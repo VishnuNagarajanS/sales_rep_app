@@ -1,133 +1,96 @@
 using System;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
-using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using backend.Data;
 
 #nullable disable
 
 namespace backend.Migrations
 {
-    /// <inheritdoc />
+    [DbContext(typeof(ApplicationDbContext))]
+    [Migration("20260928151800_AddLeadsAndSiteVisits")]
     public partial class AddLeadsAndSiteVisits : Migration
     {
-        /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.CreateTable(
-                name: "leads",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    TenantId = table.Column<int>(type: "integer", nullable: false),
-                    Name = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
-                    Phone = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
-                    Email = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
-                    Location = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
-                    Source = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
-                    Status = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false, defaultValue: "New"),
-                    Priority = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false, defaultValue: "Medium"),
-                    AssignedAgentId = table.Column<int>(type: "integer", nullable: true),
-                    AssignedAgentName = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: true),
-                    TargetDevelopment = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: true),
-                    PreferredVisitDate = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
-                    PreferredTimeSlot = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
-                    AnythingWeShouldKnow = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: true),
-                    WhatAreYouLookingFor = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: true),
-                    BudgetRange = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
-                    ReadyToRegister = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
-                    InvestmentCapacity = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
-                    AssetClass = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
-                    Horizon = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
-                    InvestorType = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
-                    Notes = table.Column<string>(type: "character varying(4000)", maxLength: 4000, nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "NOW()"),
-                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_leads", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_leads_tenants_TenantId",
-                        column: x => x.TenantId,
-                        principalTable: "tenants",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
+            migrationBuilder.Sql(@"
+                DO $$
+                BEGIN
+                    -- 1. Safely rename quoted 'Leads' to lowercase 'leads' if it exists
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'Leads') THEN
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'leads') THEN
+                            ALTER TABLE ""Leads"" RENAME TO leads;
+                        END IF;
+                    END IF;
 
-            migrationBuilder.CreateTable(
-                name: "site_visits",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    TenantId = table.Column<int>(type: "integer", nullable: false),
-                    LeadId = table.Column<int>(type: "integer", nullable: false),
-                    ProjectName = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
-                    PlotNumber = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
-                    ScheduledAt = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
-                    AssignedAgentId = table.Column<int>(type: "integer", nullable: true),
-                    AssignedAgentName = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: true),
-                    Status = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false, defaultValue: "Scheduled"),
-                    OutcomeNotes = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "NOW()"),
-                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_site_visits", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_site_visits_leads_LeadId",
-                        column: x => x.LeadId,
-                        principalTable: "leads",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                    table.ForeignKey(
-                        name: "FK_site_visits_tenants_TenantId",
-                        column: x => x.TenantId,
-                        principalTable: "tenants",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
+                    -- 2. Create 'leads' table if neither exists
+                    CREATE TABLE IF NOT EXISTS leads (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""CompanyId"" integer NOT NULL DEFAULT 1,
+                        ""Name"" character varying(150) NOT NULL,
+                        ""Phone"" character varying(50) NOT NULL,
+                        ""Email"" character varying(255) NULL,
+                        ""Location"" character varying(255) NOT NULL DEFAULT '',
+                        ""Source"" character varying(100) NOT NULL DEFAULT 'Website Inbound',
+                        ""Status"" character varying(50) NOT NULL DEFAULT 'New',
+                        ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium',
+                        ""AssignedAgentId"" integer NULL,
+                        ""AssignedAgentName"" character varying(150) NULL,
+                        ""Notes"" character varying(4000) NULL,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""UpdatedAt"" timestamp with time zone NULL
+                    );
 
-                        migrationBuilder.CreateIndex(
-                name: "IX_leads_Status",
-                table: "leads",
-                column: "Status");
+                    -- 3. If AssignedToUserId exists from initial schema, rename it to AssignedAgentId
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'leads' AND column_name = 'AssignedToUserId') THEN
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'leads' AND column_name = 'AssignedAgentId') THEN
+                            ALTER TABLE leads RENAME COLUMN ""AssignedToUserId"" TO ""AssignedAgentId"";
+                        END IF;
+                    END IF;
 
-            migrationBuilder.CreateIndex(
-                name: "IX_leads_TenantId_Phone",
-                table: "leads",
-                columns: new[] { "TenantId", "Phone" });
+                    -- 4. Ensure standard columns exist on leads
+                    ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""CompanyId"" integer NOT NULL DEFAULT 1;
+                    ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssignedAgentId"" integer NULL;
+                    ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssignedAgentName"" character varying(150) NULL;
+                    ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Location"" character varying(255) NOT NULL DEFAULT '';
+                    ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Source"" character varying(100) NOT NULL DEFAULT 'Website Inbound';
+                    ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'New';
+                    ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
+                    ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Notes"" character varying(4000) NULL;
 
-            migrationBuilder.CreateIndex(
-                name: "IX_site_visits_LeadId",
-                table: "site_visits",
-                column: "LeadId");
+                    -- 5. Create 'site_visits' table if it does not exist
+                    CREATE TABLE IF NOT EXISTS site_visits (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""CompanyId"" integer NOT NULL DEFAULT 1,
+                        ""LeadId"" integer NULL,
+                        ""CustomerId"" integer NULL,
+                        ""ProjectName"" character varying(200) NOT NULL DEFAULT '',
+                        ""PlotNumber"" character varying(100) NULL,
+                        ""CustomerName"" character varying(150) NOT NULL DEFAULT '',
+                        ""CustomerPhone"" character varying(50) NOT NULL DEFAULT '',
+                        ""ContactType"" character varying(50) NOT NULL DEFAULT 'lead',
+                        ""ScheduledAt"" character varying(100) NOT NULL DEFAULT '',
+                        ""AssignedAgentId"" integer NULL,
+                        ""AssignedAgentName"" character varying(150) NULL,
+                        ""Status"" character varying(50) NOT NULL DEFAULT 'Scheduled',
+                        ""OutcomeNotes"" character varying(2000) NULL,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""UpdatedAt"" timestamp with time zone NULL
+                    );
 
-            migrationBuilder.CreateIndex(
-                name: "IX_site_visits_Status",
-                table: "site_visits",
-                column: "Status");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_site_visits_TenantId",
-                table: "site_visits",
-                column: "TenantId");
+                    -- 6. Indexes
+                    CREATE INDEX IF NOT EXISTS ""IX_leads_Status"" ON leads (""Status"");
+                    CREATE INDEX IF NOT EXISTS ""IX_leads_CompanyId_Phone"" ON leads (""CompanyId"", ""Phone"");
+                    CREATE INDEX IF NOT EXISTS ""IX_site_visits_LeadId"" ON site_visits (""LeadId"");
+                    CREATE INDEX IF NOT EXISTS ""IX_site_visits_Status"" ON site_visits (""Status"");
+                    CREATE INDEX IF NOT EXISTS ""IX_site_visits_CompanyId"" ON site_visits (""CompanyId"");
+                END $$;
+            ");
         }
 
-        /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropTable(
-                name: "site_visits");
-
-            migrationBuilder.DropTable(
-                name: "leads");
-
-            migrationBuilder.DeleteData(
-                table: "users",
-                keyColumn: "Id",
-                keyValue: 5);
+            // Non-destructive down in production
         }
     }
 }

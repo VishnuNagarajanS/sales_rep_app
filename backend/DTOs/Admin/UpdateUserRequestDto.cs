@@ -8,4 +8,5 @@ public class UpdateUserRequestDto
     public string Phone { get; set; } = string.Empty;
     public int RoleId { get; set; }
     public UserStatus Status { get; set; }
+    public string? Password { get; set; }
 }

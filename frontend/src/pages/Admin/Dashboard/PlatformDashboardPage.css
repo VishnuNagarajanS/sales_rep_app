@@ -227,6 +227,15 @@
   font-size: 11px;
 }
 
+.trend-stat-negative {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: #f87171;
+  font-weight: 700;
+  font-size: 11px;
+}
+
 .text-muted-xs {
   font-size: 11px;
   color: #64748b;
@@ -260,6 +269,18 @@
   font-size: 14px;
   animation: pulse-dot 2s infinite;
 }
+
+.carrier-bar-indicator.degraded {
+  color: #f59e0b;
+  font-size: 14px;
+  animation: pulse-dot 2s infinite;
+}
+
+.carrier-bar-indicator.offline {
+  color: #ef4444;
+  font-size: 14px;
+}
+
 
 .carrier-bar-title {
   font-size: 11px;

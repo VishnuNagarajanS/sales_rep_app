@@ -35,24 +35,6 @@ Authorization: Bearer {{token}}
 GET {{host}}/api/irm/investors?status=Lead
 Authorization: Bearer {{token}}
 
-### Create New Investor Lead
-# @name createInvestor
-POST {{host}}/api/irm/investors
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "name": "Rajesh Singhania",
-  "phone": "+91 98200 44556",
-  "email": "rajesh.singhania@apexcapital.in",
-  "investmentCapacity": "₹5 Cr – ₹10 Cr",
-  "preferredAssetClass": "AIF",
-  "riskTolerance": "Moderate",
-  "investmentMandate": "Growth focused Category II AIF with real estate allocation",
-  "referralSource": "Wealth Partner Direct",
-  "notes": "Met at Bangalore Real Estate Investors Conclave 2026"
-}
-
 ### Get Investor by ID (Includes Full Activity Feed)
 GET {{host}}/api/irm/investors/1
 Authorization: Bearer {{token}}

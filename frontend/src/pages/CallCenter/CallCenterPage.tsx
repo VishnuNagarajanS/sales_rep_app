@@ -328,7 +328,11 @@ export const CallCenterPage: React.FC = () => {
           </div>
 
           <div className="form-group">
+            <label htmlFor="softphone-dial-number" style={{ display: 'none' }}>Dial Phone Number</label>
             <input
+              id="softphone-dial-number"
+              name="dialNumber"
+              aria-label="Dial Phone Number"
               type="tel"
               inputMode="tel"
               className="form-input"
@@ -346,7 +350,11 @@ export const CallCenterPage: React.FC = () => {
           </div>
 
           <div className="form-group">
+            <label htmlFor="softphone-contact-name" style={{ display: 'none' }}>Contact Name</label>
             <input
+              id="softphone-contact-name"
+              name="contactName"
+              aria-label="Contact Name (optional)"
               type="text"
               className="form-input"
               style={{ fontSize: 12 }}
@@ -402,13 +410,6 @@ export const CallCenterPage: React.FC = () => {
                   Today's pending follow-ups and high-priority leads awaiting outreach
                 </p>
               </div>
-              <button
-                className="btn btn-ghost btn-sm"
-                style={{ color: 'var(--primary-600)' }}
-                onClick={() => simulateIncomingCall('Pravin Godbole', '+91 97410 88223')}
-              >
-                Simulate Call Event
-              </button>
             </div>
 
             {pipelineItems.length === 0 ? (

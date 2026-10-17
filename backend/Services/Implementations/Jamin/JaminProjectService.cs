@@ -35,10 +35,20 @@ public class JaminProjectService : IJaminProjectService
             }
 
             var projects = await query.OrderByDescending(p => p.CreatedAt).ToListAsync(ct);
-            var allVisits = await _context.SiteVisits
-                .AsNoTracking()
-                .Where(s => s.TenantId == JaminTenantId)
-                .ToListAsync(ct);
+
+            List<SiteVisit> allVisits;
+            try
+            {
+                allVisits = await _context.SiteVisits
+                    .AsNoTracking()
+                    .Where(s => s.TenantId == JaminTenantId)
+                    .ToListAsync(ct);
+            }
+            catch (Exception exVisits)
+            {
+                Console.WriteLine($"[JaminProjectService Warning] SiteVisits query failed: {exVisits.Message}");
+                allVisits = new List<SiteVisit>();
+            }
 
             var dtos = projects.Select(p =>
             {
@@ -63,10 +73,19 @@ public class JaminProjectService : IJaminProjectService
                 .OrderByDescending(p => p.CreatedAt)
                 .ToListAsync(ct);
 
-            var allVisits = await _context.SiteVisits
-                .AsNoTracking()
-                .Where(s => s.TenantId == JaminTenantId)
-                .ToListAsync(ct);
+            List<SiteVisit> allVisits;
+            try
+            {
+                allVisits = await _context.SiteVisits
+                    .AsNoTracking()
+                    .Where(s => s.TenantId == JaminTenantId)
+                    .ToListAsync(ct);
+            }
+            catch (Exception exVisits)
+            {
+                Console.WriteLine($"[JaminProjectService Warning] Fallback SiteVisits query failed: {exVisits.Message}");
+                allVisits = new List<SiteVisit>();
+            }
 
             var dtos = fallback.Select(p =>
             {

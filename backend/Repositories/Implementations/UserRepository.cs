@@ -8,10 +8,12 @@ namespace backend.Repositories.Implementations;
 public class UserRepository : IUserRepository
 {
     private readonly ApplicationDbContext _context;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
-    public UserRepository(ApplicationDbContext context)
+    public UserRepository(ApplicationDbContext context, IHttpContextAccessor? httpContextAccessor = null)
     {
         _context = context;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     public async Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
@@ -25,6 +27,11 @@ public class UserRepository : IUserRepository
 
     public async Task<User?> GetByIdAsync(int id, CancellationToken cancellationToken = default)
     {
+        if (_httpContextAccessor?.HttpContext?.Items.TryGetValue("ValidatedCurrentUser", out var obj) == true && obj is User validatedUser && validatedUser.Id == id)
+        {
+            return validatedUser;
+        }
+
         return await _context.Users
             .Include(u => u.Role)
             .Include(u => u.Company)

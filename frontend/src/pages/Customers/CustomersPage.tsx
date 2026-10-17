@@ -22,6 +22,8 @@ import {
   Info,
   FileText,
   AlertCircle,
+  User,
+  Volume2,
 } from 'lucide-react';
 import { Customer, CallRecord, Followup, Deal, Lead, IrmProfile, SiteVisit, CustomFieldDefinition, Booking, AuditLog } from '../../types';
 import { SITE_VISIT_TIME_SLOTS, formatSiteVisitSchedule } from '../../constants/siteVisit';
@@ -190,6 +192,7 @@ export const CustomersPage: React.FC = () => {
   };
 
   // New Customer modal state
+  const [customerDocsTab, setCustomerDocsTab] = useState<'customer' | 'company'>('customer');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -207,7 +210,7 @@ export const CustomersPage: React.FC = () => {
   const [editPhone, setEditPhone] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editLocation, setEditLocation] = useState('');
-  const [editStatus, setEditStatus] = useState<'Active' | 'VIP' | 'Inactive'>('Active');
+  const [editStatus, setEditStatus] = useState<'Active' | 'VIP' | 'Inactive' | 'Interested'>('Active');
   const [editAgentId, setEditAgentId] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [editTotalValue, setEditTotalValue] = useState<number | string>('');
@@ -744,6 +747,25 @@ export const CustomersPage: React.FC = () => {
       return String(c.customerId || '') === String(selectedCustomer.id);
     });
   }, [isJamin, customer360Data, calls, selectedCustomer]);
+
+  const authorizedCustomerCalls = (customerCalls || []) as (CallRecord & { callerType?: string; connectVia?: string; reason?: string })[];
+  const [expandedCallIds, setExpandedCallIds] = useState<Record<string, boolean>>({});
+  const toggleCallExpand = (id: string) => {
+    setExpandedCallIds(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+  const formatCallTimestamp = (ts?: string) => {
+    if (!ts) return '—';
+    try {
+      const d = new Date(ts);
+      return isNaN(d.getTime()) ? ts : d.toLocaleString();
+    } catch {
+      return ts;
+    }
+  };
+  const formatCallDuration = (secs?: number) => {
+    const s = secs || 0;
+    return `${Math.floor(s / 60)}m ${s % 60}s`;
+  };
 
   const customerFollowups = useMemo(() => {
     if (isJamin && customer360Data?.followups) {
@@ -1914,6 +1936,161 @@ export const CustomersPage: React.FC = () => {
                       </div>
                     </div>
                   )}
+{/* Recent Call History Preview in Overview */}
+                  <div className="card customer-profile-card" style={{ marginTop: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <h4 className="customer-section-heading" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Phone size={15} color="var(--primary-600)" />
+                        Call History ({authorizedCustomerCalls.length})
+                      </h4>
+                      {authorizedCustomerCalls.length > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: 12, color: 'var(--primary-600)', padding: '2px 8px' }}
+                          onClick={() => setActiveTab('calls')}
+                        >
+                          View Full History →
+                        </button>
+                      )}
+                    </div>
+
+                    {authorizedCustomerCalls.length === 0 ? (
+                      <div className="customer-empty-text" style={{ padding: '20px 12px' }}>
+                        No call records logged yet with this customer.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {authorizedCustomerCalls.slice(0, 2).map(c => {
+                          const isExpanded = !!expandedCallIds[c.id];
+                          return (
+                            <div key={c.id} className="customer-call-card-item">
+                              <div className="customer-call-compact-row">
+                                <div className="customer-call-meta-left">
+                                  <span className={`customer-call-direction-badge ${c.direction === 'inbound' ? 'is-inbound' : 'is-outbound'}`}>
+                                    {c.direction === 'inbound' ? '↙ Inbound' : '↗ Outbound'}
+                                  </span>
+                                  <span className="customer-call-date">{formatCallTimestamp(c.timestamp)}</span>
+                                  <span className="customer-call-sep">•</span>
+                                  <span className="customer-call-duration">
+                                    <Clock size={12} /> {formatCallDuration(c.duration)}
+                                  </span>
+                                  <StatusChip status={c.disposition} size="sm" />
+                                </div>
+                                <div className="customer-call-meta-right">
+                                  <span className={`customer-call-connect-badge ${c.callerType === 'IRM' || c.connectVia === 'Connect via IRM' ? 'is-irm' : 'is-agent'}`}>
+                                    {c.callerType === 'IRM' || c.connectVia === 'Connect via IRM' ? (
+                                      <>
+                                        <Sparkles size={12} /> Connect via IRM
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Phone size={12} /> Connect via Agent
+                                      </>
+                                    )}
+                                  </span>
+                                  <span className="customer-call-agent-label">
+                                    <User size={12} />
+                                    <strong>{c.agentName || 'System'}</strong>
+                                    <span className={`customer-call-role-tag ${c.callerType === 'IRM' ? 'role-irm' : 'role-agent'}`}>
+                                      {c.callerType === 'IRM' ? 'IRM' : 'Agent'}
+                                    </span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-sm customer-call-expand-btn"
+                                    onClick={() => toggleCallExpand(c.id)}
+                                  >
+                                    {isExpanded ? (
+                                      <>
+                                        <span>Collapse</span>
+                                        <ChevronUp size={14} />
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span>Details</span>
+                                        <ChevronDown size={14} />
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                              {isExpanded && (
+                                <div className="customer-call-expanded-panel">
+                                  {c.notes && (
+                                    <div className="customer-call-notes-section">
+                                      <div className="customer-call-section-label">Discussion Notes</div>
+                                      <div className="customer-call-notes-content">{c.notes}</div>
+                                    </div>
+                                  )}
+                                  {c.reason && (
+                                    <div className="customer-call-reason-section">
+                                      <span className="customer-call-reason-label">
+                                        {c.disposition === 'Skipped' ? 'Skip Reason:' : 'Outcome Reason:'}
+                                      </span>{' '}
+                                      <span>{c.reason}</span>
+                                    </div>
+                                  )}
+                                  <div className="customer-call-media-card">
+                                    <div className="customer-call-media-header">
+                                      <div className="customer-call-media-title">
+                                        <Volume2 size={14} />
+                                        <span>Voice Recording</span>
+                                      </div>
+                                      <span className={`badge badge-sm ${c.recordingUrl ? 'badge-success' : 'badge-neutral'}`}>
+                                        {c.recordingUrl ? 'Recording Available' : 'Unavailable'}
+                                      </span>
+                                    </div>
+                                    {c.recordingUrl ? (
+                                      <div className="customer-call-audio-wrap">
+                                        <audio controls src={c.recordingUrl} className="customer-call-audio-player" />
+                                      </div>
+                                    ) : (
+                                      <div className="customer-call-diagnostic-box">
+                                        <AlertCircle size={16} className="customer-call-diag-icon" />
+                                        <div className="customer-call-diag-body">
+                                          <strong>Audio recording not available for this call.</strong>
+                                          <p>
+                                            No telephony audio recording is attached to this record. Voice recording requires carrier PBX trunking (e.g., Twilio Voice / Exotel) and secure cloud media bucket storage (AWS S3 or Azure Blob) configured on the backend server.
+                                          </p>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="customer-call-media-card">
+                                    <div className="customer-call-media-header">
+                                      <div className="customer-call-media-title">
+                                        <FileText size={14} />
+                                        <span>Call Transcript</span>
+                                      </div>
+                                      <span className={`badge badge-sm ${c.transcription ? 'badge-success' : 'badge-neutral'}`}>
+                                        {c.transcription ? 'Transcript Available' : 'Transcript unavailable'}
+                                      </span>
+                                    </div>
+                                    {c.transcription ? (
+                                      <div className="customer-call-transcript-wrap">
+                                        <p className="customer-call-transcript-text">{c.transcription}</p>
+                                      </div>
+                                    ) : (
+                                      <div className="customer-call-diagnostic-box">
+                                        <FileText size={16} className="customer-call-diag-icon" />
+                                        <div className="customer-call-diag-body">
+                                          <strong>Transcript unavailable</strong>
+                                          <p>
+                                            Speech-to-text transcription service is not currently configured on the server. Automatic transcripts require integrating an AI speech-to-text provider (e.g., OpenAI Whisper API, Deepgram, or AWS Transcribe) into the audio capture pipeline.
+                                          </p>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -2477,16 +2654,55 @@ export const CustomersPage: React.FC = () => {
 
               {activeTab === 'documents' && selectedCustomer && (
                 <div className="customer-docs-stack">
-                  <DocumentUploader
-                    entityType="customer"
-                    entityId={selectedCustomer.id}
-                    allowedCategories={isJamin ? ['Booking Form', 'Sale Agreement', 'Payment Receipt', 'Identity Proof', 'Other'] : ['KYC', 'Agreement', 'Payment Receipt', 'Identity Proof', 'Other']}
-                  />
-                  <DocumentList
-                    entityType="customer"
-                    entityId={selectedCustomer.id}
-                    canDelete
-                  />
+                  <div className="incall-docs-tabs-bar" style={{ marginBottom: 16 }}>
+                    {[
+                      { id: 'customer' as const, label: 'Customer Documents' },
+                      { id: 'company' as const, label: 'Company Resources' },
+                    ].map(tab => (
+                      <button
+                        key={tab.id}
+                        className="btn btn-ghost incall-docs-tab-btn"
+                        style={{
+                          borderBottom: customerDocsTab === tab.id ? '2px solid var(--primary-600)' : '2px solid transparent',
+                          color: customerDocsTab === tab.id ? 'var(--primary-600)' : 'var(--text-secondary)',
+                          fontWeight: customerDocsTab === tab.id ? 700 : 500,
+                        }}
+                        onClick={() => setCustomerDocsTab(tab.id)}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {customerDocsTab === 'customer' && (
+                    <>
+                      <DocumentUploader
+                        entityType={selectedCustomer.isLeadRecord ? 'lead' : 'customer'}
+                        entityId={selectedCustomer.isLeadRecord ? (selectedCustomer.sourceLeadId || selectedCustomer.id) : selectedCustomer.id}
+                        allowedCategories={isJamin ? ['Booking Form', 'Sale Agreement', 'Payment Receipt', 'Identity Proof', 'Other'] : ['KYC', 'Agreement', 'Payment Receipt', 'Identity Proof', 'Other']}
+                      />
+                      <DocumentList
+                        entityType={selectedCustomer.isLeadRecord ? 'lead' : 'customer'}
+                        entityId={selectedCustomer.isLeadRecord ? (selectedCustomer.sourceLeadId || selectedCustomer.id) : selectedCustomer.id}
+                        canDelete
+                      />
+                    </>
+                  )}
+
+                  {customerDocsTab === 'company' && (
+                    <>
+                      <DocumentUploader
+                        entityType="company"
+                        entityId={tenant?.id || tenant?.slug || '1'}
+                        allowedCategories={['Brochure', 'Price List', 'Terms & Conditions', 'Policy Document', 'Other']}
+                      />
+                      <DocumentList
+                        entityType="company"
+                        entityId={tenant?.id || tenant?.slug || '1'}
+                        canDelete={false}
+                      />
+                    </>
+                  )}
                 </div>
               )}
             </div>

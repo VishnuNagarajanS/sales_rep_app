@@ -1,5 +1,5 @@
 /* ==========================================================================
-   ConsultationsPage Styles
+   ConsultationsPage Styles - Option 1: Live Transfers & Scheduled Sessions
    ========================================================================== */
 
 .consultations-page-container {
@@ -8,34 +8,395 @@
   gap: 20px;
 }
 
-.consultation-slot-title {
+/* ── Top KPI Metrics Grid ───────────────────────────────────────────────── */
+.consultations-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px;
+}
+
+.consultations-kpi-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.consultations-kpi-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-base);
+  box-shadow: var(--shadow-md);
+}
+
+.consultations-kpi-card.active-card {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: linear-gradient(145deg, rgba(239, 68, 68, 0.04) 0%, var(--bg-surface) 100%);
+  box-shadow: 0 4px 20px -2px rgba(239, 68, 68, 0.12);
+}
+
+.consultations-kpi-card.live-card.active-card {
+  border-color: rgba(168, 85, 247, 0.45);
+  background: linear-gradient(145deg, rgba(168, 85, 247, 0.05) 0%, var(--bg-surface) 100%);
+  box-shadow: 0 4px 20px -2px rgba(168, 85, 247, 0.15);
+}
+
+.consultations-kpi-card.scheduled-card.active-card {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: linear-gradient(145deg, rgba(59, 130, 246, 0.05) 0%, var(--bg-surface) 100%);
+  box-shadow: 0 4px 20px -2px rgba(59, 130, 246, 0.15);
+}
+
+.consultations-kpi-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.consultations-kpi-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
+}
+
+.consultations-kpi-icon-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.consultations-kpi-icon-wrap.total {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.consultations-kpi-icon-wrap.live {
+  background: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+}
+
+.consultations-kpi-icon-wrap.scheduled {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+}
+
+.consultations-kpi-icon-wrap.completed {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.consultations-kpi-value {
+  font-size: 28px;
   font-weight: 700;
   color: var(--text-primary);
+  line-height: 1.1;
+  margin-bottom: 6px;
+  font-family: var(--font-display);
+}
+
+.consultations-kpi-subtext {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.consultations-kpi-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+}
+
+.consultations-kpi-badge.live {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+}
+
+.consultations-kpi-badge.scheduled {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+
+/* ── Option 1 Tabs Bar ──────────────────────────────────────────────────── */
+.consultations-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-surface);
+  padding: 6px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.consultations-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.consultations-tab-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-surface-hover);
+}
+
+.consultations-tab-btn.active {
+  background: var(--primary-500);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
+.consultations-tab-pill {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface-active);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.consultations-tab-btn.active .consultations-tab-pill {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.consultations-tab-pill.live {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+}
+
+.consultations-tab-btn.active .consultations-tab-pill.live {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+/* ── Table Cells & Custom Badges ────────────────────────────────────────── */
+.consultation-slot-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.consultation-slot-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.consultation-slot-clock-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .consultation-slot-id {
   font-size: 11px;
   color: var(--text-muted);
+  font-family: monospace;
+}
+
+/* ── Type Badges (Live Call Transfer vs Scheduled) ──────────────────────── */
+.consultation-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.consultation-type-badge.live-transfer {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.18) 0%, rgba(139, 92, 246, 0.1) 100%);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+.consultation-type-badge.scheduled {
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.live-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #a855f7;
+  box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.7);
+  animation: liveDotPulse 1.8s infinite;
+}
+
+@keyframes liveDotPulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(168, 85, 247, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(168, 85, 247, 0);
+  }
+}
+
+/* ── Customer Profile Cell ──────────────────────────────────────────────── */
+.consultation-customer-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .consultation-client-name {
+  font-size: 13px;
   font-weight: 600;
+  color: var(--text-primary);
 }
 
 .consultation-client-phone {
-  font-size: 11px;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
   color: var(--text-secondary);
+}
+
+/* ── Sales Agent & IRM Pills ────────────────────────────────────────────── */
+.consultation-agent-cell,
+.consultation-irm-cell {
+  display: flex;
+  align-items: center;
+}
+
+.consultation-agent-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-surface-hover);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+
+.consultation-agent-unassigned {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.consultation-irm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+/* ── Agenda & Discussion Cell ───────────────────────────────────────────── */
+.consultation-agenda-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .consultation-agenda-text {
   font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
-.consultation-advisor-name {
-  font-size: 12px;
-  font-weight: 500;
+.consultation-outcome-preview {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* ── Status Badges ──────────────────────────────────────────────────────── */
+.consultation-status-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  text-transform: capitalize;
+}
+
+.consultation-status-badge.status-scheduled {
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.consultation-status-badge.status-completed {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.consultation-status-badge.status-rescheduled {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.consultation-status-badge.status-cancelled {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.consultation-status-badge.status-no-show {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+/* ── Modal Form Styles ──────────────────────────────────────────────────── */
 .consultation-form {
   display: flex;
   flex-direction: column;
@@ -48,9 +409,38 @@
   gap: 12px;
 }
 
-.consultation-form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 8px;
+@media (max-width: 640px) {
+  .consultation-form-grid-2 {
+    grid-template-columns: 1fr;
+  }
 }
+
+/* ── Admin Oversight Banner ────────────────────────────────────────────── */
+.admin-consultation-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.admin-scope-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-scope-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+

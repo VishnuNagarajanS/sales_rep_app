@@ -22,5 +22,19 @@ public class CreateLeadValidator : AbstractValidator<CreateLeadDto>
         RuleFor(x => x.Priority)
             .Must(p => string.IsNullOrEmpty(p) || new[] { "Low", "Medium", "High", "Urgent" }.Contains(p))
             .WithMessage("Priority must be one of: Low, Medium, High, Urgent.");
+
+        RuleFor(x => x.AssetClass)
+            .Must(a => {
+                var norm = backend.Helpers.OptionalFieldNormalizer.Normalize(a);
+                return string.IsNullOrEmpty(norm) || norm.Equals("AIF", System.StringComparison.OrdinalIgnoreCase) || norm.Equals("CO-AIF", System.StringComparison.OrdinalIgnoreCase);
+            })
+            .WithMessage("Asset class must be AIF or CO-AIF.");
+
+        RuleFor(x => x.PreferredAssetClass)
+            .Must(a => {
+                var norm = backend.Helpers.OptionalFieldNormalizer.Normalize(a);
+                return string.IsNullOrEmpty(norm) || norm.Equals("AIF", System.StringComparison.OrdinalIgnoreCase) || norm.Equals("CO-AIF", System.StringComparison.OrdinalIgnoreCase);
+            })
+            .WithMessage("Asset class must be AIF or CO-AIF.");
     }
 }

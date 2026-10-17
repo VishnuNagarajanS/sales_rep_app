@@ -15,7 +15,9 @@ public sealed class ExecutiveDashboardService(ApplicationDbContext context, ICur
         var now = DateTime.UtcNow;
         var today = now.Date;
         var week = today.AddDays(-7);
-        var compId = currentUser.CompanyId ?? 1;
+        if (!currentUser.CompanyId.HasValue || currentUser.CompanyId.Value <= 0)
+            throw new UnauthorizedAccessException("Unauthorized: Company ID is missing.");
+        var compId = currentUser.CompanyId.Value;
         var agentId = currentUser.UserId;
 
         var leads = context.Set<Lead>().AsNoTracking().Where(x => x.CompanyId == compId);

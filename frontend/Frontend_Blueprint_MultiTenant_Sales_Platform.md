@@ -60,7 +60,7 @@ Used for: Login, Forgot Password, Reset Password, (future) Invite-Accept screen.
 - Top bar: Super Admin identity, global environment indicator (e.g. "Platform Console"), no tenant switcher needed since Super Admin operates above tenants — but the Companies module lets them "view as"/drill into a specific company's data read-only.
 - No company logo/branding — this is the platform's own operator console, visually distinct (e.g. darker sidebar) from the tenant-facing app so operators never confuse it with a customer view.
 
-### 3.3 SalesLayout (Company Admin / Sales Manager / Sales Executive)
+### 3.3 SalesLayout (Company Admin / Sales Executive / IRM)
 - Left sidebar: collapsible, tenant-branded (company name/logo if set), nav items rendered from `enabledFeatures + permissions` (Section 4.2).
 - Top bar: global search, notification bell (unread count badge), quick "New" button (context menu: New Lead / New Follow-up / New Deal, filtered by permission), user menu (profile, switch theme, logout).
 - Persistent **incoming call bar/popup** lives at this layout level (not per-page) since a call can arrive while the user is on any screen — see Section 7.6.
@@ -80,7 +80,7 @@ Used for: Login, Forgot Password, Reset Password, (future) Invite-Accept screen.
 8. Audit Logs
 9. System Settings
 
-### 4.2 Company User Sidebar (Company Admin / Sales Manager / Sales Executive — items filtered by `enabledFeatures` + `permissions`)
+### 4.2 Company User Sidebar (Company Admin / Sales Executive / IRM — items filtered by `enabledFeatures` + `permissions`)
 1. Dashboard
 2. **Sales** (section header)
    - Leads
@@ -267,7 +267,7 @@ Each module below follows the same template: **Purpose · Access · List View ·
 ### 7.13 Users (per-tenant, Company Admin view)
 
 **Purpose:** Manage users within one's own company.
-**Access:** `users.*`, Company Admin (and Sales Manager if granted).
+**Access:** `users.*`, Company Admin.
 
 - **List View:** Name, Email, Role, Status (Active/Invited/Disabled), Last Login. Filters: role, status.
 - **Invite/Create:** Name, Email, Role (select from company's available roles), optional team assignment.
@@ -311,7 +311,7 @@ Each module below follows the same template: **Purpose · Access · List View ·
 **Purpose:** Cross-tenant administration.
 **Access:** Super Admin only.
 - **Users (platform-wide):** same shape as 7.13 but with a Company column/filter, cross-tenant search.
-- **Roles (platform-wide):** define the canonical role templates (Super Admin, Company Admin, Sales Manager, Sales Executive) and their permission sets — this is the actual editable permissions matrix (contrast with 7.14's likely-read-only company view).
+- **Roles (platform-wide):** define the canonical role templates (Super Admin, Company Admin, Sales Executive, IRM) and their permission sets — this is the actual editable permissions matrix (contrast with 7.14's likely-read-only company view).
 - **Permissions:** reference/catalog list of all permission keys, grouped by module, mostly read-only reference unless the platform supports adding custom permissions.
 - **Features:** the master Feature Catalogue (Section 6) — enable/disable/define feature packages that Companies (7.16) can select from.
 - **Call Configuration:** phone-number-to-tenant mapping, routing strategy options (round-robin, least-busy, skill/priority-based) available for company admins to choose from, provider settings.

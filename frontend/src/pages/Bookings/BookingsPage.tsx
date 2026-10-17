@@ -42,9 +42,10 @@ export const BookingsPage: React.FC = () => {
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Filters for Buyer Type (Lead vs Customer) and Payment Status (Verified vs Pending)
+  // Filters for Buyer Type (Lead vs Customer), Payment Status (Verified vs Pending), and Booking Status
   const [buyerTypeFilter, setBuyerTypeFilter] = useState('All');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState('All');
+  const [bookingStatusFilter, setBookingStatusFilter] = useState('All');
 
   // Role checking for financial actions
   const roleCode = String(user?.role?.code || user?.role?.name || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -117,8 +118,8 @@ export const BookingsPage: React.FC = () => {
         jaminApiService.getBookings(),
         jaminApiService.getProjects(),
         jaminApiService.getPlots().catch(() => []),
-        jaminApiService.getCustomers().catch(() => getCustomers(tenant?.id).catch(() => storageService.getCustomers(tenant?.id) || [])),
-        jaminApiService.getLeads(true).catch(() => getLeads(tenant?.id).catch(() => storageService.getLeads(tenant?.id) || [])),
+        jaminApiService.getCustomers().catch(() => []),
+        jaminApiService.getLeads(true).catch(() => []),
       ]);
       setBookings(bkgList || []);
       setProjects(projList || []);
@@ -143,6 +144,31 @@ export const BookingsPage: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Auto-fill and open booking modal if redirected from Leads page (Convert / Book Plot)
+  useEffect(() => {
+    const rawPendingLead = sessionStorage.getItem('pending_booking_lead');
+    if (rawPendingLead) {
+      try {
+        const leadObj = JSON.parse(rawPendingLead);
+        sessionStorage.removeItem('pending_booking_lead');
+        setBuyerSourceType('lead');
+        setSelectedLeadId(String(leadObj.id));
+        setCustomerName(leadObj.name || '');
+        setCustomerPhone(leadObj.phone || '');
+        const targetProj = leadObj.targetDevelopment || leadObj.customFields?.targetDevelopment || leadObj.customFields?.project;
+        if (targetProj && projects.length > 0) {
+          const matchedP = projects.find(p => p.name?.trim().toLowerCase() === targetProj.trim().toLowerCase() || targetProj.trim().toLowerCase().includes(p.name?.trim().toLowerCase()));
+          if (matchedP) {
+            setSelectedProjectId(String(matchedP.id));
+          }
+        }
+        setIsNewBookingModalOpen(true);
+      } catch (e) {
+        console.error('Error parsing pending booking lead', e);
+      }
+    }
+  }, [projects]);
 
   // Effective customers list: includes all customers from CRM database, PLUS any converted leads who are already customers
   const effectiveCustomersList = useMemo(() => {
@@ -279,7 +305,6 @@ export const BookingsPage: React.FC = () => {
 
         if (leadObj && leadObj.status !== 'Converted') {
           const updatedLead = { ...leadObj, status: 'Booking In Progress' as const };
-          storageService.saveLead(updatedLead);
           setLeadsList(prev => prev.map(l => String(l.id) === String(leadObj.id) ? updatedLead : l));
           const numId = parseInt(String(leadObj.id).replace('db-', ''), 10);
           if (!isNaN(numId)) {
@@ -354,6 +379,7 @@ export const BookingsPage: React.FC = () => {
 
       if (res && res.success) {
         window.dispatchEvent(new Event('nexus_storage_updated'));
+        await loadData();
       } else {
         throw new Error(res?.message || 'Payment verification failed on server.');
       }
@@ -634,9 +660,16 @@ export const BookingsPage: React.FC = () => {
         if (pStatus !== paymentStatusFilter.toLowerCase()) return false;
       }
 
+      // 3. Booking Status filter
+      if (bookingStatusFilter !== 'All') {
+        const bStatus = (b.status || '').trim().toLowerCase();
+        const targetStatus = bookingStatusFilter.trim().toLowerCase();
+        if (bStatus !== targetStatus) return false;
+      }
+
       return true;
     });
-  }, [bookings, buyerTypeFilter, paymentStatusFilter]);
+  }, [bookings, buyerTypeFilter, paymentStatusFilter, bookingStatusFilter]);
 
   const columns: Column<any>[] = [
     {
@@ -816,10 +849,27 @@ export const BookingsPage: React.FC = () => {
                   { value: 'Pending', label: 'Pending Verification' },
                 ],
               },
+              {
+                key: 'bookingStatus',
+                label: 'Booking Status',
+                allLabel: 'All Booking Statuses',
+                value: bookingStatusFilter,
+                onChange: setBookingStatusFilter,
+                options: [
+                  { value: 'Hold', label: 'Hold' },
+                  { value: 'Pending Verification', label: 'Pending Verification' },
+                  { value: 'Token Paid', label: 'Token Paid' },
+                  { value: 'Token Verified', label: 'Token Verified' },
+                  { value: 'Agreement Signed', label: 'Agreement Signed' },
+                  { value: 'Registration Completed', label: 'Registration Completed' },
+                  { value: 'Cancelled', label: 'Cancelled' },
+                ],
+              },
             ]}
             onClearAll={() => {
               setBuyerTypeFilter('All');
               setPaymentStatusFilter('All');
+              setBookingStatusFilter('All');
             }}
           />
         }
@@ -1142,8 +1192,10 @@ export const BookingsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Official Receipt Number *</label>
+            <label htmlFor="verify-receipt-number" className="form-label">Official Receipt Number *</label>
             <input
+              id="verify-receipt-number"
+              name="verifyReceiptNumber"
               type="text"
               className="form-input"
               required
@@ -1303,8 +1355,10 @@ export const BookingsPage: React.FC = () => {
 
           <div className="booking-form-grid-2">
             <div className="form-group">
-              <label className="form-label">Refund Amount (₹)</label>
+              <label htmlFor="cancel-refund-amount" className="form-label">Refund Amount (₹)</label>
               <input
+                id="cancel-refund-amount"
+                name="cancelRefundAmount"
                 type="number"
                 className="form-input"
                 min={0}
@@ -1531,8 +1585,10 @@ export const BookingsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Total Agreement Value (₹) *</label>
+              <label htmlFor="booking-total-amount" className="form-label">Total Agreement Value (₹) *</label>
               <input
+                id="booking-total-amount"
+                name="totalAmount"
                 type="number"
                 className="form-input"
                 required
@@ -1544,8 +1600,10 @@ export const BookingsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Payment Mode</label>
+            <label htmlFor="booking-payment-mode" className="form-label">Payment Mode</label>
             <select
+              id="booking-payment-mode"
+              name="paymentMode"
               className="form-select"
               value={paymentMode}
               onChange={e => {
@@ -1569,10 +1627,12 @@ export const BookingsPage: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Payment Terms / Milestone Schedule</label>
-            <input
-              type="text"
-              className="form-input"
+            <label htmlFor="booking-payment-terms" className="form-label">Payment Terms & Milestones</label>
+            <textarea
+              id="booking-payment-terms"
+              name="paymentTerms"
+              className="form-textarea"
+              rows={2}
               value={paymentTerms}
               onChange={e => setPaymentTerms(e.target.value)}
               placeholder="e.g. 10% token, 40% on agreement, 50% on registration"

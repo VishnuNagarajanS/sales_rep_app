@@ -6,5 +6,6 @@ namespace backend.Services.Interfaces;
 public interface IInvestorCallService
 {
     Task<ApiResponse<List<CallLogDto>>> GetAllAsync(int companyId, int? irmId, CancellationToken ct = default);
+    Task<ApiResponse<CallLogDto>> GetByIdAsync(int id, int companyId, int? userId, string role, CancellationToken ct = default);
     Task<ApiResponse<CallLogDto>> LogCallAsync(int companyId, int irmId, LogCallDto dto, CancellationToken ct = default);
 }

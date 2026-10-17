@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { History, Phone, FileText, Download, AlertCircle, Users } from 'lucide-react';
+import { History, Phone, FileText, Download, AlertCircle, Users, ShieldAlert, Calendar, Clock } from 'lucide-react';
 import Papa from 'papaparse';
 import { CallRecord, User, Consultation } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { storageService } from '../../services/storageService';
-import { getCalls, getConsultations } from '../../services/ghlApiService';
+import { getCalls, getConsultations, getCallById } from '../../services/ghlApiService';
 import { adminUserService } from '../../services/adminUserService';
+import { isMockMode } from '../../config/environment';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
@@ -23,6 +24,7 @@ export const CallHistoryPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
   const [transcriptCall, setTranscriptCall] = useState<CallRecord | null>(null);
+  const [callAuthError, setCallAuthError] = useState<string | null>(null);
 
   const [roleFilter, setRoleFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
@@ -59,6 +61,26 @@ export const CallHistoryPage: React.FC = () => {
     window.addEventListener('nexus_storage_updated', handleUpdate);
     return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
   }, [tenant?.id]);
+
+  // Verify call ownership & access authorization when opening details
+  useEffect(() => {
+    if (!transcriptCall) {
+      setCallAuthError(null);
+      return;
+    }
+    if (!isMockMode()) {
+      getCallById(transcriptCall.id)
+        .then(() => setCallAuthError(null))
+        .catch((err: any) => {
+          const msg = String(err?.message || '');
+          if (msg.toLowerCase().includes('denied') || msg.toLowerCase().includes('forbidden') || msg.includes('403')) {
+            setCallAuthError('Access denied: You are only authorized to view your own call records.');
+          } else {
+            setCallAuthError(null);
+          }
+        });
+    }
+  }, [transcriptCall?.id]);
 
   // ── Date formatting helpers ────────────────────────────────────────────────
   const formatDateYMD = (d: Date): string => {
@@ -112,6 +134,17 @@ export const CallHistoryPage: React.FC = () => {
     }
   };
 
+  // ── Role-scoping for Sales Executive and IRM ──────────────────────────────
+  const isExec = user?.role?.code === 'sales_executive';
+  const isIrm = user?.role?.code === 'irm';
+  const isScopedUser = isExec || isIrm;
+  const scopedCalls = isScopedUser
+    ? calls.filter(c =>
+      (c.agentId && (c.agentId === user?.id || String(c.agentId) === String(user?.id))) ||
+      (c.agentName && (c.agentName.toLowerCase() === (user?.name || '').toLowerCase() || c.agentName === user?.name))
+    )
+    : calls;
+
   const parseDateFromTimestamp = (ts: string): string => {
     if (!ts) return '';
     if (ts.startsWith('Today')) return formatDateYMD(new Date());
@@ -124,16 +157,6 @@ export const CallHistoryPage: React.FC = () => {
     if (!isNaN(d.getTime())) return formatDateYMD(d);
     return '';
   };
-
-  // ── Role-scoping ───────────────────────────────────────────────────────────
-  const isExec = user?.role?.code === 'sales_executive';
-  const scopedCalls = isExec
-    ? calls.filter(c =>
-      !c.agentId ||
-      String(c.agentId) === String(user?.id) ||
-      (c.agentName && user?.name && c.agentName.toLowerCase().trim() === user.name.toLowerCase().trim())
-    )
-    : calls;
 
   const agentRoleMap = React.useMemo(() => {
     const map = new Map<string, string>();
@@ -251,6 +274,15 @@ export const CallHistoryPage: React.FC = () => {
   const isIrmConnectedCall = (c: CallRecord | null): boolean =>
     !!(c && (c.notes || '').trim().startsWith('Connected to IRM:'));
 
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1') &&
+    ['company_admin', 'admin', 'super_admin', 'ghl_admin'].includes(user?.role?.code as string);
+
+  const isIrmCall = (c: CallRecord): boolean => {
+    const agentRole = (agentRoleMap.get(c.agentId) || '').toLowerCase();
+    return isIrmConnectedCall(c) || agentRole.includes('irm') || (c.notes || '').includes('IRM') || Boolean(c.investorId);
+  };
+
   // ── Table columns ─────────────────────────────────────────────────────────
   const columns: Column<CallRecord>[] = [
     {
@@ -266,7 +298,7 @@ export const CallHistoryPage: React.FC = () => {
       width: '20%',
       sortable: true,
       render: c => {
-        const connectedViaIrm = tenant?.slug === 'ghl' && isIrmConnectedCall(c);
+        const connectedViaIrm = isIrmConnectedCall(c);
         return (
           <div>
             <div style={{ fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -308,7 +340,27 @@ export const CallHistoryPage: React.FC = () => {
       header: 'Outcome / Disposition',
       width: '16%',
       sortable: true,
-      render: c => <StatusChip status={c.disposition} size="sm" />,
+      render: c => (
+        <div>
+          <StatusChip status={c.disposition} size="sm" />
+          {c.disposition === 'Skipped' && c.reason && (
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--text-muted)',
+                marginTop: 3,
+                maxWidth: 160,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={c.reason}
+            >
+              {c.reason}
+            </div>
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -329,6 +381,7 @@ export const CallHistoryPage: React.FC = () => {
           c.customerId ? 'customer' : 'lead',
           c.customerId || c.leadId
         ),
+      hidden: c => isGhlAdmin && isIrmCall(c),
     },
   ];
 
@@ -367,8 +420,8 @@ export const CallHistoryPage: React.FC = () => {
             <History size={24} color="var(--primary-600)" /> Call Log & History
           </h1>
           <p className="page-subtitle">
-            {isExec
-              ? `Auditable archive of your calls and automated transcripts for ${tenant?.name}.`
+            {isScopedUser
+              ? `Auditable archive of your call records, recordings, and transcripts for ${tenant?.name}.`
               : `Auditable archive of all agent calls and automated transcripts for ${tenant?.name}.`}
           </p>
         </div>
@@ -387,22 +440,26 @@ export const CallHistoryPage: React.FC = () => {
         searchPlaceholder="Search calls by contact name, phone, or agent..."
         filtersNode={
           <FilterBar
-            filters={[
-              {
-                key: 'role',
-                label: 'Role',
-                value: roleFilter,
-                onChange: setRoleFilter,
-                options: roleOptions,
-              },
-              {
-                key: 'agent',
-                label: 'Agent',
-                value: agentFilter,
-                onChange: setAgentFilter,
-                options: agentOptions,
-              },
-            ]}
+            filters={
+              isScopedUser
+                ? []
+                : [
+                  {
+                    key: 'role',
+                    label: 'Role',
+                    value: roleFilter,
+                    onChange: setRoleFilter,
+                    options: roleOptions,
+                  },
+                  {
+                    key: 'agent',
+                    label: 'Agent',
+                    value: agentFilter,
+                    onChange: setAgentFilter,
+                    options: agentOptions,
+                  },
+                ]
+            }
             dateRange={{
               from: dateFrom,
               to: dateTo,
@@ -456,87 +513,186 @@ export const CallHistoryPage: React.FC = () => {
         {/* Single Call Detail & Transcript Drawer (accessible via row action) */}
         <Drawer
           isOpen={!!transcriptCall}
-          onClose={() => setTranscriptCall(null)}
-          title="Call Detail & Transcription"
+          onClose={() => {
+            setTranscriptCall(null);
+            setCallAuthError(null);
+          }}
+          title="Call Record & Details"
           subtitle={`${transcriptCall?.contactName} (${transcriptCall?.contactPhone}) • ${transcriptCall ? formatTimestamp(transcriptCall.timestamp) : ''}`}
-          width={560}
+          width={580}
         >
           {transcriptCall && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              {/* Outcome Overview */}
-              <div
-                style={{
-                  padding: 16,
-                  borderRadius: 'var(--radius-lg)',
-                  backgroundColor: 'var(--bg-surface-hover)',
-                  border: '1px solid var(--border-base)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <StatusChip status={transcriptCall.direction} />
-                    <StatusChip status={transcriptCall.disposition} />
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
-                    Agent: <strong>{transcriptCall.agentName}</strong> • Duration:{' '}
-                    <strong>{formatDuration(transcriptCall.duration)}</strong>
-                  </div>
-                </div>
-
-                {/* Task 4: Quick Call Back from drawer */}
-                <button
-                  className="btn btn-primary btn-sm"
-                  style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
-                  onClick={() => initiateCall(transcriptCall.contactName, transcriptCall.contactPhone)}
-                >
-                  <Phone size={13} /> Call Back
-                </button>
+            callAuthError ? (
+              <div className="card" style={{ padding: 32, textAlign: 'center', margin: '20px 0', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                <ShieldAlert size={44} color="#ef4444" style={{ margin: '0 auto 14px' }} />
+                <h4 style={{ color: '#ef4444', marginBottom: 8, fontSize: 16 }}>Unauthorized Access</h4>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: 0, lineHeight: 1.5 }}>
+                  {callAuthError}
+                </p>
               </div>
-
-              {/* Task 1: Honest recording state — no fake player */}
-              <div className="card" style={{ padding: 18, border: '1px solid var(--border-base)' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Call Voice Recording</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Overview Header */}
                 <div
                   style={{
+                    padding: 16,
+                    borderRadius: 'var(--radius-lg)',
+                    backgroundColor: 'var(--bg-surface-hover)',
+                    border: '1px solid var(--border-base)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 12,
-                    padding: '12px 14px',
-                    borderRadius: 'var(--radius-md)',
-                    backgroundColor: 'var(--bg-surface-hover)',
-                    border: '1px dashed var(--border-strong)',
+                    justifyContent: 'space-between',
                   }}
                 >
-                  <AlertCircle size={18} color="var(--text-muted)" style={{ flexShrink: 0 }} />
-                  <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
-                    Recording playback isn't available — this call was simulated, no audio was recorded.
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <StatusChip status={transcriptCall.direction} />
+                      <StatusChip status={transcriptCall.disposition} />
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                      Called By: <strong>{transcriptCall.agentName}</strong> • Duration:{' '}
+                      <strong>{formatDuration(transcriptCall.duration)}</strong>
+                    </div>
+                  </div>
+
+                  <button
+                    className="btn btn-primary btn-sm"
+                    style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
+                    onClick={() => initiateCall(transcriptCall.contactName, transcriptCall.contactPhone)}
+                  >
+                    <Phone size={13} /> Call Back
+                  </button>
+                </div>
+
+                {/* Call Metadata Details */}
+                <div className="card" style={{ padding: 16, border: '1px solid var(--border-base)' }}>
+                  <h4 style={{ fontSize: 12, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 12, letterSpacing: '0.05em' }}>
+                    Call Record Details
+                  </h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 12 }}>
+                    <div>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: 11 }}>Customer / Contact</span>
+                      <strong style={{ color: 'var(--text-primary)' }}>{transcriptCall.contactName}</strong>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{transcriptCall.contactPhone}</div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: 11 }}>Date & Time</span>
+                      <strong style={{ color: 'var(--text-primary)' }}>{formatTimestamp(transcriptCall.timestamp)}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: 11 }}>Duration</span>
+                      <strong style={{ color: 'var(--text-primary)' }}>{formatDuration(transcriptCall.duration)}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: 11 }}>Disposition Outcome</span>
+                      <strong style={{ color: 'var(--text-primary)' }}>{transcriptCall.disposition}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Voice Recording Section */}
+                <div className="card" style={{ padding: 18, border: '1px solid var(--border-base)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>Call Voice Recording</span>
+                    <span className={`badge ${transcriptCall.recordingUrl && !transcriptCall.recordingUrl.includes('sample.mp3') ? 'badge-success' : 'badge-neutral'}`} style={{ fontSize: 11 }}>
+                      {transcriptCall.recordingUrl && !transcriptCall.recordingUrl.includes('sample.mp3') ? 'Recording Available' : 'Not Available'}
+                    </span>
+                  </div>
+                  {transcriptCall.recordingUrl && !transcriptCall.recordingUrl.includes('sample.mp3') ? (
+                    <audio controls src={transcriptCall.recordingUrl} style={{ width: '100%', marginTop: 6 }} />
+                  ) : (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 12,
+                        padding: '12px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundColor: 'var(--bg-surface-hover)',
+                        border: '1px dashed var(--border-strong)',
+                      }}
+                    >
+                      <AlertCircle size={18} color="var(--text-muted)" style={{ flexShrink: 0, marginTop: 2 }} />
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                        <strong>Audio recording not available for this call.</strong>
+                        <p style={{ margin: '4px 0 0', color: 'var(--text-muted)' }}>
+                          No audio recording file is attached to this call record. Telephony audio recording requires carrier PBX trunking (e.g., Twilio Voice / Exotel) and secure cloud media bucket storage (AWS S3 or Azure Blob) configured on the backend server.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Transcript Section */}
+                <div className="card" style={{ padding: 18 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ textTransform: 'uppercase', color: 'var(--text-muted)', fontSize: 12 }}>Call Transcript</span>
+                    <span className={`badge ${transcriptCall.transcription && !transcriptCall.transcription.startsWith('Automated Call Transcript: Agent') ? 'badge-success' : 'badge-neutral'}`} style={{ fontSize: 11 }}>
+                      {transcriptCall.transcription && !transcriptCall.transcription.startsWith('Automated Call Transcript: Agent') ? 'Transcript Available' : 'Not Available'}
+                    </span>
+                  </div>
+                  {transcriptCall.transcription && !transcriptCall.transcription.startsWith('Automated Call Transcript: Agent') ? (
+                    <p style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', margin: 0 }}>
+                      {transcriptCall.transcription}
+                    </p>
+                  ) : (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 12,
+                        padding: '12px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundColor: 'var(--bg-surface-hover)',
+                        border: '1px dashed var(--border-strong)',
+                      }}
+                    >
+                      <FileText size={18} color="var(--text-muted)" style={{ flexShrink: 0, marginTop: 2 }} />
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                        <strong>No transcript available for this call.</strong>
+                        <p style={{ margin: '4px 0 0', color: 'var(--text-muted)' }}>
+                          Speech-to-text transcription service is not currently configured on the server. Automatic call transcripts require integrating an AI speech-to-text engine (e.g., OpenAI Whisper API, Deepgram, or AWS Transcribe) into the backend audio capture pipeline.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Agent Discussion Notes */}
+                <div className="card" style={{ padding: 18 }}>
+                  <h4 style={{ fontSize: 13, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10 }}>
+                    Agent Post-Call Notes
+                  </h4>
+                  <p style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5, margin: 0, whiteSpace: 'pre-wrap' }}>
+                    {transcriptCall.notes || 'No agent notes entered during call disposition.'}
                   </p>
                 </div>
-              </div>
 
-              {/* Transcription Box */}
-              <div className="card" style={{ padding: 18 }}>
-                <h4 style={{ fontSize: 13, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10 }}>
-                  Automated Call Transcript
-                </h4>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, fontStyle: 'italic' }}>
-                  {transcriptCall.transcription || 'Transcription processing completed.'}
-                </p>
+                {/* Skip Reason or Disposition Reason */}
+                {(transcriptCall.reason || (transcriptCall.notes && /(?:\[(?:Skip Reason|Reason)\]:\s*|(?:Skip Reason|Reason):\s*)/i.test(transcriptCall.notes))) && (
+                  <div
+                    className="card"
+                    style={{
+                      padding: 18,
+                      border: transcriptCall.disposition === 'Skipped' ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(239,68,68,0.2)',
+                      backgroundColor: transcriptCall.disposition === 'Skipped' ? 'rgba(245,158,11,0.06)' : 'rgba(239,68,68,0.04)',
+                      borderRadius: 'var(--radius-lg)',
+                    }}
+                  >
+                    <h4 style={{ fontSize: 13, textTransform: 'uppercase', color: transcriptCall.disposition === 'Skipped' ? '#d97706' : 'var(--text-muted)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <AlertCircle size={14} color={transcriptCall.disposition === 'Skipped' ? '#d97706' : '#ef4444'} />
+                      {transcriptCall.disposition === 'Skipped' ? 'Wrap-up Skip Reason' : 'Disposition Reason'}
+                    </h4>
+                    <p style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5, margin: 0, fontWeight: 500 }}>
+                      {transcriptCall.reason || (() => {
+                        const m = transcriptCall.notes?.match(/(?:\[(?:Skip Reason|Reason)\]:\s*|(?:Skip Reason|Reason):\s*)([^\n]+)/i);
+                        return m ? m[1].trim() : transcriptCall.notes;
+                      })()}
+                    </p>
+                  </div>
+                )}
               </div>
-
-              {/* Agent Discussion Notes */}
-              <div className="card" style={{ padding: 18 }}>
-                <h4 style={{ fontSize: 13, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10 }}>
-                  Agent Post-Call Notes
-                </h4>
-                <p style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5 }}>
-                  {transcriptCall.notes || 'No custom agent notes entered during disposition.'}
-                </p>
-              </div>
-            </div>
+            )
           )}
         </Drawer>
       </div>

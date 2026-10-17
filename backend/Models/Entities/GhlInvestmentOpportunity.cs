@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace backend.Models.Entities;
 
 /// <summary>
@@ -12,12 +14,19 @@ public class GhlInvestmentOpportunity
     public int CompanyId { get; set; }
     public Tenant? Company { get; set; }
 
-    /// <summary>FK to GhlInvestors table – the investor this opportunity belongs to.</summary>
+    /// <summary>FK to Investors table – the investor this opportunity belongs to.</summary>
     public int InvestorId { get; set; }
-    public GhlInvestor? Investor { get; set; }
+    public Investor? Investor { get; set; }
 
     public int AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
+
+    [NotMapped]
+    public int? HandoverId { get; set; }
+    [NotMapped]
+    public WorkHandover? Handover { get; set; }
+    public int? OriginalOwnerId { get; set; }
+    public User? OriginalOwner { get; set; }
 
     /// <summary>Opportunity title / fund name (e.g. "AIF Category II – Fund IV").</summary>
     public string Title { get; set; } = string.Empty;

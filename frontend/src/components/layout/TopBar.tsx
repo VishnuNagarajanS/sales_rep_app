@@ -15,7 +15,9 @@ import { AgentAvailabilityToggle } from '../calling/CallCenterComponents';
 import { PersonaSwitcher } from './PersonaSwitcher';
 import { storageService } from '../../services/storageService';
 import { FEATURES } from '../../constants/features';
+import { ExportReportModal } from '../modals/ExportReportModal';
 import './TopBar.css';
+
 
 interface TopBarProps {
   onNavigate: (route: string, extraState?: any) => void;
@@ -25,6 +27,8 @@ interface TopBarProps {
 export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate }) => {
   const { user, tenant, isSuperAdmin, logout, enabledFeatures } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
   const roleCode = user?.role?.code;
   const isJamin = Boolean(
@@ -37,9 +41,10 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
     (user?.companyId as any) === '2'
   );
   const isGhlAdmin =
+    !isSuperAdmin &&
     !isJamin &&
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
-    (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
+    (roleCode === 'company_admin' || (roleCode as string) === 'admin');
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -60,6 +65,8 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+
 
   // Sync notifications with tenant and user scoping
   useEffect(() => {
@@ -135,15 +142,15 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
     const q = searchQuery.toLowerCase();
 
     const leads = storageService.getLeads(tenant?.id).filter(l =>
-      l.name.toLowerCase().includes(q) || l.phone.includes(q) || l.email.toLowerCase().includes(q)
+      l.name?.toLowerCase().includes(q) || l.phone?.includes(q) || l.email?.toLowerCase().includes(q)
     );
 
     const customers = storageService.getCustomers(tenant?.id).filter(c =>
-      c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.email.toLowerCase().includes(q)
+      c.name?.toLowerCase().includes(q) || c.phone?.includes(q) || c.email?.toLowerCase().includes(q)
     );
 
     const deals = storageService.getDeals(tenant?.id).filter(d =>
-      d.title.toLowerCase().includes(q) || d.customerName.toLowerCase().includes(q)
+      d.title?.toLowerCase().includes(q) || d.customerName?.toLowerCase().includes(q)
     );
 
     const plots = enabledFeatures.includes(FEATURES.PROPERTIES)
@@ -162,18 +169,18 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
     const scopedLeads = isIrm
       ? []
       : isExec
-      ? leads.filter(l => l.assignedAgentId === user?.id || l.assignedAgentName === user?.name)
-      : leads;
+        ? leads.filter(l => l.assignedAgentId === user?.id || l.assignedAgentName === user?.name)
+        : leads;
     const scopedCustomers = isIrm
       ? []
       : isExec
-      ? customers.filter(c => c.assignedAgentId === user?.id || c.assignedAgentName === user?.name)
-      : customers;
+        ? customers.filter(c => c.assignedAgentId === user?.id || c.assignedAgentName === user?.name)
+        : customers;
     const scopedDeals = isIrm
       ? []
       : isExec
-      ? deals.filter(d => d.assignedAgentId === user?.id || d.assignedAgentName === user?.name)
-      : deals;
+        ? deals.filter(d => d.assignedAgentId === user?.id || d.assignedAgentName === user?.name)
+        : deals;
     const scopedInvestors = (isExec || isIrm)
       ? investors.filter(i => i.assignedAgentId === user?.id || i.assignedAgentName === user?.name)
       : investors;
@@ -183,7 +190,43 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  const handleExport = async (moduleName: string) => {
+    setIsExportModalOpen(false);
+    try {
+      const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token') || '';
+      const url = `/api/Reports/export${moduleName === 'All' ? '' : '?module=' + moduleName}`;
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Failed to export: ${res.status} - ${errorText}`);
+      }
+      
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0];
+      const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-');
+      const timestamp = `${dateStr}_${timeStr}`;
+      const baseName = moduleName === 'All' ? 'Complete_Report' : moduleName;
+      
+      a.download = `${baseName}_${timestamp}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Failed to export report.");
+    }
+  };
+
   return (
+    <>
     <header className="topbar-header">
       {/* Hidden SVG Gradient definition for Red Gradient icon stroke */}
       <svg width="0" height="0" className="topbar-svg-def">
@@ -338,9 +381,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
         {isGhlAdmin && (
           <button
             className="btn btn-secondary btn-sm"
-            onClick={() => {
-              alert("Downloading comprehensive report for all users...");
-            }}
+            onClick={() => setIsExportModalOpen(true)}
             title="Export Report"
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
@@ -582,7 +623,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                   : `linear-gradient(135deg, ${tenant?.brandColor || '#ef4444'} 0%, #991b1b 100%)`,
               }}
             >
-              {user?.name.charAt(0)}
+              {user?.name?.charAt(0) || '?'}
             </div>
           </button>
 
@@ -592,7 +633,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{user?.name}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{user?.email}</div>
                   <div className="topbar-user-role-label">
-                    {user?.role.name}
+                    {user?.role?.name || 'User'}
                   </div>
                 </div>
 
@@ -614,5 +655,12 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
         </div>
       </div>
     </header>
+    {isExportModalOpen && (
+      <ExportReportModal 
+        onClose={() => setIsExportModalOpen(false)} 
+        onExport={handleExport} 
+      />
+    )}
+    </>
   );
 };

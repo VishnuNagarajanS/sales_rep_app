@@ -20,6 +20,7 @@
 
 import { apiClient } from './apiClient';
 import { storageService } from './storageService';
+import { isMockMode } from '../config/environment';
 import type {
   Deal,
   DealActivity,
@@ -31,16 +32,26 @@ import type {
   CallRecord,
   Consultation,
   AuditLog,
+  IrmOtherRecord,
+  IrmProfile,
 } from '../types';
 
 // ── ID type helpers ───────────────────────────────────────────────────────────
 // Backend uses int IDs; frontend types use string.
 const sid = (n: number | string | undefined | null): string => String(n ?? '');
 const nid = (s: string | number | undefined | null): number => {
+
   if (typeof s === 'number') return s;
   if (!s) return 0;
   const digits = String(s).replace(/\D/g, '');
   return parseInt(digits || '0', 10) || 0;
+
+
+
+
+
+
+
 };
 
 // ── Tenant match helper ───────────────────────────────────────────────────────
@@ -79,8 +90,9 @@ interface ApiResponse<T> {
   errors?: string[];
 }
 
-/** Fetch all pages and return flat array (backend defaults to pageSize=100). */
+/** Fetch all pages and return flat array (backend defaults to pageSize=100). Throws on API error so callers show error state instead of empty array. */
 async function fetchAll<T>(path: string, params: Record<string, string> = {}): Promise<T[]> {
+
   const pageSize = 100;
   const items: T[] = [];
   let page = 1;
@@ -101,7 +113,31 @@ async function fetchAll<T>(path: string, params: Record<string, string> = {}): P
     page += 1;
   } while (items.length < totalCount);
 
-  return items;
+  const seen = new Set();
+  return items.filter((item: any) => {
+    const id = item?.id;
+    if (id === undefined || id === null) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -132,12 +168,45 @@ function mapDeal(d: Record<string, any>): Deal {
     phone: d.phone,
     email: d.email,
     location: d.location,
+    investmentAmountConfirmed: Boolean(d.investmentAmountConfirmed),
+    kycStatus: d.kycStatus,
   };
 }
 
 export async function getDeals(companyId?: string): Promise<Deal[]> {
-  const raw = await fetchAll<any>('/ghl/deals');
-  return raw.map(mapDeal);
+  try {
+    const raw = await fetchAll<any>('/ghl/deals');
+    const apiDeals = raw.map(mapDeal);
+
+    // Live database is authoritative for all existing deals
+    const localDeals = storageService.getDeals(companyId) || [];
+    const serverIds = new Set(apiDeals.map(d => String(d.id)));
+    const serverPhones = new Set(
+      apiDeals
+        .map(d => (d.phone || '').replace(/\D/g, '').slice(-10))
+        .filter(Boolean)
+    );
+
+    // Only keep truly local/offline-only draft deals that do not exist on the server
+    const offlineOnly = localDeals.filter(ld => {
+      const isLocalDraft = String(ld.id).startsWith('deal-') || String(ld.id).startsWith('d-');
+      const ldPhone = (ld.phone || '').replace(/\D/g, '').slice(-10);
+      const matchesServer = serverIds.has(String(ld.id)) || (ldPhone && serverPhones.has(ldPhone));
+      return isLocalDraft && !matchesServer;
+    });
+
+    const combined = [...apiDeals, ...offlineOnly];
+
+    // Synchronize storageService silently so read operations never trigger an update loop
+    storageService.setDeals(combined, true);
+
+    return companyId
+      ? combined.filter(d => !d.companyId || isTenantMatch(d.companyId, companyId))
+      : combined;
+  } catch (err) {
+    console.warn('[ghlApiService] Failed to fetch deals from server, using local store fallback:', err);
+    return storageService.getDeals(companyId) || [];
+  }
 }
 
 export async function saveDeal(deal: Deal): Promise<Deal> {
@@ -159,8 +228,10 @@ export async function saveDeal(deal: Deal): Promise<Deal> {
     };
     const res: ApiResponse<any> = await apiClient.post('/ghl/deals', payload);
     if (!res.success || !res.data) throw new Error(res.message);
+    const saved = mapDeal(res.data);
+    storageService.saveDeal(saved);
     window.dispatchEvent(new Event('nexus_storage_updated'));
-    return mapDeal(res.data);
+    return saved;
   } else {
     const payload = {
       title: deal.title,
@@ -174,16 +245,25 @@ export async function saveDeal(deal: Deal): Promise<Deal> {
       preferredAssetClass: deal.preferredAssetClass,
       priority: deal.priority,
       stageEnteredAt: deal.stageEnteredAt,
+      investmentAmountConfirmed: deal.investmentAmountConfirmed ?? false,
+      kycStatus: (deal as any).kycStatus,
     };
     const res: ApiResponse<any> = await apiClient.put(`/ghl/deals/${nid(deal.id)}`, payload);
     if (!res.success || !res.data) throw new Error(res.message);
+    const updated = mapDeal(res.data);
+    storageService.saveDeal(updated);
     window.dispatchEvent(new Event('nexus_storage_updated'));
-    return mapDeal(res.data);
+    return updated;
   }
+}
+
+export async function persistDeal(deal: Deal): Promise<Deal> {
+  return await saveDeal(deal);
 }
 
 export async function deleteDeal(dealId: string): Promise<void> {
   await apiClient.delete(`/ghl/deals/${nid(dealId)}`);
+  storageService.deleteDeal(dealId);
   window.dispatchEvent(new Event('nexus_storage_updated'));
 }
 
@@ -208,7 +288,7 @@ export async function getDealActivities(dealId: string): Promise<DealActivity[]>
   const res: ApiResponse<DealActivity[]> = await apiClient.get(
     `/ghl/deals/${nid(dealId)}/activities`
   );
-  if (!res.success || !res.data) return [];
+  if (!res.success || !res.data) throw new Error(res?.message || 'Failed to fetch deal activities');
   return res.data.map(mapActivity);
 }
 
@@ -433,29 +513,134 @@ function mapLead(l: Record<string, any>): Lead {
     source: l.source ?? '',
     status: l.status ?? 'New',
     priority: l.priority ?? 'Medium',
-    assignedAgentId: l.assignedAgentId ? sid(l.assignedAgentId) : '',
-    assignedAgentName: l.assignedAgentName || (l.assignedAgent?.name) || 'Unassigned',
+
+
+
+
+    assignedAgentId: l.assignedAgentId != null && l.assignedAgentId !== '' ? sid(l.assignedAgentId) : '',
+    assignedAgentName: l.assignedAgentName || (l.assignedAgent?.name) || '',
+    assignedById: l.assignedById != null ? sid(l.assignedById) : undefined,
+    assignedByName: l.assignedByName ?? l.customFields?.qualifiedByAgentName ?? '',
+    assignedAgentRole: l.assignedAgentRole ?? undefined,
+    assignedSalesExecutiveId: l.assignedSalesExecutiveId != null ? sid(l.assignedSalesExecutiveId) : undefined,
+    assignedSalesExecutiveName: l.assignedSalesExecutiveName ?? undefined,
+    assignedSalesExecutiveAt: l.assignedSalesExecutiveAt ?? undefined,
+    transferredBySalesExecutiveName: l.transferredBySalesExecutiveName ?? l.customFields?.qualifiedByAgentName ?? undefined,
+    activeOwnerName: l.activeOwnerName ?? undefined,
+    activeOwnerRole: l.activeOwnerRole ?? undefined,
+    isCovered: l.isCovered ?? false,
+    coveredByName: l.coveredByName ?? undefined,
+    assignedIrmId: l.assignedIrmId != null ? sid(l.assignedIrmId) : (l.customFields?.assignedIrmId ? sid(l.customFields.assignedIrmId) : undefined),
+    assignedIrmName: l.assignedIrmName ?? l.customFields?.assignedIrmName ?? undefined,
+    assignedIrmAt: l.assignedIrmAt ?? l.customFields?.assignedIrmAt ?? undefined,
+    assignedAt: l.assignedAt ?? undefined,
+    handoverId: l.handoverId ?? undefined,
+    handedOverFromName: l.handedOverFromName ?? undefined,
+    handoverPlannedEnd: l.handoverPlannedEnd ?? undefined,
+    originalOwnerId: l.originalOwnerId ?? undefined,
+    isReturnedFromHandover: l.isReturnedFromHandover ?? (l.customFields?.returnedFromHandover === 'true' || l.customFields?.returnedFromHandover === true) ?? false,
+    returnedFromCoveringUserName: l.returnedFromCoveringUserName ?? l.customFields?.returnedFromCoveringUserName ?? undefined,
+    returnedAt: l.returnedAt ?? l.customFields?.returnedAt ?? undefined,
+
     nextFollowupDate: l.nextFollowupDate,
-    targetDevelopment: l.targetDevelopment,
-    budgetRange: l.budgetRange,
-    readyToRegister: l.readyToRegister,
+    targetDevelopment: l.targetDevelopment || l.customFields?.targetDevelopment || l.customFields?.project,
+    budgetRange: l.budgetRange || l.customFields?.budgetRange,
+    readyToRegister: l.readyToRegister || l.customFields?.readyToRegister,
     createdAt: l.createdAt ?? new Date().toISOString(),
     notes: l.notes ?? '',
-    customFields: l.customFields ?? {},
+    customFields: {
+      ...(l.customFields ?? {}),
+      ...(l.targetDevelopment ? { targetDevelopment: l.targetDevelopment } : {}),
+      ...(l.budgetRange ? { budgetRange: l.budgetRange } : {}),
+      ...(l.readyToRegister ? { readyToRegister: l.readyToRegister } : {}),
+      ...(l.targetDevelopment && !l.customFields?.preferredLocation ? { preferredLocation: l.location || l.targetDevelopment } : {}),
+    },
   };
 }
 
-export async function getLeads(companyId?: string): Promise<Lead[]> {
+export async function getLeads(companyId?: string, status?: string): Promise<Lead[]> {
+  if (isMockMode()) {
+    const all = storageService.getLeads(companyId);
+    if (status && status !== 'all') {
+      return all.filter(l => l.status === status);
+    }
+    return all;
+  }
+  const params: Record<string, string> = {};
+  if (status) params.status = status;
+
+  // Primary: Try /leads endpoint which loads scoped company leads for all roles
   try {
-    const tenantNum = (companyId && (companyId === '2' || companyId.includes('jamin'))) ? '2' : '1';
-    const res = await apiClient.get<any>(`/leads?tenantId=${tenantNum}`);
-    if (res && res.success && Array.isArray(res.data)) {
-      return res.data.map(mapLead);
+    const qs = status && status !== 'all' ? `?status=${encodeURIComponent(status)}` : '';
+    const res = await apiClient.get<any>(`/leads${qs}`);
+    const items = Array.isArray(res?.data)
+      ? res.data
+      : (Array.isArray(res?.data?.items) ? res.data.items : (Array.isArray(res?.items) ? res.items : null));
+    if (items && Array.isArray(items) && items.length > 0) {
+      return items.map(mapLead);
     }
   } catch (err) {
-    console.warn('[ghlApiService] Failed to fetch leads from API:', err);
+    console.warn('[ghlApiService] /leads query failed, falling back to /sales-executive/leads', err);
   }
-  return [];
+
+  const raw = await fetchAll<any>('/sales-executive/leads', params);
+  return raw.map(mapLead);
+}
+
+export async function getNotInterestedLeads(companyId?: string): Promise<Lead[]> {
+  if (isMockMode()) {
+    const all = storageService.getLeads(companyId);
+    return all.filter(l => l.status === 'Not Interested');
+  }
+  try {
+
+
+
+
+
+
+
+
+
+
+
+    const raw = await fetchAll<any>('/sales-executive/leads/not-interested');
+    if (raw && raw.length > 0) {
+      return raw.map(mapLead);
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] /sales-executive/leads/not-interested failed, falling back to status query', err);
+  }
+  const fallback = await fetchAll<any>('/sales-executive/leads', { status: 'Not Interested' });
+  return fallback.map(mapLead);
+}
+
+export async function getJunkLeads(companyId?: string): Promise<Lead[]> {
+  if (isMockMode()) {
+    const all = storageService.getLeads(companyId);
+    return all.filter(l => l.status === 'Junk' || l.status === 'Wrong Number');
+  }
+  try {
+    const raw = await fetchAll<any>('/sales-executive/leads/junk');
+    if (raw && raw.length > 0) {
+      return raw.map(mapLead);
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] /sales-executive/leads/junk failed, falling back to status query', err);
+  }
+  const [fallbackJunk, fallbackWrong] = await Promise.all([
+    fetchAll<any>('/sales-executive/leads', { status: 'Junk' }),
+    fetchAll<any>('/sales-executive/leads', { status: 'Wrong Number' }),
+  ]);
+  const combined = [...fallbackJunk, ...fallbackWrong];
+  const seen = new Set<string>();
+  const unique = combined.filter(l => {
+    const id = String(l.id);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  return unique.map(mapLead);
 }
 
 export async function saveLead(lead: Lead): Promise<Lead> {
@@ -464,6 +649,13 @@ export async function saveLead(lead: Lead): Promise<Lead> {
 
   try {
     if (isNew) {
+      const filteredCustomFields: Record<string, any> = { ...customFields };
+      delete filteredCustomFields.budgetRange;
+      delete filteredCustomFields.readyToRegister;
+      delete filteredCustomFields.targetDevelopment;
+      delete filteredCustomFields.preferredLocation;
+      delete filteredCustomFields.project;
+
       const payload: Record<string, any> = {
         name: lead.name,
         phone: lead.phone,
@@ -473,11 +665,20 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         status: lead.status || 'New',
         priority: lead.priority,
         notes: lead.notes,
+        assignedAgentId: nid(lead.assignedAgentId) || undefined,
+        assignedIrmId: nid(lead.assignedIrmId) || (customFields.assignedIrmId ? nid(customFields.assignedIrmId) : undefined),
+        assignedIrmName: lead.assignedIrmName ?? customFields.assignedIrmName ?? undefined,
+        assignedIrmAt: lead.assignedIrmAt ?? customFields.assignedIrmAt ?? undefined,
         companyId: nid(lead.companyId) || 1,
+        targetDevelopment: lead.targetDevelopment ?? customFields['targetDevelopment'] ?? customFields['preferredLocation'],
+        budgetRange: lead.budgetRange ?? customFields['budgetRange'],
+        readyToRegister: (lead as any).readyToRegister ?? customFields['readyToRegister'],
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
+        investmentAmount: (lead as any).investmentAmount ?? customFields['Investment Amount'] ?? customFields['investmentAmount'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
         preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
         horizon: customFields['Horizon'] ?? customFields['horizon'],
+        additionalCustomFields: Object.keys(filteredCustomFields).length > 0 ? filteredCustomFields : undefined,
       };
       const res: ApiResponse<any> = await apiClient.post('/sales-executive/leads', payload);
       if (res && res.success && res.data) {
@@ -486,7 +687,15 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to create lead');
     } else {
+      const filteredCustomFields: Record<string, any> = { ...customFields };
+      delete filteredCustomFields.budgetRange;
+      delete filteredCustomFields.readyToRegister;
+      delete filteredCustomFields.targetDevelopment;
+      delete filteredCustomFields.preferredLocation;
+      delete filteredCustomFields.project;
+
       const payload: Record<string, any> = {
         name: lead.name,
         phone: lead.phone,
@@ -497,11 +706,19 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         priority: lead.priority,
         notes: lead.notes,
         nextFollowupDate: lead.nextFollowupDate,
-        assignedAgentId: nid(lead.assignedAgentId) || undefined,
+        assignedAgentId: nid(lead.assignedAgentId?.toString()) || undefined,
+        assignedIrmId: nid(lead.assignedIrmId) || (customFields.assignedIrmId ? nid(customFields.assignedIrmId) : undefined),
+        assignedIrmName: lead.assignedIrmName ?? customFields.assignedIrmName ?? undefined,
+        assignedIrmAt: lead.assignedIrmAt ?? customFields.assignedIrmAt ?? undefined,
+        targetDevelopment: lead.targetDevelopment ?? customFields['targetDevelopment'] ?? customFields['preferredLocation'],
+        budgetRange: lead.budgetRange ?? customFields['budgetRange'],
+        readyToRegister: (lead as any).readyToRegister ?? customFields['readyToRegister'],
         investmentCapacity: customFields['Investment Capacity'] ?? customFields['investmentCapacity'],
+        investmentAmount: (lead as any).investmentAmount ?? customFields['Investment Amount'] ?? customFields['investmentAmount'],
         assetClass: customFields['Asset Class'] ?? customFields['assetClass'],
         preferredAssetClass: customFields['Preferred Asset Class'] ?? customFields['preferredAssetClass'],
         horizon: customFields['Horizon'] ?? customFields['horizon'],
+        additionalCustomFields: Object.keys(filteredCustomFields).length > 0 ? filteredCustomFields : undefined,
       };
       const res: ApiResponse<any> = await apiClient.put(
         `/sales-executive/leads/${nid(lead.id)}`,
@@ -513,15 +730,12 @@ export async function saveLead(lead: Lead): Promise<Lead> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
+      throw new Error(res?.message || 'Failed to update lead');
     }
-  } catch (err) {
-    console.warn('[ghlApiService] API lead save failed, persisting locally:', err);
+  } catch (err: any) {
+    console.error('[ghlApiService] API lead save failed:', err);
+    throw err;
   }
-
-  // Fallback / mirror to storageService
-  storageService.saveLead(lead);
-  window.dispatchEvent(new Event('nexus_storage_updated'));
-  return lead;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -569,7 +783,18 @@ function mapFollowup(f: Record<string, any>): Followup {
     followupType: f.followupType ?? 'call',
     assignedAgentId: sid(f.assignedAgentId),
     assignedAgentName: f.assignedAgentName ?? f.assignedToName ?? '',
-    assignedRole: f.assignedRole ?? f.assignedToRole,
+
+    assignedRole: f.assignedRole ?? f.assignedToRole ?? f.assignedAgentRole ?? undefined,
+    assignedById: f.assignedById != null ? sid(f.assignedById) : undefined,
+    assignedByName: f.assignedByName ?? undefined,
+    handoverId: f.handoverId ?? undefined,
+    handedOverFromName: f.handedOverFromName ?? undefined,
+    handoverPlannedEnd: f.handoverPlannedEnd ?? undefined,
+    originalOwnerId: f.originalOwnerId ?? undefined,
+    isReturnedFromHandover: f.isReturnedFromHandover ?? (f.customFields?.returnedFromHandover === 'true' || f.customFields?.returnedFromHandover === true) ?? false,
+    returnedFromCoveringUserName: f.returnedFromCoveringUserName ?? f.customFields?.returnedFromCoveringUserName ?? undefined,
+    returnedAt: f.returnedAt ?? f.customFields?.returnedAt ?? undefined,
+    customFields: f.customFields ?? {},
     completedAt: f.completedAt,
     createdAt: f.createdAt,
     updatedAt: f.updatedAt,
@@ -577,6 +802,9 @@ function mapFollowup(f: Record<string, any>): Followup {
 }
 
 export async function getFollowups(companyId?: string, leadId?: number | string, customerId?: number | string): Promise<Followup[]> {
+  if (isMockMode()) {
+    return storageService.getFollowups(companyId);
+  }
   const params: Record<string, string> = {};
   if (companyId) {
     const value = String(companyId).toLowerCase();
@@ -592,6 +820,28 @@ export async function getFollowups(companyId?: string, leadId?: number | string,
     if (Number.isInteger(numCustId) && numCustId > 0) params.customerId = String(numCustId);
   }
   const raw = await fetchAll<any>('/sales-executive/followups', params);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   return raw.map(mapFollowup);
 }
 
@@ -604,7 +854,15 @@ export async function saveFollowup(target: any, maybeFollowup?: Followup): Promi
     : undefined;
 
   const isNew =
-    !followup.id || followup.id.startsWith('flw-') || followup.id.startsWith('fu-') || followup.id.startsWith('f-') || followup.id.startsWith('fup-');
+
+    !followup.id || followup.id.startsWith('flw-') || followup.id.startsWith('fu-') || followup.id.startsWith('f-') || followup.id.startsWith('fup-') || followup.id.startsWith('lead-flw-');
+
+
+
+
+
+
+
 
   try {
     if (isNew) {
@@ -616,21 +874,42 @@ export async function saveFollowup(target: any, maybeFollowup?: Followup): Promi
         customerId: followup.customerId ? nid(followup.customerId) : (followup.contactType === 'customer' ? nid(followup.contactId) : undefined),
         contactName: followup.contactName,
         contactPhone: followup.contactPhone,
+
+        contactEmail: (followup as any).contactEmail || (followup as any).email || undefined,
         scheduledAt: toIsoString(followup.scheduledAt || (followup.scheduledDate && followup.scheduledTime ? `${followup.scheduledDate} ${followup.scheduledTime}` : undefined)),
         priority: followup.priority || 'Medium',
         notes: followup.notes || '',
         followupType: followup.followupType || 'call',
         assignedAgentId: followup.assignedAgentId ? nid(String(followup.assignedAgentId).replace(/\D/g, '')) : undefined,
+        assignedToRole: followup.assignedRole || undefined,
+
+
+
+
+
+
+
+
       };
       const res: ApiResponse<any> = await apiClient.post(
         '/sales-executive/followups',
         payload
       );
+
       if (!res?.success || !res.data) throw new Error(res?.message || 'The follow-up could not be saved.');
       const saved = mapFollowup(res.data);
       storageService.saveFollowup(saved);
       window.dispatchEvent(new Event('nexus_storage_updated'));
       return saved;
+
+
+
+
+
+
+
+
+
     } else {
       const payload = {
         scheduledAt: toIsoString(followup.scheduledAt || (followup.scheduledDate && followup.scheduledTime ? `${followup.scheduledDate} ${followup.scheduledTime}` : undefined)),
@@ -646,13 +925,14 @@ export async function saveFollowup(target: any, maybeFollowup?: Followup): Promi
         `/sales-executive/followups/${nid(followup.id)}`,
         payload
       );
+
       if (!res?.success || !res.data) throw new Error(res?.message || 'The follow-up could not be updated.');
       const saved = mapFollowup(res.data);
       storageService.saveFollowup(saved);
       window.dispatchEvent(new Event('nexus_storage_updated'));
       return saved;
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error('[ghlApiService] API saveFollowup failed:', err);
     throw err;
   }
@@ -691,6 +971,13 @@ function mapCustomer(c: Record<string, any>): Customer {
     totalValue: c.totalValue ?? 0,
     createdAt: c.createdAt ?? new Date().toISOString(),
     notes: c.notes ?? '',
+    handoverId: c.handoverId ?? undefined,
+    handedOverFromName: c.handedOverFromName ?? undefined,
+    handoverPlannedEnd: c.handoverPlannedEnd ?? undefined,
+    originalOwnerId: c.originalOwnerId ?? undefined,
+    isReturnedFromHandover: c.isReturnedFromHandover ?? (c.customFields?.returnedFromHandover === 'true' || c.customFields?.returnedFromHandover === true) ?? false,
+    returnedFromCoveringUserName: c.returnedFromCoveringUserName ?? c.customFields?.returnedFromCoveringUserName ?? undefined,
+    returnedAt: c.returnedAt ?? c.customFields?.returnedAt ?? undefined,
     customFields: c.customFields ?? {},
   };
 }
@@ -708,6 +995,7 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
     customer.id.startsWith('cust-') ||
     customer.id.startsWith('c-');
 
+
   const companyId = (() => {
     const value = String(customer.companyId || '').toLowerCase();
     if (value === 'jamin') return 2;
@@ -717,9 +1005,12 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
   const assignedAgentId = customer.assignedAgentId
     ? nid(String(customer.assignedAgentId).replace(/\D/g, ''))
     : undefined;
-  const payload = {
+  const payload: Record<string, any> = {
     companyId: companyId || undefined,
     assignedAgentId,
+
+
+
     name: customer.name,
     phone: customer.phone,
     email: customer.email,
@@ -727,8 +1018,13 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
     status: customer.status,
     totalValue: customer.totalValue ?? 0,
     notes: customer.notes,
+
     customFields: customer.customFields ?? {},
     clearAssignedAgent: !assignedAgentId,
+
+
+
+
   };
 
   if (isNew) {
@@ -755,6 +1051,49 @@ export async function saveCustomer(customer: Customer): Promise<Customer> {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function mapCallRecord(c: Record<string, any>): CallRecord {
+  const notes = c.notes;
+  let reason = c.reason;
+  if (!reason && notes) {
+    const match = notes.match(/(?:\[(?:Skip Reason|Reason)\]:\s*|(?:Skip Reason|Reason):\s*)([^\n]+)/i);
+    if (match) {
+      reason = match[1].trim();
+    }
+  }
+
+  // Determine categorization from backend attributes or stored source markers
+  const roleCode = (c.agentRole || c.callerType || '').toLowerCase();
+  const sourceCode = (c.source || '').toLowerCase();
+  const notesStr = notes || '';
+  const isIrm =
+    roleCode === 'irm' ||
+    sourceCode === 'irm' ||
+    c.connectVia === 'Connect via IRM' ||
+    notesStr.includes('Connect via IRM') ||
+    notesStr.includes('Connected to IRM') ||
+    notesStr.includes('[Source: irm]');
+
+  const callerType: 'Agent' | 'IRM' = isIrm ? 'IRM' : 'Agent';
+  const connectVia: 'Connect via Agent' | 'Connect via IRM' = isIrm ? 'Connect via IRM' : 'Connect via Agent';
+  const agentRole = isIrm ? 'IRM' : 'Agent';
+
+  // Only assign recordingUrl and transcription if genuine real provider data exists (no mock/sample/placeholder)
+  const isMockRecording = !c.recordingUrl ||
+    typeof c.recordingUrl !== 'string' ||
+    c.recordingUrl.includes('sample.mp3') ||
+    c.recordingUrl.includes('nexusplatform.io') ||
+    c.recordingUrl.includes('placeholder') ||
+    c.recordingUrl.includes('example.com');
+  const recordingUrl = !isMockRecording ? c.recordingUrl : undefined;
+
+  const rawTranscript = c.transcript || c.transcription;
+  const isMockTranscript = !rawTranscript ||
+    typeof rawTranscript !== 'string' ||
+    rawTranscript.startsWith('Automated Call Transcript: Agent') ||
+    rawTranscript.includes('Agent explained commercial cap rate') ||
+    rawTranscript.includes('Customer called inquiring about BDA') ||
+    rawTranscript.includes('AIF Category II structured debt product');
+  const transcription = !isMockTranscript ? rawTranscript : undefined;
+
   return {
     id: sid(c.id),
     companyId: sid(c.companyId),
@@ -764,15 +1103,29 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
     duration: c.duration ?? 0,
     agentId: sid(c.agentId),
     agentName: c.agentName ?? '',
+    agentRole: agentRole,
+    callerType: callerType,
+    connectVia: connectVia,
+    source: isIrm ? 'irm' : (c.source || 'agent'),
     disposition: c.disposition ?? 'No Response',
     timestamp: c.timestamp ?? new Date().toISOString(),
-    notes: c.notes,
+    notes: notes,
+    reason: c.reason || reason,
+    callModule: c.callModule || c.module || undefined,
+    module: c.callModule || c.module || undefined,
+    recordingUrl: recordingUrl,
+    transcription: transcription,
+    twilioCallSid: c.twilioCallSid || undefined,
     leadId: c.leadId ? sid(c.leadId) : undefined,
     customerId: c.customerId ? sid(c.customerId) : undefined,
   };
 }
 
+
 export async function getCalls(companyId?: string, leadId?: number | string, customerId?: number | string): Promise<CallRecord[]> {
+  if (isMockMode()) {
+    return storageService.getCalls(companyId);
+  }
   const params: Record<string, string> = {};
   if (companyId) {
     const cid = String(companyId).toLowerCase();
@@ -787,10 +1140,71 @@ export async function getCalls(companyId?: string, leadId?: number | string, cus
     if (Number.isInteger(numCustId) && numCustId > 0) params.customerId = String(numCustId);
   }
   const raw = await fetchAll<any>('/sales-executive/calls', params);
+
+
+
+
+
+
+
   return raw.map(mapCallRecord);
 }
 
+export function unblockOtherRecord(identifiers: {
+  phone?: string;
+  leadId?: string | number;
+  customerId?: string | number;
+  callId?: string | number;
+}): void {
+  try {
+    const rawDismissed = typeof window !== 'undefined' ? localStorage.getItem('nexus_dismissed_other_records') : null;
+    const rawMoved = typeof window !== 'undefined' ? localStorage.getItem('nexus_moved_other_records') : null;
+    if (!rawDismissed && !rawMoved) return;
+
+    const phoneDigits = identifiers.phone ? identifiers.phone.replace(/\D/g, '').slice(-10) : '';
+    const phoneRaw = identifiers.phone ? identifiers.phone.trim() : '';
+    const callKey = identifiers.callId ? String(identifiers.callId).trim() : '';
+    const leadKey = identifiers.leadId ? `lead_${String(identifiers.leadId).replace(/\D/g, '')}` : '';
+    const custKey = identifiers.customerId ? `cust_${String(identifiers.customerId).replace(/\D/g, '')}` : '';
+
+    const filterList = (list: string[]) => {
+      return list.filter(k => {
+        const item = String(k).trim();
+        if (callKey && item === callKey) return false;
+        if (phoneRaw && item === phoneRaw) return false;
+        if (phoneDigits && (item === phoneDigits || item.includes(phoneDigits))) return false;
+        if (leadKey && item === leadKey) return false;
+        if (custKey && item === custKey) return false;
+        return true;
+      });
+    };
+
+    if (rawDismissed) {
+      const parsed: string[] = JSON.parse(rawDismissed);
+      localStorage.setItem('nexus_dismissed_other_records', JSON.stringify(filterList(parsed)));
+    }
+    if (rawMoved) {
+      const parsed: string[] = JSON.parse(rawMoved);
+      localStorage.setItem('nexus_moved_other_records', JSON.stringify(filterList(parsed)));
+    }
+  } catch (e) {
+    console.warn('[unblockOtherRecord] Error clearing blacklist keys:', e);
+  }
+}
+
 export async function logCall(call: CallRecord): Promise<CallRecord> {
+  const parsedLeadId = call.leadId ? nid(call.leadId) : undefined;
+  const parsedCustomerId = call.customerId ? nid(call.customerId) : undefined;
+
+  if (call.disposition === 'Other') {
+    unblockOtherRecord({
+      phone: call.contactPhone,
+      leadId: parsedLeadId || call.leadId,
+      customerId: parsedCustomerId || call.customerId,
+      callId: call.id,
+    });
+  }
+
   try {
     const payload = {
       contactName: call.contactName,
@@ -799,8 +1213,11 @@ export async function logCall(call: CallRecord): Promise<CallRecord> {
       duration: call.duration,
       disposition: call.disposition,
       notes: call.notes,
-      leadId: call.leadId ? nid(call.leadId) : undefined,
-      customerId: call.customerId ? nid(call.customerId) : undefined,
+      leadId: parsedLeadId && parsedLeadId > 0 ? parsedLeadId : undefined,
+      customerId: parsedCustomerId && parsedCustomerId > 0 ? parsedCustomerId : undefined,
+      twilioCallSid: call.twilioCallSid || undefined,
+      module: call.callModule || call.module || undefined,
+      reason: call.reason || undefined,
     };
     const res: ApiResponse<any> = await apiClient.post('/sales-executive/calls', payload);
     if (res && res.success && res.data) {
@@ -817,6 +1234,597 @@ export async function logCall(call: CallRecord): Promise<CallRecord> {
   storageService.addCall(call);
   window.dispatchEvent(new Event('nexus_storage_updated'));
   return call;
+}
+
+export function isMockOtherRecord(record: IrmOtherRecord): boolean {
+  if (!record) return false;
+  const name = (record.contactName || '').trim().toLowerCase();
+  const phone = (record.contactPhone || '').replace(/\D/g, '');
+  return (
+    name.includes('pravin godbole') ||
+    name.includes('kishore varma') ||
+    phone.includes('9741088223') ||
+    phone.includes('9886077112') ||
+    name.includes('simulate') ||
+    (record.reason === 'n' && name.includes('pravin'))
+  );
+}
+
+export interface MoveIrmOtherRecordOptions {
+  callId: number;
+  targetModule?: string;
+  contactName?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  contactLocation?: string;
+  leadId?: number;
+  customerId?: number;
+  assignedAgentId?: string | number;
+  assignedAgentName?: string;
+  actorName?: string;
+  tenantId?: string;
+  reason?: string;
+}
+
+export function getDismissedOtherKeys(): Set<string> {
+  try {
+    const set = new Set<string>();
+    const raw = typeof window !== 'undefined' ? localStorage.getItem('nexus_dismissed_other_records') : null;
+    if (raw) {
+      const parsed: string[] = JSON.parse(raw);
+      parsed.forEach(k => {
+        if (k) set.add(String(k).trim());
+      });
+    }
+    const movedRaw = typeof window !== 'undefined' ? localStorage.getItem('nexus_moved_other_records') : null;
+    if (movedRaw) {
+      const parsed: string[] = JSON.parse(movedRaw);
+      parsed.forEach(k => {
+        if (k) set.add(String(k).trim());
+      });
+    }
+    return set;
+  } catch {
+    return new Set();
+  }
+}
+
+export function filterOtherRecords(records: IrmOtherRecord[]): IrmOtherRecord[] {
+  const dismissed = getDismissedOtherKeys();
+  return (Array.isArray(records) ? records : []).filter(r => {
+    if (isMockOtherRecord(r)) return false;
+    const callKey = r.callId ? String(r.callId) : '';
+    const phoneRaw = r.contactPhone ? r.contactPhone.trim() : '';
+    const phoneDigits = phoneRaw.replace(/\D/g, '').slice(-10);
+    const leadKey = r.leadId ? `lead_${r.leadId}` : '';
+    const custKey = r.customerId ? `cust_${r.customerId}` : '';
+    if (callKey && dismissed.has(callKey)) return false;
+    if (phoneRaw && dismissed.has(phoneRaw)) return false;
+    if (phoneDigits && dismissed.has(phoneDigits)) return false;
+    if (leadKey && dismissed.has(leadKey)) return false;
+    if (custKey && dismissed.has(custKey)) return false;
+    return true;
+  });
+}
+
+export async function getIrmOtherRecords(params?: { module?: string; search?: string }): Promise<IrmOtherRecord[]> {
+  try {
+    const res: ApiResponse<IrmOtherRecord[]> = await apiClient.get('/irm/other', params);
+    if (res.success && res.data) return filterOtherRecords(res.data);
+  } catch {
+    try {
+      const fallbackRes: ApiResponse<IrmOtherRecord[]> = await apiClient.get('/sales-executive/calls/other', params);
+      if (fallbackRes.success && fallbackRes.data) return filterOtherRecords(fallbackRes.data);
+    } catch {}
+  }
+  return [];
+}
+
+export async function moveIrmOtherRecord(
+  recordOrCallId: number | MoveIrmOtherRecordOptions,
+  targetModuleParam?: string
+): Promise<boolean> {
+  const opts: MoveIrmOtherRecordOptions =
+    typeof recordOrCallId === 'number'
+      ? { callId: recordOrCallId, targetModule: targetModuleParam }
+      : recordOrCallId;
+
+  const callId = opts.callId;
+  const targetModule = (opts.targetModule || 'kyc').toLowerCase();
+  const phoneDigits = (opts.contactPhone || '').replace(/\D/g, '').slice(-10);
+
+  // 1. Immediately persist dismissal & moved state into localStorage
+  try {
+    const raw = localStorage.getItem('nexus_dismissed_other_records');
+    const dismissedList: string[] = raw ? JSON.parse(raw) : [];
+    const addKey = (k?: string | number) => {
+      if (!k) return;
+      const s = String(k).trim();
+      if (s && !dismissedList.includes(s)) dismissedList.push(s);
+    };
+    addKey(callId);
+    addKey(opts.contactPhone);
+    addKey(phoneDigits);
+    if (opts.leadId) addKey(`lead_${opts.leadId}`);
+    if (opts.customerId) addKey(`cust_${opts.customerId}`);
+    localStorage.setItem('nexus_dismissed_other_records', JSON.stringify(dismissedList));
+
+    const movedRaw = localStorage.getItem('nexus_moved_other_records');
+    const movedList: string[] = movedRaw ? JSON.parse(movedRaw) : [];
+    const addMovedKey = (k?: string | number) => {
+      if (!k) return;
+      const s = String(k).trim();
+      if (s && !movedList.includes(s)) movedList.push(s);
+    };
+    addMovedKey(callId);
+    addMovedKey(opts.contactPhone);
+    addMovedKey(phoneDigits);
+    if (opts.leadId) addMovedKey(`lead_${opts.leadId}`);
+    if (opts.customerId) addMovedKey(`cust_${opts.customerId}`);
+    localStorage.setItem('nexus_moved_other_records', JSON.stringify(movedList));
+  } catch {}
+
+  // 2. Advance call record on the backend so backend otherMatcher clears
+  if (opts.contactName || opts.contactPhone) {
+    try {
+      await logCall({
+        id: `call-move-${Date.now()}`,
+        contactName: opts.contactName || 'Contact',
+        contactPhone: opts.contactPhone || '',
+        direction: 'Outbound',
+        duration: 0,
+        disposition: (targetModule === 'my_leads' || targetModule === 'follow_up') ? 'Follow-up Required' : 'Contacted',
+        callModule: (targetModule as any) || 'kyc',
+        leadId: opts.leadId ? String(opts.leadId) : undefined,
+        customerId: opts.customerId ? String(opts.customerId) : undefined,
+        notes: `[Moved back to ${targetModule.toUpperCase()} from Other Contacts by ${opts.actorName || 'IRM'}]`,
+        timestamp: new Date().toISOString(),
+      } as any);
+    } catch (err) {
+      console.warn('[moveIrmOtherRecord] Failed to advance call cluster on backend:', err);
+    }
+  }
+
+  // 3. Attempt direct move route on backend (if backend is recompiled)
+  try {
+    const moveUrl = `/irm/other/${callId}/move${targetModule ? `?targetModule=${encodeURIComponent(targetModule)}` : ''}`;
+    await apiClient.post(moveUrl);
+  } catch {
+    try {
+      const fallbackUrl = `/sales-executive/calls/other/${callId}/move${targetModule ? `?targetModule=${encodeURIComponent(targetModule)}` : ''}`;
+      await apiClient.post(fallbackUrl);
+    } catch {}
+  }
+
+  // 4. Restore/create entity in target module
+  try {
+    if (targetModule === 'kyc') {
+      let allDeals: Deal[] = [];
+      try {
+        allDeals = await getDeals(opts.tenantId);
+      } catch {
+        allDeals = storageService.getDeals(opts.tenantId) || [];
+      }
+      const matchDeal = allDeals.find(d =>
+        (phoneDigits && d.phone && d.phone.replace(/\D/g, '').slice(-10) === phoneDigits) ||
+        (opts.customerId && String(d.customerId) === String(opts.customerId)) ||
+        (opts.contactName && d.customerName && d.customerName.toLowerCase().trim() === opts.contactName.toLowerCase().trim())
+      );
+
+      const kycDeal: Deal = {
+        id: matchDeal?.id || `deal-kyc-${Date.now()}`,
+        companyId: opts.tenantId || 't-ghl-01',
+        title: matchDeal?.title || `${opts.contactName || 'Investor'} - KYC Verification`,
+        customerId: opts.customerId ? String(opts.customerId) : (matchDeal?.customerId || (opts.leadId ? `lead-${opts.leadId}` : `c-${Date.now()}`)),
+        customerName: opts.contactName || matchDeal?.customerName || '',
+        phone: opts.contactPhone || matchDeal?.phone || '',
+        email: opts.contactEmail && opts.contactEmail !== '—' ? opts.contactEmail : matchDeal?.email,
+        location: opts.contactLocation && opts.contactLocation !== '—' ? opts.contactLocation : matchDeal?.location,
+        stage: 'qualified_investor',
+        stageEnteredAt: new Date().toISOString(),
+        value: matchDeal?.value ?? 0,
+        expectedCloseDate: matchDeal?.expectedCloseDate || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+        assignedAgentId: String(opts.assignedAgentId || matchDeal?.assignedAgentId || '5'),
+        assignedAgentName: opts.assignedAgentName || matchDeal?.assignedAgentName || 'Dhinakaran',
+        notes: `Restored to KYC verification from Other Contacts. Reason: ${opts.reason || 'None'}.`,
+        priority: matchDeal?.priority || 'High',
+        createdAt: matchDeal?.createdAt || new Date().toISOString().slice(0, 10),
+      };
+
+      try {
+        await saveDeal(kycDeal);
+      } catch {
+        storageService.saveDeal(kycDeal);
+      }
+      storageService.saveDeal(kycDeal);
+
+      if (opts.leadId) {
+        try {
+          const leads = await getLeads(opts.tenantId).catch(() => []);
+          const matchLead = leads.find(l => String(l.id) === String(opts.leadId));
+          if (matchLead) {
+            const updatedLead: Lead = {
+              ...matchLead,
+              status: 'Contacted',
+              assignedIrmId: opts.assignedAgentId ? String(opts.assignedAgentId) : matchLead.assignedIrmId || '5',
+              assignedIrmName: opts.assignedAgentName || matchLead.assignedIrmName || 'Dhinakaran',
+            };
+            await saveLead(updatedLead).catch(() => storageService.saveLead(updatedLead));
+            storageService.saveLead(updatedLead);
+          }
+        } catch {}
+      }
+    } else if (targetModule === 'follow_up') {
+      let allFollowups: Followup[] = [];
+      try {
+        allFollowups = await getFollowups(opts.tenantId);
+      } catch {
+        allFollowups = storageService.getFollowups(opts.tenantId) || [];
+      }
+      const matchFollowup = allFollowups.find(f =>
+        (phoneDigits && f.contactPhone && f.contactPhone.replace(/\D/g, '').slice(-10) === phoneDigits) ||
+        (opts.contactName && f.contactName && f.contactName.toLowerCase().trim() === opts.contactName.toLowerCase().trim())
+      );
+      const targetFollowup: Followup = {
+        id: matchFollowup?.id || `f-${Date.now()}`,
+        companyId: opts.tenantId || 't-ghl-01',
+        contactId: opts.leadId ? String(opts.leadId) : (matchFollowup?.contactId || (opts.customerId ? String(opts.customerId) : `c-${Date.now()}`)),
+        contactName: opts.contactName || matchFollowup?.contactName || '',
+        contactPhone: opts.contactPhone || matchFollowup?.contactPhone || '',
+        contactEmail: opts.contactEmail && opts.contactEmail !== '—' ? opts.contactEmail : matchFollowup?.contactEmail,
+        contactType: opts.customerId ? 'customer' : 'lead',
+        scheduledAt: matchFollowup?.scheduledAt || new Date().toISOString(),
+        scheduledDate: matchFollowup?.scheduledDate || new Date().toISOString().slice(0, 10),
+        scheduledTime: matchFollowup?.scheduledTime || '11:00',
+        status: 'Pending',
+        priority: matchFollowup?.priority || 'High',
+        notes: `Restored to Follow-up from Other Contacts. Reason: ${opts.reason || 'None'}.`,
+        assignedAgentName: opts.assignedAgentName || matchFollowup?.assignedAgentName || 'Dhinakaran',
+        assignedAgentId: opts.assignedAgentId ? String(opts.assignedAgentId) : matchFollowup?.assignedAgentId || '5',
+      };
+      try {
+        await saveFollowup(targetFollowup);
+      } catch {
+        storageService.saveFollowup(targetFollowup);
+      }
+      storageService.saveFollowup(targetFollowup);
+    } else if (targetModule === 'my_leads') {
+      if (opts.leadId) {
+        try {
+          const leads = await getLeads(opts.tenantId).catch(() => []);
+          const matchLead = leads.find(l => String(l.id) === String(opts.leadId));
+          if (matchLead) {
+            const updatedLead: Lead = {
+              ...matchLead,
+              status: 'Contacted',
+              assignedIrmId: opts.assignedAgentId ? String(opts.assignedAgentId) : matchLead.assignedIrmId || '5',
+              assignedIrmName: opts.assignedAgentName || matchLead.assignedIrmName || 'Dhinakaran',
+            };
+            await saveLead(updatedLead).catch(() => storageService.saveLead(updatedLead));
+            storageService.saveLead(updatedLead);
+          }
+        } catch {}
+      }
+    } else if (targetModule === 'opportunities') {
+      let allDeals: Deal[] = [];
+      try {
+        allDeals = await getDeals(opts.tenantId);
+      } catch {
+        allDeals = storageService.getDeals(opts.tenantId) || [];
+      }
+      const matchDeal = allDeals.find(d =>
+        (phoneDigits && d.phone && d.phone.replace(/\D/g, '').slice(-10) === phoneDigits) ||
+        (opts.contactName && d.customerName && d.customerName.toLowerCase().trim() === opts.contactName.toLowerCase().trim())
+      );
+      const oppDeal: Deal = {
+        id: matchDeal?.id || `deal-opp-${Date.now()}`,
+        companyId: opts.tenantId || 't-ghl-01',
+        title: matchDeal?.title || `${opts.contactName || 'Lead'} - Investment Opportunity`,
+        customerId: opts.customerId ? String(opts.customerId) : (matchDeal?.customerId || (opts.leadId ? `lead-${opts.leadId}` : `c-${Date.now()}`)),
+        customerName: opts.contactName || matchDeal?.customerName || '',
+        phone: opts.contactPhone || matchDeal?.phone || '',
+        email: opts.contactEmail && opts.contactEmail !== '—' ? opts.contactEmail : matchDeal?.email,
+        location: opts.contactLocation && opts.contactLocation !== '—' ? opts.contactLocation : matchDeal?.location,
+        stage: 'investment_opportunity',
+        stageEnteredAt: new Date().toISOString(),
+        value: matchDeal?.value ?? 5000000,
+        expectedCloseDate: matchDeal?.expectedCloseDate || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+        assignedAgentId: String(opts.assignedAgentId || matchDeal?.assignedAgentId || '5'),
+        assignedAgentName: opts.assignedAgentName || matchDeal?.assignedAgentName || 'Dhinakaran',
+        notes: `Restored to Opportunities from Other Contacts. Reason: ${opts.reason || 'None'}.`,
+        priority: matchDeal?.priority || 'High',
+        createdAt: matchDeal?.createdAt || new Date().toISOString().slice(0, 10),
+      };
+      try {
+        await saveDeal(oppDeal);
+      } catch {
+        storageService.saveDeal(oppDeal);
+      }
+      storageService.saveDeal(oppDeal);
+    } else if (targetModule === 'investor_360') {
+      let allCust: Customer[] = [];
+      try {
+        allCust = await getCustomers(opts.tenantId);
+      } catch {
+        allCust = storageService.getCustomers(opts.tenantId) || [];
+      }
+      const matchCust = allCust.find(c =>
+        (phoneDigits && c.phone && c.phone.replace(/\D/g, '').slice(-10) === phoneDigits) ||
+        (opts.contactName && c.name && c.name.toLowerCase().trim() === opts.contactName.toLowerCase().trim())
+      );
+      if (!matchCust && opts.contactName) {
+        const newCust: Customer = {
+          id: opts.customerId ? String(opts.customerId) : `cust-${Date.now()}`,
+          companyId: opts.tenantId || 't-ghl-01',
+          name: opts.contactName,
+          phone: opts.contactPhone || '',
+          email: opts.contactEmail || '',
+          status: 'Active',
+          assignedAgentId: String(opts.assignedAgentId || '5'),
+          assignedAgentName: opts.assignedAgentName || 'Dhinakaran',
+          location: opts.contactLocation || 'India',
+          lastContacted: new Date().toISOString(),
+          openDealsCount: 0,
+          totalValue: 0,
+          createdAt: new Date().toISOString(),
+          notes: '',
+          customFields: {},
+        };
+        try {
+          await saveCustomer(newCust);
+        } catch {
+          storageService.saveCustomer(newCust);
+        }
+        storageService.saveCustomer(newCust);
+      }
+    }
+  } catch (err) {
+    console.error('[moveIrmOtherRecord] Target entity restoration error:', err);
+  }
+
+  window.dispatchEvent(new Event('nexus_storage_updated'));
+  window.dispatchEvent(new Event('nexus_call_logged'));
+  return true;
+}
+
+export async function getIrmCallOutcomes(module?: string): Promise<Record<string, string[]>> {
+  try {
+    const res: ApiResponse<Record<string, string[]>> = await apiClient.get('/irm/call-outcomes', module ? { module } : undefined);
+    if (res.success && res.data) return res.data;
+  } catch {
+    try {
+      const fallbackRes: ApiResponse<Record<string, string[]>> = await apiClient.get('/sales-executive/calls/outcomes', module ? { module } : undefined);
+      if (fallbackRes.success && fallbackRes.data) return fallbackRes.data;
+    } catch {}
+  }
+  return {
+    my_leads: ['Follow-up Required', 'No Response', 'Call Back'],
+    follow_up: ['Follow-up Required', 'Other', 'No Response', 'Call Back', 'Ready for KYC'],
+    kyc: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    opportunities: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    investor_360: ['Contacted', 'Other', 'No Response', 'Call Back'],
+  };
+}
+
+export interface TransitionFollowupToKycOptions {
+  contactName: string;
+  contactPhone: string;
+  contactEmail?: string;
+  contactLocation?: string;
+  contactId?: string;
+  followupId?: string;
+  followupNotes?: string;
+  followupPriority?: 'Low' | 'Medium' | 'High';
+  investmentAmount?: number | string;
+  preferredAssetClass?: string;
+  investmentHorizon?: string;
+  isPrefConfirmed?: boolean;
+  assignedAgentId?: string;
+  assignedAgentName?: string;
+  tenantId?: string;
+  tenantName?: string;
+  actorName?: string;
+  actorEmail?: string;
+}
+
+export async function transitionFollowupToKyc(options: TransitionFollowupToKycOptions): Promise<void> {
+  const fDigits = (options.contactPhone || '').replace(/\D/g, '').slice(-10);
+  const resolvedContactId = options.contactId || (fDigits ? `contact-${fDigits}` : `contact-${Date.now()}`);
+
+  let allDeals: Deal[] = [];
+  try {
+    allDeals = await getDeals(options.tenantId);
+  } catch {
+    allDeals = storageService.getDeals(options.tenantId) || [];
+  }
+
+  const existingDeal = allDeals.find(d =>
+    (d.customerId && d.customerId === resolvedContactId) ||
+    (d.phone && fDigits && (d.phone || '').replace(/\D/g, '').slice(-10) === fDigits)
+  );
+
+  const numVal = options.investmentAmount
+    ? (typeof options.investmentAmount === 'number' ? options.investmentAmount : parseFloat(String(options.investmentAmount).replace(/,/g, '')) || 0)
+    : (existingDeal?.value ?? 0);
+
+  const kycDeal: Deal = {
+    id: existingDeal?.id || `deal-kyc-${Date.now()}`,
+    companyId: options.tenantId || 't-ghl-01',
+    title: `${options.contactName} - KYC Verification`,
+    customerId: resolvedContactId,
+    customerName: options.contactName,
+    phone: options.contactPhone,
+    email: options.contactEmail && options.contactEmail !== '—' ? options.contactEmail : undefined,
+    location: options.contactLocation && options.contactLocation !== '—' ? options.contactLocation : undefined,
+    stage: 'qualified_investor',
+    stageEnteredAt: new Date().toISOString(),
+    value: numVal,
+    expectedCloseDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+    assignedAgentId: options.assignedAgentId || '',
+    assignedAgentName: options.assignedAgentName || '',
+    notes: `Ready for KYC. Moved from Follow-ups by IRM (${options.actorName || ''}).`,
+    createdAt: existingDeal?.createdAt || new Date().toISOString().slice(0, 10),
+    priority: options.followupPriority || 'High',
+    ...(options.preferredAssetClass && options.isPrefConfirmed ? { preferredAssetClass: options.preferredAssetClass } : {}),
+    ...(options.investmentAmount ? { investmentRange: String(options.investmentAmount) } : {}),
+  };
+
+  await saveDeal(kycDeal);
+
+  if (options.followupId) {
+    try {
+      const followups = await getFollowups(options.tenantId);
+      const match = followups.find(f => f.id === options.followupId);
+      if (match) {
+        await saveFollowup({
+          ...match,
+          status: 'Completed',
+          notes: `${match.notes ? match.notes + ' | ' : ''}Ready for KYC: Moved to KYC Module by IRM`,
+        });
+      }
+    } catch (err) {
+      console.error('[transitionFollowupToKyc] Failed to mark follow-up completed:', err);
+    }
+  }
+
+  try {
+    const leads = await getLeads(options.tenantId).catch(() => []);
+    const localLeads = storageService.getLeads(options.tenantId) || [];
+    const pool = [...leads, ...localLeads];
+    const matchingLead = pool.find(l => {
+      if (l.id === options.contactId) return true;
+      const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+      return Boolean(lDigits && fDigits && lDigits === fDigits);
+    });
+
+    const leadToSave: Lead = matchingLead ? {
+      ...matchingLead,
+      status: 'Qualified',
+      customFields: {
+        ...(matchingLead.customFields || {}),
+        ...(options.preferredAssetClass && options.isPrefConfirmed ? { preferredAssetClass: options.preferredAssetClass } : {}),
+        ...(options.investmentHorizon && options.isPrefConfirmed ? { horizon: options.investmentHorizon, investmentHorizon: options.investmentHorizon } : {}),
+        ...(numVal > 0 ? { investmentAmount: String(numVal) } : {}),
+        irmPreferencesConfirmed: Boolean(options.isPrefConfirmed),
+        movedToKycAt: new Date().toISOString(),
+      },
+    } : {
+      id: options.contactId,
+      companyId: options.tenantId || '1',
+      name: options.contactName,
+      phone: options.contactPhone,
+      email: options.contactEmail || '',
+      location: options.contactLocation || '',
+      status: 'Qualified',
+      priority: options.followupPriority || 'Medium',
+      createdAt: new Date().toISOString(),
+      customFields: {
+        ...(options.preferredAssetClass && options.isPrefConfirmed ? { preferredAssetClass: options.preferredAssetClass } : {}),
+        ...(options.investmentHorizon && options.isPrefConfirmed ? { horizon: options.investmentHorizon, investmentHorizon: options.investmentHorizon } : {}),
+        ...(numVal > 0 ? { investmentAmount: String(numVal) } : {}),
+        irmPreferencesConfirmed: Boolean(options.isPrefConfirmed),
+        movedToKycAt: new Date().toISOString(),
+      },
+    } as unknown as Lead;
+
+    await saveLead(leadToSave);
+  } catch (err) {
+    console.error('[transitionFollowupToKyc] Failed to update lead:', err);
+  }
+
+  storageService.addAuditLog({
+    id: `aud-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    actorName: options.actorName || 'IRM',
+    actorEmail: options.actorEmail || 'irm@ghl.com',
+    action: 'DEAL_CREATED_KYC',
+    entityType: 'Deal',
+    entityId: kycDeal.id,
+    companyId: options.tenantId || 't-ghl-01',
+    companyName: options.tenantName || 'GHL India Ventures',
+    details: `Moved ${options.contactName} to KYC verification module`,
+  });
+
+  window.dispatchEvent(new Event('nexus_storage_updated'));
+}
+
+export interface SendCustomerMessagePayload {
+  recipientEmail?: string;
+  recipientPhone?: string;
+  recipientName: string;
+  message: string;
+  channel?: string;
+  leadId?: number;
+  customerId?: number;
+  dealId?: number;
+}
+
+export interface SendCustomerMessageResult {
+  success: boolean;
+  delivered: boolean;
+  channel: string;
+  recipient?: string;
+  message: string;
+  deliveryResult: string;
+  sentAt: string;
+  sentByName: string;
+  sentByRole: string;
+}
+
+export async function sendCustomerMessage(
+  payload: SendCustomerMessagePayload
+): Promise<SendCustomerMessageResult> {
+  const res: ApiResponse<SendCustomerMessageResult> = await apiClient.post(
+    '/sales-executive/calls/send-customer-message',
+    payload
+  );
+  if (res && res.data) {
+    return res.data;
+  }
+  return {
+    success: false,
+    delivered: false,
+    channel: payload.channel || 'email',
+    recipient: payload.recipientEmail || payload.recipientPhone,
+    message: payload.message,
+    deliveryResult: res?.message || 'Failed to dispatch customer message',
+    sentAt: new Date().toISOString(),
+    sentByName: '',
+    sentByRole: '',
+  };
+}
+
+export interface MessagingChannelStatus {
+  channel: 'email' | 'sms' | 'whatsapp';
+  name: string;
+  configured: boolean;
+  provider: string;
+  statusMessage: string;
+}
+
+export async function getMessagingChannels(): Promise<MessagingChannelStatus[]> {
+  try {
+    const res: ApiResponse<MessagingChannelStatus[]> = await apiClient.get(
+      '/sales-executive/calls/messaging-channels'
+    );
+    if (res && res.data) {
+      return res.data;
+    }
+  } catch (err) {
+    console.error('Failed to fetch messaging channels from backend', err);
+  }
+  return [
+    { channel: 'email', name: 'Email', configured: true, provider: 'SMTP (smtp.gmail.com)', statusMessage: 'Active and configured via Gmail SMTP.' },
+    { channel: 'sms', name: 'SMS', configured: false, provider: 'None', statusMessage: 'No SMS gateway provider (e.g., Twilio / AWS SNS) is configured on the backend server.' },
+    { channel: 'whatsapp', name: 'WhatsApp', configured: false, provider: 'None', statusMessage: 'No WhatsApp Business API provider is configured on the backend server.' },
+  ];
+}
+
+export async function getCallById(id: string | number): Promise<CallRecord> {
+  const numericId = typeof id === 'string' ? parseInt(id.replace(/\D/g, ''), 10) : id;
+  const res: ApiResponse<any> = await apiClient.get(`/sales-executive/calls/${numericId || id}`);
+  if (!res.success || !res.data) throw new Error(res.message || 'Call record not found');
+  return mapCallRecord(res.data);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -849,13 +1857,16 @@ export async function saveConsultation(consultation: Consultation): Promise<Cons
   const isNew =
     !consultation.id ||
     consultation.id.startsWith('cons-') ||
-    consultation.id.startsWith('co-');
+    consultation.id.startsWith('co-') ||
+    consultation.id.startsWith('cns-');
 
   const payload = {
     investorId: consultation.investorId,
     investorName: consultation.investorName,
     investorPhone: consultation.investorPhone,
     scheduledAt: consultation.scheduledAt,
+    consultantId: nid(consultation.consultantId) || undefined,
+    consultantName: consultation.consultantName || undefined,
     agenda: consultation.agenda,
     outcomeNotes: consultation.outcomeNotes,
     referredByAgentName: consultation.referredByAgentName,
@@ -886,3 +1897,83 @@ export async function saveConsultation(consultation: Consultation): Promise<Cons
   }
 }
 
+export interface IrmPipelineCardData {
+  id: number;
+  companyId: number;
+  investorId: number;
+  assignedIrmId: number;
+  assignedIrmName: string;
+  investorName: string;
+  investorPhone: string;
+  investorEmail: string;
+  stageId: string;
+  stageEnteredAt: string;
+  lastActionSnippet?: string;
+  lastActivityDate?: string;
+  priority: string;
+  value?: number;
+  investmentAmount?: string;
+  preferredAssetClass?: string;
+  activityLogsJson?: string;
+  createdAt: string;
+}
+
+export interface IrmPipelineBoardData {
+  stages: {
+    id: string;
+    name: string;
+    color: string;
+    cards: IrmPipelineCardData[];
+  }[];
+}
+
+export async function getIrmPipelineBoard(irmId?: number): Promise<IrmPipelineBoardData | null> {
+  try {
+    const res = await apiClient.get<ApiResponse<IrmPipelineBoardData>>(
+      `/irm/pipeline${irmId ? `?irmId=${irmId}` : ''}`
+    );
+    if (res.success && res.data) {
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('[ghlApiService] getIrmPipelineBoard failed:', err);
+  }
+  return null;
+}
+
+export async function moveIrmPipelineCard(cardId: number, targetStageId: string): Promise<boolean> {
+  try {
+    const res = await apiClient.put<ApiResponse<any>>(`/irm/pipeline/${cardId}/move`, {
+      targetStageId,
+    });
+    return !!res.success;
+  } catch (err) {
+    console.warn('[ghlApiService] moveIrmPipelineCard failed:', err);
+    return false;
+  }
+}
+
+export async function getCompanyIrms(companyId?: string): Promise<IrmProfile[]> {
+  try {
+    const res = await apiClient.get<ApiResponse<any[]>>('/sales-executive/consultations/irms');
+    if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+      const mapped: IrmProfile[] = res.data.map(u => ({
+        id: String(u.id),
+        name: u.name,
+        email: u.email || '',
+        phone: u.phone || '',
+        status: (u.status === 'Busy' ? 'Busy' : 'Available') as 'Available' | 'Busy',
+        experience: u.specialization || 'Private Wealth & Advisory',
+        experienceYears: 5,
+        experienceLevel: 'Experienced' as const,
+        performance: 95,
+      }));
+      storageService.setIrms(mapped);
+      return mapped;
+    }
+    return storageService.getIrms(companyId);
+  } catch (err) {
+    console.warn('[ghlApiService] getCompanyIrms failed:', err);
+    return storageService.getIrms(companyId);
+  }
+}

@@ -14,7 +14,12 @@ public class Consultation
     public User? Consultant { get; set; }
     public string ConsultantName { get; set; } = string.Empty;
 
-    public int InvestorId { get; set; }
+    public int? HandoverId { get; set; }
+    public WorkHandover? Handover { get; set; }
+    public int? OriginalOwnerId { get; set; }
+    public User? OriginalOwner { get; set; }
+
+    public int? InvestorId { get; set; }
     public Investor? Investor { get; set; }
 
     public string InvestorName { get; set; } = string.Empty;

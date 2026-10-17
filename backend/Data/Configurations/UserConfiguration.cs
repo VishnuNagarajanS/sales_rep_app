@@ -41,6 +41,21 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.CreatedAt)
             .HasDefaultValueSql("NOW()");
 
+        builder.Property(u => u.IsProtected)
+            .HasDefaultValue(false);
+
+        builder.Property(u => u.MustChangePassword)
+            .HasDefaultValue(false);
+
+        builder.Property(u => u.IsTwoFactorEnabled)
+            .HasDefaultValue(false);
+
+        builder.Property(u => u.TwoFactorSecret)
+            .HasMaxLength(128);
+
+        builder.Property(u => u.TwoFactorRecoveryCodesJson)
+            .HasColumnType("text");
+
         // Relationships
         builder.HasOne(u => u.Role)
             .WithMany(r => r.Users)
@@ -51,5 +66,8 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .WithMany(t => t.Users)
             .HasForeignKey(u => u.CompanyId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(u => u.CompanyId);
+        builder.HasIndex(u => u.RoleId);
     }
 }

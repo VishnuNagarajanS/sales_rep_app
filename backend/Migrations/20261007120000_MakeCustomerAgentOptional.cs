@@ -11,7 +11,13 @@ public sealed class MakeCustomerAgentOptional : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.Sql("ALTER TABLE customers ALTER COLUMN \"AssignedAgentId\" DROP NOT NULL;");
+        migrationBuilder.Sql(@"
+            DO $$
+            BEGIN
+                ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""AssignedAgentId"" integer NULL;
+                ALTER TABLE customers ALTER COLUMN ""AssignedAgentId"" DROP NOT NULL;
+            END $$;
+        ");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)

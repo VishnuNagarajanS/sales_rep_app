@@ -8,4 +8,5 @@ public interface ICurrentUserService
     string? Email { get; }
     string? Name { get; }
     bool IsAuthenticated { get; }
+    backend.Models.Entities.User? ValidatedUser { get; }
 }

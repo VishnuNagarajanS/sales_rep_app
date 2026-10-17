@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Calendar, Plus, CheckCircle2, Phone, RefreshCw, User, Building2, Lock, Edit } from 'lucide-react';
 import { SiteVisit, Lead, Customer } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
+import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
 import { jaminApiService } from '../../services/jaminApiService';
@@ -35,6 +36,10 @@ export const SiteVisitsPage: React.FC = () => {
   const [loadError, setLoadError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+
+  // Filters for Status and Visitor Source
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [visitorFilter, setVisitorFilter] = useState('All');
 
   // Unified Manage Site Visit modal state (Status change, Reschedule, Complete, Cancel)
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
@@ -96,7 +101,9 @@ export const SiteVisitsPage: React.FC = () => {
 
       if (projs) setProjects(projs);
       if (allPlots) setPlots(allPlots);
-      if (agentList) setAgents(agentList);
+      if (agentList && agentList.length > 0) {
+        setAgents(agentList);
+      }
 
       const normPhone = (p?: string) => (p || '').replace(/\D/g, '').slice(-10);
 
@@ -324,7 +331,7 @@ export const SiteVisitsPage: React.FC = () => {
     setManagingVisit(sv);
 
     let parsedDate = '';
-    let parsedSlot = TIME_SLOTS[0];
+    let parsedSlot: string = TIME_SLOTS[0];
 
     if (sv.scheduledAt) {
       const parts = sv.scheduledAt.split(/[·•]/).map(s => s.trim());
@@ -626,8 +633,8 @@ export const SiteVisitsPage: React.FC = () => {
       icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
       onClick: sv =>
         initiateCall(
-          sv.customerName,
-          sv.customerPhone,
+          sv.customerName || sv.leadName || 'Client',
+          sv.customerPhone || sv.leadPhone || '',
           sv.contactType === 'customer' || sv.customerId ? 'customer' : 'lead',
           sv.customerId ? String(sv.customerId) : sv.leadId ? String(sv.leadId) : undefined
         ),
@@ -644,6 +651,20 @@ export const SiteVisitsPage: React.FC = () => {
       onClick: sv => handleOpenManageModal(sv),
     },
   ];
+
+  const filteredSiteVisits = useMemo(() => {
+    return siteVisits.filter(sv => {
+      if (statusFilter !== 'All') {
+        const s = (sv.status || '').toLowerCase().trim();
+        if (s !== statusFilter.toLowerCase().trim()) return false;
+      }
+      if (visitorFilter !== 'All') {
+        const ct = (sv.contactType || (sv.customerId ? 'customer' : 'lead')).toLowerCase().trim();
+        if (ct !== visitorFilter.toLowerCase().trim()) return false;
+      }
+      return true;
+    });
+  }, [siteVisits, statusFilter, visitorFilter]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -697,11 +718,47 @@ export const SiteVisitsPage: React.FC = () => {
 
       <DataTable
         columns={columns}
-        data={siteVisits}
+        data={filteredSiteVisits}
         loading={isLoading}
         keyExtractor={sv => sv.id}
         rowActions={rowActions}
         searchPlaceholder="Search visits by customer, project, or plot..."
+        filtersNode={
+          <FilterBar
+            filters={[
+              {
+                key: 'status',
+                label: 'Status',
+                allLabel: 'All Visit Statuses',
+                value: statusFilter,
+                onChange: setStatusFilter,
+                options: [
+                  { value: 'Scheduled', label: 'Scheduled' },
+                  { value: 'Completed', label: 'Completed' },
+                  { value: 'Rescheduled', label: 'Rescheduled' },
+                  { value: 'Cancelled', label: 'Cancelled' },
+                  { value: 'Pending', label: 'Pending' },
+                  { value: 'No-show', label: 'No-show' },
+                ],
+              },
+              {
+                key: 'visitor',
+                label: 'Visitor Source',
+                allLabel: 'All Visitors',
+                value: visitorFilter,
+                onChange: setVisitorFilter,
+                options: [
+                  { value: 'lead', label: 'Leads' },
+                  { value: 'customer', label: 'Customers' },
+                ],
+              },
+            ]}
+            onClearAll={() => {
+              setStatusFilter('All');
+              setVisitorFilter('All');
+            }}
+          />
+        }
       />
 
       {/* ── Schedule Visit Modal ──────────────────────────────────────────── */}
@@ -746,10 +803,12 @@ export const SiteVisitsPage: React.FC = () => {
           {/* If Lead: Display Leads Dropdown */}
           {visitorType === 'lead' && (
             <div className="form-group">
-              <label className="form-label">
+              <label htmlFor="sitevisit-lead-select" className="form-label">
                 Select Lead * <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({leads.length} available)</span>
               </label>
               <select
+                id="sitevisit-lead-select"
+                name="leadId"
                 className="form-select"
                 required
                 value={selectedLeadId}
@@ -851,13 +910,15 @@ export const SiteVisitsPage: React.FC = () => {
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">
+              <label htmlFor="sitevisit-plot-number" className="form-label">
                 Plot{' '}
                 <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
                   (optional)
                 </span>
               </label>
               <select
+                id="sitevisit-plot-number"
+                name="plotNumber"
                 className="form-select"
                 value={selectedPlotId}
                 onChange={e => setSelectedPlotId(e.target.value)}
@@ -931,8 +992,10 @@ export const SiteVisitsPage: React.FC = () => {
 
           {/* Notes */}
           <div className="form-group">
-            <label className="form-label">Visit Notes / Requirements</label>
+            <label htmlFor="sitevisit-notes" className="form-label">Visit Notes / Requirements</label>
             <textarea
+              id="sitevisit-notes"
+              name="notes"
               className="form-textarea"
               rows={2}
               value={notes}

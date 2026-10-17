@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Building2,
   Plus,
@@ -26,8 +26,10 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
+import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import { Tenant, User, SubscriptionPackage } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
+import { storageService } from '../../../services/storageService';
 import { FEATURES } from '../../../constants/features';
 import { SYSTEM_ROLES } from '../../../constants/roles';
 import { Modal } from '../../../components/common/Modal';
@@ -94,29 +96,223 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('+91 98450 ');
   const [newUserRole, setNewUserRole] = useState<'company_admin'>('company_admin');
+  const [isSavingDrawer, setIsSavingDrawer] = useState(false);
+  const [isDeployingWizard, setIsDeployingWizard] = useState(false);
+  const [isActionInProgress, setIsActionInProgress] = useState(false);
+  const [isAddingUser, setIsAddingUser] = useState(false);
 
-  const loadData = () => {
-    const allTenants = superAdminService.getTenants();
-    setTenants(allTenants);
-    setPackages(superAdminService.getPackages());
+  // Unsaved changes check
+  const isWizardDirty = isWizardOpen && (wizardName.trim() !== '' || wizardSlug.trim() !== '' || wizardAdminEmail.trim() !== '');
+  const isDrawerDirty = isDetailDrawerOpen && !!drawerTenantEdit && !!selectedTenant && (
+    drawerTenantEdit.name !== selectedTenant.name ||
+    drawerTenantEdit.industry !== selectedTenant.industry ||
+    drawerTenantEdit.tagline !== selectedTenant.tagline ||
+    drawerTenantEdit.brandColor !== selectedTenant.brandColor ||
+    drawerTenantEdit.timezone !== selectedTenant.timezone ||
+    drawerTenantEdit.currency !== selectedTenant.currency ||
+    drawerTenantEdit.businessHours !== selectedTenant.businessHours ||
+    drawerTenantEdit.subscriptionPlan !== selectedTenant.subscriptionPlan ||
+    (drawerTenantEdit.phone || '') !== (selectedTenant.phone || '') ||
+    (drawerTenantEdit.defaultRoutingStrategy || '') !== (selectedTenant.defaultRoutingStrategy || '') ||
+    JSON.stringify(drawerTenantEdit.enabledFeatures || []) !== JSON.stringify(selectedTenant.enabledFeatures || [])
+  );
+  const isAddUserDirty = isAddUserModalOpen && (newUserName.trim() !== '' || newUserEmail.trim() !== '');
 
-    if (selectedTenantId) {
-      const match = allTenants.find(t => t.id === selectedTenantId || t.slug === selectedTenantId);
-      if (match) {
-        openTenantDrawer(match);
+  useUnsavedChanges(
+    isWizardDirty || isDrawerDirty || isAddUserDirty,
+    'You have unsaved changes in organization configuration. Are you sure you want to leave?',
+    'companies-page'
+  );
+
+  // ── Assigned Reps & Tenant Isolation ──────────────────────────────────────
+  const activeTenantKeyRef = useRef<string | null>(null);
+
+  const getTenantKey = (tenant: Tenant): string => {
+    return String(tenant.id || tenant.slug || tenant.name || '');
+  };
+
+  const isGhlTenant = (tenant?: Tenant | null): boolean => {
+    if (!tenant) return false;
+    const slug = (tenant.slug || '').toLowerCase().trim();
+    const id = String(tenant.id || '').toLowerCase().trim();
+    const name = (tenant.name || '').toLowerCase().trim();
+    return slug === 'ghl' || id === '1' || id === 't-ghl-01' || name.includes('ghl');
+  };
+
+  const isJaminTenant = (tenant?: Tenant | null): boolean => {
+    if (!tenant) return false;
+    const slug = (tenant.slug || '').toLowerCase().trim();
+    const id = String(tenant.id || '').toLowerCase().trim();
+    const name = (tenant.name || '').toLowerCase().trim();
+    return slug === 'jamin' || id === '2' || id === 't-jamin-02' || name.includes('jamin');
+  };
+
+  const isGhlUser = (u: User): boolean => {
+    if (!u || u.role?.code === 'super_admin') return false;
+    const cId = String(u.companyId || '').trim();
+    const cSlug = String(u.companySlug || '').toLowerCase().trim();
+    const cName = (u.companyName || '').toLowerCase().trim();
+
+    // Strictly isolate: never include Jamin users in GHL
+    if (cId === '2' || cId === 't-jamin-02' || cSlug === 'jamin' || cName.includes('jamin')) {
+      return false;
+    }
+
+    return cId === '1' || cId === 't-ghl-01' || cSlug === 'ghl' || cName.includes('ghl');
+  };
+
+  const isJaminUser = (u: User): boolean => {
+    if (!u || u.role?.code === 'super_admin') return false;
+    const cId = String(u.companyId || '').trim();
+    const cSlug = String(u.companySlug || '').toLowerCase().trim();
+    const cName = (u.companyName || '').toLowerCase().trim();
+
+    // Strictly isolate: never include GHL users in Jamin
+    if (cId === '1' || cId === 't-ghl-01' || cSlug === 'ghl' || cName.includes('ghl')) {
+      return false;
+    }
+
+    return cId === '2' || cId === 't-jamin-02' || cSlug === 'jamin' || cName.includes('jamin');
+  };
+
+  const filterUsersForTenant = (users: User[], tenant: Tenant): User[] => {
+    if (!users || !Array.isArray(users)) return [];
+
+    if (isGhlTenant(tenant)) {
+      return users.filter(isGhlUser);
+    }
+
+    if (isJaminTenant(tenant)) {
+      return users.filter(isJaminUser);
+    }
+
+    const tenantIdStr = String(tenant.id || '').trim();
+    const tenantSlugStr = String(tenant.slug || '').toLowerCase().trim();
+
+    return users.filter(u => {
+      if (!u || u.role?.code === 'super_admin') return false;
+      if (isGhlUser(u) || isJaminUser(u)) return false;
+      const userCompanyIdStr = String(u.companyId || '').trim();
+      const userSlugStr = String(u.companySlug || '').toLowerCase().trim();
+      return (
+        (userCompanyIdStr !== '' && userCompanyIdStr === tenantIdStr) ||
+        (userSlugStr !== '' && userSlugStr === tenantSlugStr)
+      );
+    });
+  };
+
+  const getCachedAssignedReps = (tenant: Tenant): User[] => {
+    const adminUsers = superAdminService.getUsers();
+    let storageUsers: User[] = [];
+    try {
+      storageUsers = storageService.getUsers(tenant.slug);
+    } catch {
+      // safe fallback
+    }
+
+    const map = new Map<string, User>();
+    [...adminUsers, ...storageUsers].forEach(u => {
+      if (u && u.id) {
+        map.set(String(u.id), u);
+      }
+    });
+
+    return filterUsersForTenant(Array.from(map.values()), tenant);
+  };
+
+  const loadTenantAssignedReps = async (tenant: Tenant) => {
+    const key = getTenantKey(tenant);
+    const targetCompanyFilter = isGhlTenant(tenant)
+      ? '1'
+      : isJaminTenant(tenant)
+        ? '2'
+        : String(tenant.id || tenant.slug);
+
+    try {
+      const apiUsers = await superAdminService.fetchUsersFromApi({ companyId: targetCompanyFilter });
+      if (activeTenantKeyRef.current === key) {
+        const isolated = filterUsersForTenant(apiUsers, tenant);
+        setDrawerUsers(isolated);
+      }
+    } catch (err) {
+      console.error('Failed to load assigned reps for tenant from API:', err);
+      if (activeTenantKeyRef.current === key) {
+        setDrawerUsers([]);
       }
     }
   };
 
+  const lastLoadedTenantKeyRef = useRef<string | null>(null);
+
+  const openTenantDrawer = (tenant: Tenant) => {
+    const key = getTenantKey(tenant);
+    activeTenantKeyRef.current = key;
+    lastLoadedTenantKeyRef.current = key;
+    setSelectedTenant(tenant);
+    setDrawerTenantEdit({ ...tenant });
+
+    // Instantly set tenant-isolated reps so previous tenant's users vanish immediately
+    const initialReps = getCachedAssignedReps(tenant);
+    setDrawerUsers(initialReps);
+
+    setDrawerTab('profile');
+    setIsDetailDrawerOpen(true);
+    setSaveSuccessMsg('');
+
+    // Fetch tenant-specific users from existing data source
+    loadTenantAssignedReps(tenant);
+  };
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadData = async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const [allTenants, allPackages] = await Promise.all([
+        superAdminService.fetchTenantsFromApi(),
+        superAdminService.fetchPackagesFromApi(),
+      ]);
+      setTenants(allTenants);
+      setPackages(allPackages);
+
+      if (selectedTenantId) {
+        const match = allTenants.find(t => t.id === selectedTenantId || t.slug === selectedTenantId);
+        if (match) {
+          openTenantDrawer(match);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error loading tenants from API:', err);
+      setLoadError(err?.message || 'Unable to connect to organizations server.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStorageUpdate = () => {
+    loadData();
+  };
+
   useEffect(() => {
     loadData();
-    window.addEventListener('nexus_admin_updated', loadData);
-    window.addEventListener('nexus_storage_updated', loadData);
+    window.addEventListener('nexus_admin_updated', handleStorageUpdate);
     return () => {
-      window.removeEventListener('nexus_admin_updated', loadData);
-      window.removeEventListener('nexus_storage_updated', loadData);
+      window.removeEventListener('nexus_admin_updated', handleStorageUpdate);
     };
   }, []);
+
+  useEffect(() => {
+    if (selectedTenant && isDetailDrawerOpen) {
+      const key = getTenantKey(selectedTenant);
+      if (lastLoadedTenantKeyRef.current !== key) {
+        lastLoadedTenantKeyRef.current = key;
+        activeTenantKeyRef.current = key;
+        loadTenantAssignedReps(selectedTenant);
+      }
+    }
+  }, [selectedTenant, isDetailDrawerOpen]);
 
   const handleViewAsCompany = (t: Tenant) => {
     sessionStorage.setItem('nexus_support_mode_active', 'true');
@@ -124,21 +320,21 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     switchPersona('company_admin', t.slug);
   };
 
-  const openTenantDrawer = (tenant: Tenant) => {
-    setSelectedTenant(tenant);
-    setDrawerTenantEdit({ ...tenant });
-    setDrawerUsers(superAdminService.getUsers({ companyId: tenant.id }));
-    setDrawerTab('profile');
-    setIsDetailDrawerOpen(true);
-    setSaveSuccessMsg('');
-  };
-
-  const handleSaveDrawerTenant = () => {
-    if (!drawerTenantEdit) return;
-    const updated = superAdminService.updateTenant(drawerTenantEdit);
-    setSelectedTenant(updated);
-    setSaveSuccessMsg('Organization profile and entitlements saved successfully.');
-    setTimeout(() => setSaveSuccessMsg(''), 3000);
+  const handleSaveDrawerTenant = async () => {
+    if (!drawerTenantEdit || isSavingDrawer) return;
+    setIsSavingDrawer(true);
+    try {
+      const updated = await superAdminService.updateTenantApi(drawerTenantEdit);
+      setSelectedTenant(updated);
+      setDrawerTenantEdit(updated);
+      setTenants(prev => prev.map(t => t.id === updated.id ? updated : t));
+      setSaveSuccessMsg('Organization profile and entitlements saved successfully.');
+      setTimeout(() => setSaveSuccessMsg(''), 3000);
+    } catch (err: any) {
+      alert(err.message || 'Failed to update organization settings.');
+    } finally {
+      setIsSavingDrawer(false);
+    }
   };
 
   const handleToggleFeatureInDrawer = (featureKey: string) => {
@@ -150,76 +346,99 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     setDrawerTenantEdit({ ...drawerTenantEdit, enabledFeatures: updatedFeatures });
   };
 
-  const handleToggleTenantStatus = (newStatus: 'Active' | 'Inactive' | 'Suspended') => {
-    if (!selectedTenant) return;
-    const updated = superAdminService.toggleTenantStatus(selectedTenant.id, newStatus);
-    if (updated) {
-      setSelectedTenant(updated);
-      setDrawerTenantEdit(updated);
-      setSaveSuccessMsg(`Organization status changed to ${newStatus}.`);
-      setTimeout(() => setSaveSuccessMsg(''), 3000);
+  const handleToggleTenantStatus = async (newStatus: 'Active' | 'Inactive' | 'Suspended') => {
+    if (!selectedTenant || isActionInProgress) return;
+    setIsActionInProgress(true);
+    try {
+      const updated = await superAdminService.toggleTenantStatusApi(selectedTenant.id, newStatus);
+      if (updated) {
+        setSelectedTenant(updated);
+        setDrawerTenantEdit(updated);
+        setTenants(prev => prev.map(t => t.id === updated.id ? updated : t));
+        setSaveSuccessMsg(`Organization status changed to ${newStatus}.`);
+        setTimeout(() => setSaveSuccessMsg(''), 3000);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to update organization status.');
+    } finally {
+      setIsActionInProgress(false);
     }
   };
 
-  const handleAddUserToCompany = () => {
-    if (!selectedTenant || !newUserName || !newUserEmail) return;
+  const handleAddUserToCompany = async () => {
+    if (!selectedTenant || !newUserName || !newUserEmail || isAddingUser) return;
+    setIsAddingUser(true);
     const roles = superAdminService.getRoles();
-    superAdminService.createUser({
-      name: newUserName,
-      email: newUserEmail,
-      phone: newUserPhone,
-      role: roles.company_admin || SYSTEM_ROLES.company_admin,
-      companyId: selectedTenant.id,
-      companySlug: selectedTenant.slug,
-      companyName: selectedTenant.name,
-      status: 'Active',
-      designation: 'Company Administrator',
-    });
-    setDrawerUsers(superAdminService.getUsers({ companyId: selectedTenant.id }));
-    setIsAddUserModalOpen(false);
-    setNewUserName('');
-    setNewUserEmail('');
+    try {
+      await superAdminService.createUserApi({
+        name: newUserName,
+        email: newUserEmail,
+        phone: newUserPhone,
+        role: roles.company_admin || SYSTEM_ROLES.company_admin,
+        companyId: selectedTenant.id,
+        companySlug: selectedTenant.slug,
+        companyName: selectedTenant.name,
+        status: 'Active',
+        designation: 'Company Administrator',
+      });
+      await loadTenantAssignedReps(selectedTenant);
+      setIsAddUserModalOpen(false);
+      setNewUserName('');
+      setNewUserEmail('');
+    } catch (err: any) {
+      alert(err.message || 'Failed to provision company administrator.');
+    } finally {
+      setIsAddingUser(false);
+    }
   };
 
   // Complete Onboarding Wizard
-  const handleDeployOrganization = () => {
-    if (!wizardName.trim()) return;
+  const handleDeployOrganization = async () => {
+    if (!wizardName.trim() || isDeployingWizard) return;
+    setIsDeployingWizard(true);
 
-    superAdminService.createTenant(
-      {
-        name: wizardName.trim(),
-        legalName: wizardLegalName.trim() || wizardName.trim(),
-        slug: wizardSlug.trim().toLowerCase() || wizardName.toLowerCase().replace(/[^a-z0-9]/g, ''),
-        industry: wizardIndustry,
-        tagline: wizardTagline || 'Enterprise Sales Fleet',
-        brandColor: wizardBrandColor,
-        timezone: wizardTimezone,
-        currency: wizardCurrency,
-        businessHours: wizardBusinessHours,
-        subscriptionPlan: wizardPlan,
-        enabledFeatures: wizardSelectedFeatures,
-        status: 'Active',
-      },
-      wizardAdminEmail
-        ? {
-          name: wizardAdminName || 'Primary Administrator',
-          email: wizardAdminEmail,
-          phone: wizardAdminPhone,
-        }
-        : undefined,
-      wizardDidNumber
-        ? {
-          phoneNumber: wizardDidNumber,
-          routingStrategy: wizardRoutingStrategy,
-        }
-        : undefined
-    );
+    try {
+      const newTenant = await superAdminService.createTenantApi(
+        {
+          name: wizardName.trim(),
+          legalName: wizardLegalName.trim() || wizardName.trim(),
+          slug: wizardSlug.trim().toLowerCase() || wizardName.toLowerCase().replace(/[^a-z0-9]/g, ''),
+          industry: wizardIndustry,
+          tagline: wizardTagline || 'Enterprise Sales Fleet',
+          brandColor: wizardBrandColor,
+          timezone: wizardTimezone,
+          currency: wizardCurrency,
+          businessHours: wizardBusinessHours,
+          subscriptionPlan: wizardPlan,
+          enabledFeatures: wizardSelectedFeatures,
+          status: 'Active',
+        },
+        wizardAdminEmail
+          ? {
+            name: wizardAdminName || 'Primary Administrator',
+            email: wizardAdminEmail,
+            phone: wizardAdminPhone,
+          }
+          : undefined,
+        wizardDidNumber
+          ? {
+            phoneNumber: wizardDidNumber,
+            routingStrategy: wizardRoutingStrategy,
+          }
+          : undefined
+      );
 
-    setIsWizardOpen(false);
-    setWizardStep(1);
-    // Reset fields
-    setWizardName('');
-    setWizardAdminEmail('');
+      setTenants(prev => [...prev, newTenant]);
+      setIsWizardOpen(false);
+      setWizardStep(1);
+      // Reset fields
+      setWizardName('');
+      setWizardAdminEmail('');
+    } catch (err: any) {
+      alert(err.message || 'Failed to deploy new organization.');
+    } finally {
+      setIsDeployingWizard(false);
+    }
   };
 
   // Filtered tenants
@@ -325,8 +544,11 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
         <div className="filter-search-box">
           <Search size={16} className="search-icon" />
           <input
+            id="companies-search-input"
+            name="searchQuery"
             type="text"
             className="companies-search-input"
+            aria-label="Search organizations by name, slug, or industry"
             placeholder="Search organizations by name, slug, or industry..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
@@ -364,7 +586,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
           {/* Industry Filter Dropdown */}
           <select
+            id="companies-filter-industry"
+            name="industryFilter"
             className="companies-select-input"
+            aria-label="Filter by industry"
             value={industryFilter}
             onChange={e => setIndustryFilter(e.target.value)}
           >
@@ -382,7 +607,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       {viewMode === 'grid' && (
         <div className="companies-cards-grid">
           {filteredTenants.map(t => {
-            const stats = superAdminService.getTenantStats(t.id);
+            const stats = superAdminService.getTenantStats(t);
             const isSuspended = t.status === 'Suspended';
             return (
               <div key={t.id} className={`card company-tenant-card ${isSuspended ? 'card-suspended' : ''}`}>
@@ -477,7 +702,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
             </thead>
             <tbody>
               {filteredTenants.map(t => {
-                const stats = superAdminService.getTenantStats(t.id);
+                const stats = superAdminService.getTenantStats(t);
                 return (
                   <tr key={t.id}>
                     <td>
@@ -580,8 +805,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                 <div className="form-grid-two">
                   <div className="form-group">
-                    <label className="form-label required">Organization Display Name</label>
+                    <label htmlFor="wizard-company-name" className="form-label required">Organization Display Name</label>
                     <input
+                      id="wizard-company-name"
+                      name="name"
                       type="text"
                       className="form-control"
                       placeholder="e.g. Paramount Asset Capital"
@@ -596,10 +823,12 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label required">Tenant URL Slug (Unique Namespace)</label>
+                    <label htmlFor="wizard-company-slug" className="form-label required">Tenant URL Slug (Unique Namespace)</label>
                     <div className="input-group-prefix">
                       <span className="prefix-tag">nexus.io/</span>
                       <input
+                        id="wizard-company-slug"
+                        name="slug"
                         type="text"
                         className="form-control"
                         placeholder="paramount"
@@ -610,8 +839,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Legal Registered Entity Name</label>
+                    <label htmlFor="wizard-company-legal-name" className="form-label">Legal Registered Entity Name</label>
                     <input
+                      id="wizard-company-legal-name"
+                      name="legalName"
                       type="text"
                       className="form-control"
                       placeholder="Paramount Capital Ventures Private Limited"
@@ -621,8 +852,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Domain Specialization / Industry</label>
+                    <label htmlFor="wizard-company-industry" className="form-label">Domain Specialization / Industry</label>
                     <select
+                      id="wizard-company-industry"
+                      name="industry"
                       className="form-control"
                       value={wizardIndustry}
                       onChange={e => setWizardIndustry(e.target.value)}
@@ -636,8 +869,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group span-2">
-                    <label className="form-label">Corporate Tagline / Subtitle</label>
+                    <label htmlFor="wizard-company-tagline" className="form-label">Corporate Tagline / Subtitle</label>
                     <input
+                      id="wizard-company-tagline"
+                      name="tagline"
                       type="text"
                       className="form-control"
                       placeholder="Premier commercial real estate syndication and wealth advisory"
@@ -647,17 +882,23 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Brand Color Accent</label>
+                    <label htmlFor="wizard-company-brand-color-text" className="form-label">Brand Color Accent</label>
                     <div className="color-picker-row">
                       <input
+                        id="wizard-company-brand-color"
+                        name="brandColorPicker"
                         type="color"
                         className="color-swatch-input"
+                        aria-label="Brand color picker"
                         value={wizardBrandColor}
                         onChange={e => setWizardBrandColor(e.target.value)}
                       />
                       <input
+                        id="wizard-company-brand-color-text"
+                        name="brandColor"
                         type="text"
                         className="form-control"
+                        aria-label="Brand color hex code"
                         value={wizardBrandColor}
                         onChange={e => setWizardBrandColor(e.target.value)}
                       />
@@ -677,8 +918,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                 <div className="form-grid-two">
                   <div className="form-group">
-                    <label className="form-label">Default System Timezone</label>
+                    <label htmlFor="wizard-company-timezone" className="form-label">Default System Timezone</label>
                     <select
+                      id="wizard-company-timezone"
+                      name="timezone"
                       className="form-control"
                       value={wizardTimezone}
                       onChange={e => setWizardTimezone(e.target.value)}
@@ -692,8 +935,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Base Currency & Denomination</label>
+                    <label htmlFor="wizard-company-currency" className="form-label">Base Currency & Denomination</label>
                     <select
+                      id="wizard-company-currency"
+                      name="currency"
                       className="form-control"
                       value={wizardCurrency}
                       onChange={e => setWizardCurrency(e.target.value)}
@@ -706,8 +951,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Sales Working Shift Hours</label>
+                    <label htmlFor="wizard-company-business-hours" className="form-label">Sales Working Shift Hours</label>
                     <input
+                      id="wizard-company-business-hours"
+                      name="businessHours"
                       type="text"
                       className="form-control"
                       value={wizardBusinessHours}
@@ -716,8 +963,13 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Inbound Lead SLA Escalation Timer</label>
-                    <select className="form-control" defaultValue="15">
+                    <label htmlFor="wizard-company-sla-timer" className="form-label">Inbound Lead SLA Escalation Timer</label>
+                    <select
+                      id="wizard-company-sla-timer"
+                      name="slaTimer"
+                      className="form-control"
+                      defaultValue="15"
+                    >
                       <option value="5">5 Minutes (Hyper-Fast SLA)</option>
                       <option value="15">15 Minutes (Standard VIP)</option>
                       <option value="30">30 Minutes (Standard Sales)</option>
@@ -768,8 +1020,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                         {cat.features.map(f => {
                           const isChecked = wizardSelectedFeatures.includes(f.key);
                           return (
-                            <label key={f.key} className="feature-check-label">
+                            <label key={f.key} htmlFor={`wizard-feature-${f.key}`} className="feature-check-label">
                               <input
+                                id={`wizard-feature-${f.key}`}
+                                name={`wizard_feature_${f.key}`}
                                 type="checkbox"
                                 checked={isChecked}
                                 onChange={() => {
@@ -801,42 +1055,55 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                 <div className="form-grid-two">
                   <div className="form-group">
-                    <label className="form-label required">Administrator Full Name</label>
+                    <label htmlFor="wizard-admin-name" className="form-label required">Administrator Full Name</label>
                     <input
+                      id="wizard-admin-name"
+                      name="adminName"
                       type="text"
                       className="form-control"
                       placeholder="e.g. Siddharth Menon"
+                      autoComplete="name"
                       value={wizardAdminName}
                       onChange={e => setWizardAdminName(e.target.value)}
                     />
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label required">Work Email Address</label>
+                    <label htmlFor="wizard-admin-email" className="form-label required">Work Email Address</label>
                     <input
+                      id="wizard-admin-email"
+                      name="adminEmail"
                       type="email"
                       className="form-control"
                       placeholder="siddharth@paramountcapital.io"
+                      autoComplete="email"
                       value={wizardAdminEmail}
                       onChange={e => setWizardAdminEmail(e.target.value)}
                     />
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Direct Mobile Number</label>
+                    <label htmlFor="wizard-admin-phone" className="form-label">Direct Mobile Number</label>
                     <input
+                      id="wizard-admin-phone"
+                      name="adminPhone"
                       type="text"
                       className="form-control"
+                      autoComplete="tel"
                       value={wizardAdminPhone}
                       onChange={e => setWizardAdminPhone(e.target.value)}
                     />
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Initial Password Strategy</label>
-                    <select className="form-control" defaultValue="auto">
-                      <option value="auto">Generate Secure Password & Invite via Email</option>
-                      <option value="preset">Preset to 'Password@123' (Demo Mode)</option>
+                    <label htmlFor="wizard-admin-password-strategy" className="form-label">Initial Password Strategy</label>
+                    <select
+                      id="wizard-admin-password-strategy"
+                      name="passwordStrategy"
+                      className="form-control"
+                      defaultValue="auto"
+                    >
+                      <option value="auto">Generate Secure Cryptographic Temporary Password</option>
                     </select>
                   </div>
                 </div>
@@ -853,8 +1120,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                 <div className="form-grid-two">
                   <div className="form-group">
-                    <label className="form-label required">Inbound Hotline Virtual DID</label>
+                    <label htmlFor="wizard-did-number" className="form-label required">Inbound Hotline Virtual DID</label>
                     <input
+                      id="wizard-did-number"
+                      name="didNumber"
                       type="text"
                       className="form-control"
                       value={wizardDidNumber}
@@ -863,8 +1132,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Call Distribution Routing Strategy</label>
+                    <label htmlFor="wizard-routing-strategy" className="form-label">Call Distribution Routing Strategy</label>
                     <select
+                      id="wizard-routing-strategy"
+                      name="routingStrategy"
                       className="form-control"
                       value={wizardRoutingStrategy}
                       onChange={e => setWizardRoutingStrategy(e.target.value)}
@@ -956,9 +1227,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               ) : (
                 <button
                   className="btn btn-primary btn-deploy-confirm"
+                  disabled={isDeployingWizard}
                   onClick={handleDeployOrganization}
                 >
-                  <Sparkles size={15} /> Confirm & Deploy Organization
+                  <Sparkles size={15} /> {isDeployingWizard ? 'Deploying...' : 'Confirm & Deploy Organization'}
                 </button>
               )}
             </div>
@@ -972,7 +1244,12 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       {isDetailDrawerOpen && selectedTenant && drawerTenantEdit && (
         <Drawer
           isOpen={isDetailDrawerOpen}
-          onClose={() => setIsDetailDrawerOpen(false)}
+          onClose={() => {
+            setIsDetailDrawerOpen(false);
+            activeTenantKeyRef.current = null;
+            lastLoadedTenantKeyRef.current = null;
+            setDrawerUsers([]);
+          }}
           title={`Configure: ${selectedTenant.name}`}
           size="lg"
         >
@@ -1003,9 +1280,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                 </button>
                 <button
                   className="btn btn-primary btn-sm"
+                  disabled={isSavingDrawer}
                   onClick={handleSaveDrawerTenant}
                 >
-                  <Save size={13} /> Save Changes
+                  <Save size={13} /> {isSavingDrawer ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </div>
@@ -1055,8 +1333,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               <div className="drawer-tab-pane animate-fade-in">
                 <div className="form-grid-two">
                   <div className="form-group">
-                    <label className="form-label">Organization Name</label>
+                    <label htmlFor="drawer-tenant-name" className="form-label">Organization Name</label>
                     <input
+                      id="drawer-tenant-name"
+                      name="name"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.name}
@@ -1065,8 +1345,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Legal Name</label>
+                    <label htmlFor="drawer-tenant-legal-name" className="form-label">Legal Name</label>
                     <input
+                      id="drawer-tenant-legal-name"
+                      name="legalName"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.legalName || ''}
@@ -1075,8 +1357,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group span-2">
-                    <label className="form-label">Tagline / Mission</label>
+                    <label htmlFor="drawer-tenant-tagline" className="form-label">Tagline / Mission</label>
                     <input
+                      id="drawer-tenant-tagline"
+                      name="tagline"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.tagline || ''}
@@ -1085,8 +1369,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Industry Classification</label>
+                    <label htmlFor="drawer-tenant-industry" className="form-label">Industry Classification</label>
                     <input
+                      id="drawer-tenant-industry"
+                      name="industry"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.industry || ''}
@@ -1095,17 +1381,23 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Brand Color</label>
+                    <label htmlFor="drawer-tenant-brand-color-text" className="form-label">Brand Color</label>
                     <div className="color-picker-row">
                       <input
+                        id="drawer-tenant-brand-color"
+                        name="brandColorPicker"
                         type="color"
                         className="color-swatch-input"
+                        aria-label="Brand color picker"
                         value={drawerTenantEdit.brandColor || '#8b5cf6'}
                         onChange={e => setDrawerTenantEdit({ ...drawerTenantEdit, brandColor: e.target.value })}
                       />
                       <input
+                        id="drawer-tenant-brand-color-text"
+                        name="brandColor"
                         type="text"
                         className="form-control"
+                        aria-label="Brand color hex code"
                         value={drawerTenantEdit.brandColor || '#8b5cf6'}
                         onChange={e => setDrawerTenantEdit({ ...drawerTenantEdit, brandColor: e.target.value })}
                       />
@@ -1113,8 +1405,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Timezone</label>
+                    <label htmlFor="drawer-tenant-timezone" className="form-label">Timezone</label>
                     <input
+                      id="drawer-tenant-timezone"
+                      name="timezone"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.timezone || 'Asia/Kolkata (IST)'}
@@ -1123,8 +1417,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Currency</label>
+                    <label htmlFor="drawer-tenant-currency" className="form-label">Currency</label>
                     <input
+                      id="drawer-tenant-currency"
+                      name="currency"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.currency || '₹ INR'}
@@ -1155,9 +1451,12 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                                 <div className="feature-row-label">{f.label}</div>
                                 <code className="feature-row-code">{f.key}</code>
                               </div>
-                              <label className="switch-control">
+                              <label htmlFor={`drawer-feature-${f.key}`} className="switch-control">
                                 <input
+                                  id={`drawer-feature-${f.key}`}
+                                  name={`drawer_feature_${f.key}`}
                                   type="checkbox"
+                                  aria-label={`Toggle module ${f.label}`}
                                   checked={isEnabled}
                                   onChange={() => handleToggleFeatureInDrawer(f.key)}
                                 />
@@ -1211,8 +1510,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               <div className="drawer-tab-pane animate-fade-in">
                 <div className="form-grid-two">
                   <div className="form-group span-2">
-                    <label className="form-label">Dedicated Virtual DID Number</label>
+                    <label htmlFor="drawer-tenant-phone" className="form-label">Dedicated Virtual DID Number</label>
                     <input
+                      id="drawer-tenant-phone"
+                      name="phone"
                       type="text"
                       className="form-control"
                       value={drawerTenantEdit.phone || '+91 80 4700 8001'}
@@ -1221,8 +1522,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                   </div>
 
                   <div className="form-group span-2">
-                    <label className="form-label">Inbound Call Routing Strategy</label>
+                    <label htmlFor="drawer-tenant-routing-strategy" className="form-label">Inbound Call Routing Strategy</label>
                     <select
+                      id="drawer-tenant-routing-strategy"
+                      name="defaultRoutingStrategy"
                       className="form-control"
                       value={drawerTenantEdit.defaultRoutingStrategy || 'Round-Robin'}
                       onChange={e =>
@@ -1261,6 +1564,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                       {selectedTenant.status !== 'Active' && (
                         <button
                           className="btn btn-secondary btn-sm"
+                          disabled={isActionInProgress}
                           onClick={() => handleToggleTenantStatus('Active')}
                         >
                           <CheckCircle2 size={13} color="#10b981" /> Activate Organization
@@ -1270,6 +1574,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
                       {selectedTenant.status !== 'Suspended' && (
                         <button
                           className="btn btn-secondary btn-sm btn-suspend"
+                          disabled={isActionInProgress}
                           onClick={() => handleToggleTenantStatus('Suspended')}
                         >
                           <AlertTriangle size={13} color="#f59e0b" /> Suspend Organization
@@ -1278,14 +1583,23 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
 
                       <button
                         className="btn btn-danger btn-sm"
-                        onClick={() => {
+                        disabled={isActionInProgress}
+                        onClick={async () => {
                           if (confirm(`Are you sure you want to permanently delete organization "${selectedTenant.name}"?`)) {
-                            superAdminService.deleteTenant(selectedTenant.id);
-                            setIsDetailDrawerOpen(false);
+                            setIsActionInProgress(true);
+                            try {
+                              await superAdminService.deleteTenantApi(selectedTenant.id);
+                              setTenants(prev => prev.filter(t => t.id !== selectedTenant.id));
+                              setIsDetailDrawerOpen(false);
+                            } catch (err: any) {
+                              alert(err.message || 'Failed to delete organization');
+                            } finally {
+                              setIsActionInProgress(false);
+                            }
                           }
                         }}
                       >
-                        <Trash2 size={13} /> Delete Organization
+                        <Trash2 size={13} /> {isActionInProgress ? 'Processing...' : 'Delete Organization'}
                       </button>
                     </div>
                   </div>
@@ -1306,40 +1620,51 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
         >
           <div className="add-user-modal-form">
             <div className="form-group">
-              <label className="form-label required">Employee Full Name</label>
+              <label htmlFor="company-add-user-name" className="form-label required">Employee Full Name</label>
               <input
+                id="company-add-user-name"
+                name="name"
                 type="text"
                 className="form-control"
                 placeholder="e.g. Priya Nair"
+                autoComplete="name"
                 value={newUserName}
                 onChange={e => setNewUserName(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label required">Work Email Address</label>
+              <label htmlFor="company-add-user-email" className="form-label required">Work Email Address</label>
               <input
+                id="company-add-user-email"
+                name="email"
                 type="email"
                 className="form-control"
                 placeholder="priya@company.com"
+                autoComplete="email"
                 value={newUserEmail}
                 onChange={e => setNewUserEmail(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Phone Number</label>
+              <label htmlFor="company-add-user-phone" className="form-label">Phone Number</label>
               <input
+                id="company-add-user-phone"
+                name="phone"
                 type="text"
                 className="form-control"
+                autoComplete="tel"
                 value={newUserPhone}
                 onChange={e => setNewUserPhone(e.target.value)}
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Role Assignment</label>
+              <label htmlFor="company-add-user-role" className="form-label">Role Assignment</label>
               <select
+                id="company-add-user-role"
+                name="role"
                 className="form-control"
                 value="company_admin"
                 disabled
@@ -1354,10 +1679,10 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               </button>
               <button
                 className="btn btn-primary"
-                disabled={!newUserName || !newUserEmail}
+                disabled={!newUserName || !newUserEmail || isAddingUser}
                 onClick={handleAddUserToCompany}
               >
-                Provision Account
+                {isAddingUser ? 'Provisioning...' : 'Provision Account'}
               </button>
             </div>
           </div>

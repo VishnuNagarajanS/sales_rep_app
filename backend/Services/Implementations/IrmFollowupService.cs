@@ -4,6 +4,7 @@ using backend.Models.Entities;
 using backend.Models.Enums;
 using backend.Repositories.Interfaces;
 using backend.Services.Interfaces;
+using backend.Data;
 
 namespace backend.Services.Implementations;
 
@@ -12,17 +13,44 @@ public class IrmFollowupService : IIrmFollowupService
     private readonly IFollowupRepository _followupRepo;
     private readonly IInvestorRepository _investorRepo;
     private readonly IUserRepository _userRepo;
+    private readonly ApplicationDbContext _context;
+    private readonly IIrmOtherService? _otherService;
 
-    public IrmFollowupService(IFollowupRepository followupRepo, IInvestorRepository investorRepo, IUserRepository userRepo)
+    public IrmFollowupService(
+        IFollowupRepository followupRepo, 
+        IInvestorRepository investorRepo, 
+        IUserRepository userRepo, 
+        ApplicationDbContext context,
+        IIrmOtherService? otherService = null)
     {
         _followupRepo = followupRepo;
         _investorRepo = investorRepo;
         _userRepo = userRepo;
+        _context = context;
+        _otherService = otherService;
     }
 
     public async Task<ApiResponse<List<FollowupDto>>> GetAllAsync(int companyId, int? assignedToId, string? status, CancellationToken ct = default)
     {
         var list = await _followupRepo.GetAllAsync(companyId, assignedToId, "irm", status, ct);
+        if (_otherService != null)
+        {
+            var matcher = await _otherService.GetOtherMatcherAsync(companyId, "follow_up", ct);
+            if (matcher.HasAnyOther)
+            {
+                list = list.Where(f =>
+                {
+                    int? lid = null;
+                    if (!string.IsNullOrEmpty(f.ContactId))
+                    {
+                        var cleanContactId = f.ContactId.Replace("lead-", "").Trim();
+                        if (int.TryParse(cleanContactId, out var parsedLid))
+                            lid = parsedLid;
+                    }
+                    return !matcher.IsInOther(f.ContactPhone, f.InvestorId, lid, f.ContactName);
+                }).ToList();
+            }
+        }
         return ApiResponse<List<FollowupDto>>.SuccessResponse(list.Select(MapToDto).ToList());
     }
 
@@ -30,32 +58,85 @@ public class IrmFollowupService : IIrmFollowupService
     {
         var user = await _userRepo.GetByIdAsync(assignedToId, ct);
 
-        if (!dto.InvestorId.HasValue)
-            return ApiResponse<FollowupDto>.ErrorResponse("Select an investor before scheduling an IRM follow-up.");
+        // Deduplication & idempotency check: only collapse repeated submissions
+        // Do NOT collapse legitimate separate tasks with different details or schedules
+        var allCompanyFollowups = await _followupRepo.GetAllAsync(companyId, null, null, null, ct);
+        var fDigits = (dto.ContactPhone ?? string.Empty).Replace(" ", "").Replace("-", "");
+        if (fDigits.Length > 10) fDigits = fDigits[^10..];
 
-        var investor = await _investorRepo.GetByIdAsync(dto.InvestorId.Value, companyId, ct);
-        if (investor == null)
-            return ApiResponse<FollowupDto>.ErrorResponse("Investor not found in this company.");
+        var existingPending = allCompanyFollowups.FirstOrDefault(f =>
+            f.Status == FollowupStatus.Pending &&
+            ((!string.IsNullOrEmpty(dto.ContactId) && f.ContactId == dto.ContactId) ||
+             (!string.IsNullOrEmpty(fDigits) && f.ContactPhone != null && f.ContactPhone.Contains(fDigits))) &&
+            (Math.Abs((f.ScheduledAt - dto.ScheduledAt).TotalMinutes) <= 15 ||
+             (!string.IsNullOrEmpty(dto.Agenda) && f.Agenda == dto.Agenda.Trim() && (DateTime.UtcNow - f.CreatedAt).TotalMinutes <= 2)));
+
+        if (existingPending != null)
+        {
+            existingPending.ScheduledAt = dto.ScheduledAt;
+            existingPending.Agenda = dto.Agenda;
+            if (!string.IsNullOrWhiteSpace(dto.ContactEmail)) existingPending.ContactEmail = dto.ContactEmail.Trim();
+            existingPending.AssignedToId = assignedToId;
+            existingPending.AssignedToName = user?.Name ?? string.Empty;
+            existingPending.AssignedToRole = assignedToRole;
+            var updatedExisting = await _followupRepo.UpdateAsync(existingPending, ct);
+            return ApiResponse<FollowupDto>.SuccessResponse(MapToDto(updatedExisting), "Existing pending follow-up updated.");
+        }
+
+        string? investorName = null;
+        string? email = dto.ContactEmail?.Trim();
+        int? inheritedHandoverId = null;
+        int? inheritedOriginalOwnerId = null;
+
+        if (dto.InvestorId.HasValue)
+        {
+            var investor = await _investorRepo.GetByIdAsync(dto.InvestorId.Value, companyId, ct);
+            investorName = investor?.Name;
+            if (string.IsNullOrEmpty(email)) email = investor?.Email;
+            
+            if (investor != null)
+            {
+                inheritedHandoverId = investor.HandoverId;
+                inheritedOriginalOwnerId = investor.OriginalOwnerId;
+            }
+        }
 
         var followup = new Followup
         {
             CompanyId = companyId,
             InvestorId = dto.InvestorId,
-            InvestorName = investor.Name,
+            InvestorName = investorName,
             AssignedToId = assignedToId,
             AssignedToName = user?.Name ?? string.Empty,
             AssignedToRole = assignedToRole,
-            ContactName = dto.ContactName,
-            ContactPhone = dto.ContactPhone,
-            ContactId = investor.Id.ToString(),
+            ContactName = !string.IsNullOrWhiteSpace(dto.ContactName) ? dto.ContactName : (investorName ?? string.Empty),
+            ContactPhone = dto.ContactPhone ?? string.Empty,
+            ContactEmail = email ?? string.Empty,
+            ContactId = !string.IsNullOrEmpty(dto.ContactId) ? dto.ContactId : (dto.InvestorId.HasValue ? dto.InvestorId.Value.ToString() : string.Empty),
             ContactType = "investor",
             ScheduledAt = dto.ScheduledAt,
             Status = FollowupStatus.Pending,
             Agenda = dto.Agenda,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            HandoverId = inheritedHandoverId,
+            OriginalOwnerId = inheritedOriginalOwnerId
         };
 
         var created = await _followupRepo.CreateAsync(followup, ct);
+
+        if (inheritedHandoverId.HasValue)
+        {
+            _context.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = inheritedHandoverId.Value,
+                EntityType = "Followup",
+                EntityId = created.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync(ct);
+        }
+
         return ApiResponse<FollowupDto>.SuccessResponse(MapToDto(created), "Followup created successfully");
     }
 
@@ -102,6 +183,7 @@ public class IrmFollowupService : IIrmFollowupService
         AssignedToRole = f.AssignedToRole,
         ContactName = f.ContactName,
         ContactPhone = f.ContactPhone,
+        ContactEmail = f.ContactEmail,
         ContactId = f.ContactId,
         ScheduledAt = f.ScheduledAt,
         Status = f.Status.ToString(),
@@ -109,6 +191,10 @@ public class IrmFollowupService : IIrmFollowupService
         OutcomeNotes = f.OutcomeNotes,
         CreatedAt = f.CreatedAt,
         CompletedAt = f.CompletedAt,
-        RescheduledTo = f.RescheduledTo
+        RescheduledTo = f.RescheduledTo,
+        HandoverId = f.HandoverId,
+        HandedOverFromName = f.OriginalOwner?.Name,
+        HandoverPlannedEnd = f.Handover?.PlannedEndAt,
+        OriginalOwnerId = f.OriginalOwnerId
     };
 }

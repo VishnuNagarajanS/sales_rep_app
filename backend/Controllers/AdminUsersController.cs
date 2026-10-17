@@ -23,14 +23,39 @@ public class AdminUsersController : ControllerBase
         _db = db;
     }
 
-    private int GetCompanyId()
+    private int GetCompanyId(int? explicitCompanyId = null)
     {
         var claim = User.FindFirst("company_id");
-        if (claim != null && int.TryParse(claim.Value, out var companyId))
+        if (claim != null && int.TryParse(claim.Value, out var companyId) && companyId > 0)
         {
             return companyId;
         }
-        return 0; // Fallback or throw exception depending on security design
+
+        if (explicitCompanyId.HasValue && explicitCompanyId.Value > 0)
+        {
+            return explicitCompanyId.Value;
+        }
+
+        if (Request.Query.TryGetValue("companyId", out var qCompany) && int.TryParse(qCompany, out var qCid) && qCid > 0)
+        {
+            return qCid;
+        }
+
+        if (Request.Headers.TryGetValue("x-tenant-id", out var tenantHeader) && !string.IsNullOrWhiteSpace(tenantHeader))
+        {
+            var headerVal = tenantHeader.ToString().Trim().ToLower();
+            if (int.TryParse(headerVal, out var tid) && tid > 0) return tid;
+            if (headerVal == "ghl" || headerVal == "t-ghl-01" || headerVal == "1") return 1;
+            if (headerVal == "jamin" || headerVal == "t-jamin-02" || headerVal == "2") return 2;
+        }
+
+        var role = User.FindFirst(ClaimTypes.Role)?.Value;
+        if (role == "super_admin")
+        {
+            return 1;
+        }
+
+        return 0;
     }
 
     [HttpGet]
@@ -87,7 +112,7 @@ public class AdminUsersController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<AdminUserDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> CreateUser([FromBody] CreateUserRequestDto request, CancellationToken cancellationToken)
     {
-        var companyId = GetCompanyId();
+        var companyId = GetCompanyId(request.CompanyId);
         if (companyId == 0) return Forbid();
 
         var result = await _adminUserService.CreateUserAsync(companyId, request, cancellationToken);
@@ -104,6 +129,19 @@ public class AdminUsersController : ControllerBase
         if (companyId == 0) return Forbid();
 
         var result = await _adminUserService.UpdateUserAsync(companyId, id, request, cancellationToken);
+        if (!result.Success) return BadRequest(result);
+
+        return Ok(result);
+    }
+
+    [HttpPost("{id}/transfer-role")]
+    [ProducesResponseType(typeof(ApiResponse<AdminUserDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> TransferDataAndUpdateRole(int id, [FromBody] TransferRoleRequestDto request, CancellationToken cancellationToken)
+    {
+        var companyId = GetCompanyId();
+        if (companyId == 0) return Forbid();
+
+        var result = await _adminUserService.TransferDataAndUpdateRoleAsync(companyId, id, request, cancellationToken);
         if (!result.Success) return BadRequest(result);
 
         return Ok(result);

@@ -26,6 +26,12 @@ import {
   MessageSquare,
   User as UserIcon,
   UserCheck,
+  Clock,
+  Server,
+  KeyRound,
+  FolderArchive,
+  Layers,
+  CalendarOff,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { storageService } from '../../services/storageService';
@@ -60,40 +66,51 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
   const [pendingFollowupsCount, setPendingFollowupsCount] = useState(0);
 
   const roleCode = user?.role?.code;
+  const isSuperAdminUser = isSuperAdmin || roleCode === 'super_admin';
   const isJamin = tenant?.slug === 'jamin' || tenant?.id === 't-jamin-02' || tenant?.name === 'Jamin Bazaar' || user?.companySlug === 'jamin';
   const isJaminSalesExec = isJamin && ['sales_executive', 'irm'].includes(String(user?.role?.code || '').toLowerCase());
   const isJaminAdmin = isJamin && (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
-
+  const isIrm = roleCode === 'irm';
+  const isGhlIrm = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl' || user?.companyName?.toLowerCase().includes('ghl')) && isIrm;
+  const isSalesExec = roleCode === 'sales_executive';
+  const isGhlSalesExec = !isJamin && isSalesExec;
   const isGhlAdmin =
-    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl' || user?.companyName?.toLowerCase().includes('ghl')) &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
-  const isGhlSalesExec = tenant?.slug === 'ghl' && user?.role?.code === 'sales_executive';
-  const isIrm = user?.role?.code === 'irm';
-  const isGhlIrm = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.name === 'GHL India Ventures' || user?.companySlug === 'ghl' || user?.companyName === 'GHL India Ventures') && isIrm;
 
   useEffect(() => {
-    if (!isGhlSalesExec) {
+    if (!isSalesExec || !tenant?.id) {
       setPendingFollowupsCount(0);
       return;
     }
-
-    let active = true;
-    const loadPendingFollowups = async () => {
-      try {
-        const items = await getFollowups(tenant?.id);
-        if (active) setPendingFollowupsCount(items.filter(f => f.status === 'Pending').length);
-      } catch {
-        if (active) setPendingFollowupsCount(0);
-      }
+    let mounted = true;
+    const updateFollowups = () => {
+      getFollowups(tenant.id)
+        .then(followups => {
+          if (mounted) {
+            const count = (followups || []).filter(
+              f => f.status === 'Pending' && (f.assignedAgentId === user?.id || f.assignedAgentName === user?.name)
+            ).length;
+            setPendingFollowupsCount(count);
+          }
+        })
+        .catch(() => { });
     };
-
-    loadPendingFollowups();
-    window.addEventListener('nexus_storage_updated', loadPendingFollowups);
+    updateFollowups();
+    let timeoutId: any;
+    const handleDebouncedUpdate = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        updateFollowups();
+      }, 300);
+    };
+    window.addEventListener('nexus_storage_updated', handleDebouncedUpdate);
     return () => {
-      active = false;
-      window.removeEventListener('nexus_storage_updated', loadPendingFollowups);
+      mounted = false;
+      clearTimeout(timeoutId);
+      window.removeEventListener('nexus_storage_updated', handleDebouncedUpdate);
     };
-  }, [isGhlSalesExec, tenant?.id]);
+  }, [tenant?.id, isSalesExec, user?.id, user?.name]);
 
   const companyId = (user?.companyId as string | undefined) ?? tenant?.id ?? '';
   const [unreadChatCount, setUnreadChatCount] = useState(0);
@@ -127,10 +144,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         { id: 'admin-dashboard', label: 'Platform Console', icon: <LayoutDashboard size={18} /> },
         { id: 'admin-companies', label: 'Companies (Tenants)', icon: <Building2 size={18} /> },
         { id: 'admin-users', label: 'Cross-Tenant Users', icon: <Users size={18} /> },
-        { id: 'admin-roles', label: 'Roles & Matrix', icon: <Shield size={18} /> },
+        { id: 'admin-roles', label: 'Role Management', icon: <Shield size={18} /> },
         { id: 'admin-features', label: 'Feature Packages', icon: <Sparkles size={18} /> },
         { id: 'admin-call-config', label: 'Call Configuration', icon: <PhoneCall size={18} /> },
         { id: 'admin-audit', label: 'Platform Audit Logs', icon: <FileCheck size={18} /> },
+        { id: 'admin-security', label: 'Security & Access', icon: <KeyRound size={18} /> },
+        { id: 'admin-system', label: 'System & Health', icon: <Server size={18} /> },
       ],
     },
   ];
@@ -146,11 +165,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       header: 'Sales',
       items: [
         { id: 'leads', label: 'Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
-        { id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+        ...(isGhlAdmin ? [
+          { id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+          { id: 'pending-leads', label: 'Pending Leads', icon: <Clock size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+        ] : [
+          { id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
+        ]),
+        { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
         { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
         { id: 'pipeline', label: 'Pipeline', icon: <Kanban size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW },
-        { id: 'deals', label: 'Deals', icon: <Briefcase size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW },
-        { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
+        ...(isGhlAdmin ? [
+          { id: 'archived-leads', label: 'Archived Leads', icon: <Trash2 size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW }
+        ] : []),
       ],
     },
     {
@@ -158,7 +184,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       items: [
         { id: 'call-center', label: 'Call Center', icon: <PhoneCall size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_MAKE },
         { id: 'call-history', label: 'Call History', icon: <History size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_VIEW },
-        { id: 'call-settings', label: 'Call Settings', icon: <PhoneCall size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_VIEW },
       ],
     },
     {
@@ -176,6 +201,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
         { id: 'investors', label: 'Investors 360', icon: <TrendingUp size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
         { id: 'consultations', label: 'Consultations', icon: <Calendar size={18} />, feature: FEATURES.CONSULTATIONS, permission: PERMISSIONS.CONSULTATIONS_VIEW },
         { id: 'opportunities', label: 'Opportunities', icon: <Briefcase size={18} />, feature: FEATURES.INVESTMENT_OPPORTUNITIES, permission: PERMISSIONS.OPPORTUNITIES_VIEW },
+        { id: 'deals', label: 'Deals', icon: <Briefcase size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW },
       ],
     },
     {
@@ -189,14 +215,25 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       header: 'Administration',
       items: [
         { id: 'company-users', label: 'Users', icon: <Users size={18} />, feature: FEATURES.USERS, permission: PERMISSIONS.USERS_VIEW },
-        { id: 'company-settings', label: 'Company Settings', icon: <Settings size={18} />, feature: FEATURES.COMPANY_SETTINGS, permission: PERMISSIONS.SETTINGS_VIEW },
+        ...(isGhlAdmin ? [
+          { id: 'work-handover', label: 'Work Handover', icon: <UserCheck size={18} />, feature: FEATURES.USERS, permission: PERMISSIONS.USERS_VIEW }
+        ] : []),
+        { id: 'leave-requests', label: 'Leave Requests', icon: <CalendarOff size={18} />, feature: FEATURES.USERS, permission: PERMISSIONS.USERS_VIEW },
         { id: 'company-audit', label: 'Audit Logs', icon: <FileCheck size={18} />, feature: FEATURES.AUDIT_LOGS, permission: PERMISSIONS.AUDIT_VIEW },
+      ],
+    },
+    {
+      header: 'Settings',
+      items: [
+        { id: 'call-settings', label: 'Call Settings', icon: <PhoneCall size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_VIEW },
+        { id: 'company-settings', label: 'Company Settings', icon: <Settings size={18} />, feature: FEATURES.COMPANY_SETTINGS, permission: PERMISSIONS.SETTINGS_VIEW },
       ],
     },
     {
       header: 'Help and Support',
       items: [
         { id: 'chat', label: 'Chat', icon: <MessageSquare size={18} />, badge: unreadChatCount > 0 ? unreadChatCount : undefined },
+        { id: 'smarty-ai', label: 'Smarty AI', icon: <Sparkles size={18} /> },
       ],
     },
   ];
@@ -212,7 +249,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
       items: [
         { id: 'leads', label: 'Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
         { id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
-        { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
+        { id: 'followups', label: 'Follow-ups', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW, badge: pendingFollowupsCount > 0 ? pendingFollowupsCount : undefined },
         { id: 'consultations', label: 'Consultations', icon: <Calendar size={18} />, feature: FEATURES.CONSULTATIONS, permission: PERMISSIONS.CONSULTATIONS_VIEW },
         { id: 'customers', label: 'Customers 360', icon: <Building2 size={18} />, feature: FEATURES.CUSTOMERS, permission: PERMISSIONS.CUSTOMERS_VIEW },
         { id: 'not-interested', label: 'Not - Interested', icon: <XCircle size={18} /> },
@@ -243,6 +280,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     {
       header: 'Settings',
       items: [
+        { id: 'leave-requests', label: 'Leave Requests', icon: <CalendarOff size={18} /> },
         { id: 'call-settings', label: 'Call Settings', icon: <PhoneCall size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_VIEW },
         { id: 'profile', label: 'Profile', icon: <UserIcon size={18} /> },
       ],
@@ -259,12 +297,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     {
       header: 'Investors',
       items: [
+        { id: 'all-leads', label: 'All Leads', icon: <Layers size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
         { id: 'leads', label: 'My Leads', icon: <Users size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
         { id: 'assigned-leads', label: 'Assigned Leads', icon: <UserCheck size={18} />, feature: FEATURES.LEADS, permission: PERMISSIONS.LEADS_VIEW },
         { id: 'followups', label: 'Follow-up', icon: <CalendarCheck size={18} />, feature: FEATURES.FOLLOWUPS, permission: PERMISSIONS.FOLLOWUPS_VIEW },
         { id: 'kyc', label: 'KYC', icon: <FileCheck size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
         { id: 'opportunities', label: 'Opportunities', icon: <Briefcase size={18} />, feature: FEATURES.INVESTMENT_OPPORTUNITIES, permission: PERMISSIONS.OPPORTUNITIES_VIEW },
         { id: 'investors', label: 'Investor 360', icon: <TrendingUp size={18} />, feature: FEATURES.INVESTORS, permission: PERMISSIONS.INVESTORS_VIEW },
+        { id: 'irm-other', label: 'Other', icon: <FolderArchive size={18} /> },
         ...(isGhlIrm ? [{ id: 'pipeline', label: 'Pipeline', icon: <Kanban size={18} />, feature: FEATURES.DEALS, permission: PERMISSIONS.DEALS_VIEW }] : []),
       ],
     },
@@ -292,6 +332,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     {
       header: 'Settings',
       items: [
+        { id: 'leave-requests', label: 'Leave Requests', icon: <CalendarOff size={18} /> },
         { id: 'call-settings', label: 'Call Settings', icon: <PhoneCall size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_VIEW },
         { id: 'profile', label: 'Profile', icon: <UserIcon size={18} /> },
       ],
@@ -418,15 +459,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     });
   };
 
-  const sectionsToRender = isSuperAdmin
+  const sectionsToRender = isSuperAdminUser
     ? superAdminSections
     : isJaminSalesExec
       ? jaminSalesExecSections
       : isJaminAdmin
         ? jaminAdminSections
-        : isGhlIrm
+        : isIrm
           ? irmSections
-          : isGhlSalesExec
+          : isSalesExec
             ? ghlSalesExecSections
             : companySections;
 
@@ -454,14 +495,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
           alignItems: 'center',
           justifyContent: collapsed
             ? 'center'
-            : tenant?.slug === 'ghl'
-              ? 'center'
-              : 'space-between',
+            : isSuperAdmin
+              ? 'space-between'
+              : tenant?.slug === 'ghl'
+                ? 'center'
+                : 'space-between',
           padding: collapsed
             ? '0'
-            : tenant?.slug === 'ghl'
-              ? '0 48px'
-              : '0 20px',
+            : isSuperAdmin
+              ? '0 20px'
+              : tenant?.slug === 'ghl'
+                ? '0 48px'
+                : '0 20px',
           borderBottom: `1px solid ${isSuperAdmin ? '#1e293b' : 'var(--border-base)'}`,
           position: 'relative',
         }}
@@ -544,6 +589,48 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
               {tenant?.name?.charAt(0) || 'T'}
             </div>
           )
+        ) : isSuperAdmin ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
+            <div
+              style={{
+                width: 45,
+                height: 45,
+                borderRadius: 16,
+                background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 20,
+              }}
+            >
+              ⚡
+            </div>
+            <div style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              <div
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontWeight: 800,
+                  fontSize: 15,
+                  color: '#ffffff',
+                  letterSpacing: '-0.02em',
+                }}
+              >
+                Platform Operator
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: '#94a3b8',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  fontWeight: 600,
+                }}
+              >
+                SUPER ADMIN CONSOLE
+              </div>
+            </div>
+          </div>
         ) : tenant?.slug === 'jamin' ? (
           <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
             <img

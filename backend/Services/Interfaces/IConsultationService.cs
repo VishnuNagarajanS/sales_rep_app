@@ -11,6 +11,7 @@ public interface IConsultationService
     Task<ApiResponse<ConsultationResponseDto>> GetConsultationByIdAsync(int id, CancellationToken ct = default);
     Task<ApiResponse<ConsultationResponseDto>> ScheduleConsultationAsync(ScheduleConsultationDto dto, CancellationToken ct = default);
     Task<ApiResponse<ConsultationResponseDto>> UpdateConsultationAsync(int id, backend.DTOs.Consultations.UpdateConsultationDto dto, CancellationToken ct = default);
+    Task<ApiResponse<List<IrmUserDto>>> GetCompanyIrmsAsync(CancellationToken ct = default);
 
     // IRM endpoints
     Task<ApiResponse<List<ConsultationDto>>> GetAllAsync(int companyId, int? consultantId, string? status, DateTime? from, DateTime? to, CancellationToken ct = default);

@@ -1,11 +1,16 @@
 using backend.Authentication.Interfaces;
+using backend.Helpers;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.GhlDeals;
+using backend.Extensions;
 using backend.Models.Entities;
+using backend.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using backend.Services.Interfaces;
+using backend.Services.Implementations;
 
 namespace backend.Controllers.GhlAdmin;
 
@@ -16,16 +21,40 @@ namespace backend.Controllers.GhlAdmin;
 /// </summary>
 [ApiController]
 [Route("api/ghl/deals")]
-[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm")]
+[Authorize(Roles = "sales_executive,company_admin,super_admin,irm")]
 public class GhlDealsController : ControllerBase
 {
+    private static readonly HashSet<string> IrmStages = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "leads", "followup", "qualified_investor", "investment_opportunity", "converted"
+    };
+
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IIrmOtherService _otherService;
 
-    public GhlDealsController(ApplicationDbContext db, ICurrentUserService currentUser)
+    public GhlDealsController(ApplicationDbContext db, ICurrentUserService currentUser, IIrmOtherService? otherService = null)
     {
         _db = db;
         _currentUser = currentUser;
+        _otherService = otherService ?? new IrmOtherService(db);
+    }
+
+    private static bool IsIrmDeal(GhlDeal deal)
+    {
+        if (deal.AssignedAgent?.Role != null &&
+            (deal.AssignedAgent.Role.Code.Equals("irm", StringComparison.OrdinalIgnoreCase) ||
+             deal.AssignedAgent.Role.Name.Equals("IRM", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(deal.Stage) && IrmStages.Contains(deal.Stage.Trim()))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     // ── Scoping helpers ───────────────────────────────────────────────────────
@@ -34,6 +63,9 @@ public class GhlDealsController : ControllerBase
     {
         var query = _db.GhlDeals.AsNoTracking()
             .Include(d => d.AssignedAgent)
+            .Include(d => d.Customer)   // needed to resolve Phone / Email / Location
+            .Include(d => d.OriginalOwner)
+            .Include(d => d.Handover)
             .AsQueryable();
 
         var companyId = _currentUser.CompanyId;
@@ -43,7 +75,7 @@ public class GhlDealsController : ControllerBase
         if (companyId.HasValue)
             query = query.Where(d => d.CompanyId == companyId.Value);
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
             query = query.Where(d => d.AssignedAgentId == agentId.Value);
 
         return query;
@@ -69,17 +101,39 @@ public class GhlDealsController : ControllerBase
             query = query.Where(d => d.Title.ToLower().Contains(s) || d.CustomerName.ToLower().Contains(s));
         }
 
-        var total = await query.CountAsync(ct);
-        page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, 200);
+        var companyId = _currentUser.CompanyId ?? 1;
+        string? moduleForStage = (stage?.Trim().ToLowerInvariant()) switch
+        {
+            "qualified_investor" => "kyc",
+            "investment_opportunity" => "opportunities",
+            "followup" => "follow_up",
+            "leads" => "my_leads",
+            _ => null
+        };
+        var otherMatcher = await _otherService.GetOtherMatcherAsync(companyId, moduleForStage, ct);
 
         var entities = await query
             .OrderByDescending(d => d.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
             .ToListAsync(ct);
 
-        var items = entities.Select(MapToDto).ToList();
+        if (otherMatcher.HasAnyOther)
+        {
+            entities = entities
+                .Where(d => !otherMatcher.IsInOther(d.Customer?.Phone, d.CustomerId, null, d.CustomerName))
+                .ToList();
+        }
+
+        var total = entities.Count;
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var paged = entities
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        var items = paged.Select(MapToDto).ToList();
+        await PopulateContactDetailsAsync(items, paged, ct);
 
         return Ok(ApiResponse<PagedResult<GhlDealResponseDto>>.SuccessResult(
             PagedResult<GhlDealResponseDto>.Create(items, total, page, pageSize),
@@ -95,7 +149,10 @@ public class GhlDealsController : ControllerBase
         if (deal == null)
             return NotFound(ApiResponse<GhlDealResponseDto>.FailureResult("Deal not found."));
 
-        return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(MapToDto(deal)));
+        var dto = MapToDto(deal);
+        await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { dto }, new List<GhlDeal> { deal }, ct);
+
+        return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(dto));
     }
 
     // ── POST /api/ghl/deals ───────────────────────────────────────────────────
@@ -103,13 +160,103 @@ public class GhlDealsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlDealResponseDto>>> CreateDeal(
         [FromBody] CreateGhlDealDto dto, CancellationToken ct)
     {
-        var agentId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
+        if (User.IsGhlAdmin() && !string.IsNullOrWhiteSpace(dto.Stage) && IrmStages.Contains(dto.Stage.Trim()))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM deal data."));
+        }
+
+        var role = _currentUser.Role?.ToLowerInvariant();
+        if (role == "irm" && (string.IsNullOrWhiteSpace(dto.Stage) || !IrmStages.Contains(dto.Stage.Trim())))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: IRM users cannot create deals directly outside IRM stages."));
+        }
+
+        var agentId = _currentUser.UserId;
+        if (!agentId.HasValue || agentId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlDealResponseDto>.FailureResult("Unauthorized: User ID is missing."));
+
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlDealResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
+
+        // Deduplication & canonical deal reuse:
+        // If a deal already exists for this customer in this company, update it instead of creating duplicates
+        GhlDeal? existingDeal = null;
+        if (dto.CustomerId.HasValue && dto.CustomerId.Value > 0)
+        {
+            existingDeal = await _db.GhlDeals
+                .Include(d => d.AssignedAgent)
+                .ThenInclude(a => a!.Role)
+                .FirstOrDefaultAsync(d =>
+                    d.CompanyId == companyId.Value &&
+                    d.CustomerId == dto.CustomerId.Value, ct);
+        }
+        if (existingDeal == null && !string.IsNullOrWhiteSpace(dto.CustomerName))
+        {
+            var custNameLower = dto.CustomerName.Trim().ToLower();
+            existingDeal = await _db.GhlDeals
+                .Include(d => d.AssignedAgent)
+                .ThenInclude(a => a!.Role)
+                .FirstOrDefaultAsync(d =>
+                    d.CompanyId == companyId.Value &&
+                    d.CustomerName.ToLower() == custNameLower, ct);
+        }
+
+        if (existingDeal != null)
+        {
+            if (IsIrmDeal(existingDeal) && User.IsGhlAdmin())
+            {
+                return StatusCode(StatusCodes.Status403Forbidden,
+                    ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM deal data."));
+            }
+
+            existingDeal.Stage = string.IsNullOrWhiteSpace(dto.Stage) ? existingDeal.Stage : dto.Stage.Trim();
+            if (dto.Value > 0) existingDeal.Value = dto.Value;
+            if (!string.IsNullOrWhiteSpace(dto.Notes)) existingDeal.Notes = dto.Notes.Trim();
+            if (dto.InvestmentRange != null) existingDeal.InvestmentRange = OptionalFieldNormalizer.Normalize(dto.InvestmentRange);
+            if (dto.PreferredAssetClass != null) existingDeal.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass);
+            if (agentId.HasValue && agentId.Value > 0) existingDeal.AssignedAgentId = agentId.Value;
+            existingDeal.StageEnteredAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync(ct);
+            await _db.Entry(existingDeal).Reference(d => d.AssignedAgent).LoadAsync(ct);
+
+            await EnsureStageIsolationForDealAsync(existingDeal, ct);
+
+            var existingDto = MapToDto(existingDeal);
+            await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { existingDto }, new List<GhlDeal> { existingDeal }, ct);
+
+            return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(existingDto, "Deal updated."));
+        }
+
+        int? inheritedHandoverId = null;
+        int? inheritedOriginalOwnerId = null;
+
+        if (dto.CustomerId.HasValue && dto.CustomerId.Value > 0)
+        {
+            var parentCust = await _db.Customers.AsNoTracking().FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value, ct);
+            if (parentCust?.HandoverId != null)
+            {
+                inheritedHandoverId = parentCust.HandoverId;
+                inheritedOriginalOwnerId = parentCust.OriginalOwnerId;
+            }
+            else
+            {
+                var parentLead = await _db.Leads.AsNoTracking().FirstOrDefaultAsync(l => l.Id == dto.CustomerId.Value, ct);
+                if (parentLead?.HandoverId != null)
+                {
+                    inheritedHandoverId = parentLead.HandoverId;
+                    inheritedOriginalOwnerId = parentLead.OriginalOwnerId;
+                }
+            }
+        }
 
         var deal = new GhlDeal
         {
-            CompanyId = companyId,
-            AssignedAgentId = agentId,
+            CompanyId = companyId.Value,
+            AssignedAgentId = agentId.Value,
             Title = dto.Title.Trim(),
             CustomerId = (dto.CustomerId.HasValue && dto.CustomerId.Value > 0) ? dto.CustomerId.Value : null,
             CustomerName = dto.CustomerName.Trim(),
@@ -118,19 +265,44 @@ public class GhlDealsController : ControllerBase
             ExpectedCloseDate = dto.ExpectedCloseDate.Trim(),
             Notes = dto.Notes.Trim(),
             InvestorType = dto.InvestorType,
-            InvestmentRange = dto.InvestmentRange,
-            PreferredAssetClass = dto.PreferredAssetClass,
+            InvestmentRange = OptionalFieldNormalizer.Normalize(dto.InvestmentRange),
+            PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass),
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             StageEnteredAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
+            HandoverId = inheritedHandoverId,
+            OriginalOwnerId = inheritedOriginalOwnerId
         };
 
         _db.GhlDeals.Add(deal);
         await _db.SaveChangesAsync(ct);
+
+        if (inheritedHandoverId.HasValue)
+        {
+            _db.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = inheritedHandoverId.Value,
+                EntityType = "GhlDeal",
+                EntityId = deal.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+
         await _db.Entry(deal).Reference(d => d.AssignedAgent).LoadAsync(ct);
+        if (deal.OriginalOwnerId.HasValue)
+            await _db.Entry(deal).Reference(d => d.OriginalOwner).LoadAsync(ct);
+        if (deal.HandoverId.HasValue)
+            await _db.Entry(deal).Reference(d => d.Handover).LoadAsync(ct);
+
+        await EnsureStageIsolationForDealAsync(deal, ct);
+
+        var newDto = MapToDto(deal);
+        await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { newDto }, new List<GhlDeal> { deal }, ct);
 
         return CreatedAtAction(nameof(GetDeal), new { id = deal.Id },
-            ApiResponse<GhlDealResponseDto>.SuccessResult(MapToDto(deal), "Deal created."));
+            ApiResponse<GhlDealResponseDto>.SuccessResult(newDto, "Deal created."));
     }
 
     // ── PUT /api/ghl/deals/{id} ───────────────────────────────────────────────
@@ -140,10 +312,18 @@ public class GhlDealsController : ControllerBase
     {
         var deal = await _db.GhlDeals
             .Include(d => d.AssignedAgent)
-            .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == _currentUser.CompanyId, ct);
+            .ThenInclude(a => a!.Role)
+            .Include(d => d.Customer)
+            .FirstOrDefaultAsync(d => d.Id == id && (!_currentUser.CompanyId.HasValue || d.CompanyId == _currentUser.CompanyId.Value), ct);
 
         if (deal == null)
             return NotFound(ApiResponse<GhlDealResponseDto>.FailureResult("Deal not found."));
+
+        if (IsIrmDeal(deal) && User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM deal data."));
+        }
 
         if (dto.Title != null) deal.Title = dto.Title.Trim();
         if (dto.Stage != null) deal.Stage = dto.Stage.Trim();
@@ -152,15 +332,22 @@ public class GhlDealsController : ControllerBase
         if (dto.Notes != null) deal.Notes = dto.Notes.Trim();
         if (dto.LostReason != null) deal.LostReason = dto.LostReason.Trim();
         if (dto.InvestorType != null) deal.InvestorType = dto.InvestorType;
-        if (dto.InvestmentRange != null) deal.InvestmentRange = dto.InvestmentRange;
-        if (dto.PreferredAssetClass != null) deal.PreferredAssetClass = dto.PreferredAssetClass;
+        if (dto.InvestmentRange != null) deal.InvestmentRange = OptionalFieldNormalizer.Normalize(dto.InvestmentRange);
+        if (dto.PreferredAssetClass != null) deal.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass);
         if (dto.Priority != null) deal.Priority = dto.Priority.Trim();
         if (dto.StageEnteredAt.HasValue) deal.StageEnteredAt = dto.StageEnteredAt.Value;
+        if (dto.InvestmentAmountConfirmed.HasValue) deal.InvestmentAmountConfirmed = dto.InvestmentAmountConfirmed.Value;
+        if (dto.KycStatus != null) deal.KycStatus = dto.KycStatus.Trim();
 
         deal.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 
-        return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(MapToDto(deal), "Deal updated."));
+        await EnsureStageIsolationForDealAsync(deal, ct);
+
+        var updateDto = MapToDto(deal);
+        await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { updateDto }, new List<GhlDeal> { deal }, ct);
+
+        return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(updateDto, "Deal updated."));
     }
 
     // ── DELETE /api/ghl/deals/{id} ────────────────────────────────────────────
@@ -168,11 +355,20 @@ public class GhlDealsController : ControllerBase
     [Authorize(Roles = "company_admin,super_admin")]
     public async Task<ActionResult<ApiResponse<bool>>> DeleteDeal(int id, CancellationToken ct)
     {
+        var isSuperAdmin = _currentUser.Role == "super_admin";
         var deal = await _db.GhlDeals
-            .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == _currentUser.CompanyId, ct);
+            .Include(d => d.AssignedAgent)
+            .ThenInclude(a => a!.Role)
+            .FirstOrDefaultAsync(d => d.Id == id && (isSuperAdmin || !_currentUser.CompanyId.HasValue || d.CompanyId == _currentUser.CompanyId.Value), ct);
 
         if (deal == null)
             return NotFound(ApiResponse<bool>.FailureResult("Deal not found."));
+
+        if (IsIrmDeal(deal) && User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<bool>.FailureResult("Access denied: GHL Admin has read-only access to IRM deal data."));
+        }
 
         _db.GhlDeals.Remove(deal);
         await _db.SaveChangesAsync(ct);
@@ -213,17 +409,29 @@ public class GhlDealsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlDealActivityResponseDto>>> LogActivity(
         int id, [FromBody] LogGhlDealActivityDto dto, CancellationToken ct)
     {
-        // Verify deal belongs to this company
-        var dealExists = await _db.GhlDeals
-            .AnyAsync(d => d.Id == id && d.CompanyId == _currentUser.CompanyId, ct);
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlDealActivityResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
-        if (!dealExists)
+        // Verify deal belongs to this company
+        var deal = await _db.GhlDeals
+            .Include(d => d.AssignedAgent)
+            .ThenInclude(a => a!.Role)
+            .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == companyId.Value, ct);
+
+        if (deal == null)
             return NotFound(ApiResponse<GhlDealActivityResponseDto>.FailureResult("Deal not found."));
+
+        if (IsIrmDeal(deal) && User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlDealActivityResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM deal data."));
+        }
 
         var activity = new GhlDealActivity
         {
             DealId = id,
-            CompanyId = _currentUser.CompanyId ?? 1,
+            CompanyId = companyId.Value,
             Type = dto.Type.Trim(),
             Text = dto.Text.Trim(),
             FromStage = dto.FromStage,
@@ -277,5 +485,203 @@ public class GhlDealsController : ControllerBase
         StageEnteredAt = d.StageEnteredAt,
         CreatedAt = d.CreatedAt,
         UpdatedAt = d.UpdatedAt,
+        InvestmentAmountConfirmed = d.InvestmentAmountConfirmed,
+        KycStatus = d.KycStatus,
+        KycId = d.KycId,
+        VerifiedBy = d.VerifiedBy,
+        VerifiedAt = d.VerifiedAt,
+        Remarks = d.Remarks,
+        FlaggedSections = d.FlaggedSections,
+        // Resolve contact details from the authoritative Customer record first,
+        // then fall back to any denormalised contact data on the deal itself.
+        Phone = (!string.IsNullOrWhiteSpace(d.Customer?.Phone) ? d.Customer.Phone : null),
+        Email = (!string.IsNullOrWhiteSpace(d.Customer?.Email) ? d.Customer.Email : null),
+        Location = (!string.IsNullOrWhiteSpace(d.Customer?.Location) ? d.Customer.Location : null),
+        HandoverId = d.HandoverId,
+        HandedOverFromName = d.OriginalOwner?.Name,
+        HandoverPlannedEnd = d.Handover?.PlannedEndAt,
+        OriginalOwnerId = d.OriginalOwnerId,
     };
+
+    private async Task PopulateContactDetailsAsync(
+        List<GhlDealResponseDto> dtos,
+        List<GhlDeal> deals,
+        CancellationToken ct)
+    {
+        var unresolved = dtos
+            .Zip(deals, (dto, deal) => new { Dto = dto, Deal = deal })
+            .Where(x => string.IsNullOrWhiteSpace(x.Dto.Phone) || string.IsNullOrWhiteSpace(x.Dto.Email) || string.IsNullOrWhiteSpace(x.Dto.Location))
+            .ToList();
+
+        if (!unresolved.Any()) return;
+
+        var companyId = _currentUser.CompanyId;
+        var candidateIds = unresolved
+            .Where(x => x.Deal.CustomerId.HasValue && x.Deal.CustomerId.Value > 0)
+            .Select(x => x.Deal.CustomerId!.Value)
+            .Distinct()
+            .ToList();
+
+        var candidateNames = unresolved
+            .Where(x => !string.IsNullOrWhiteSpace(x.Deal.CustomerName))
+            .Select(x => x.Deal.CustomerName.Trim().ToLower())
+            .Distinct()
+            .ToList();
+
+        // 1. Check Leads table (for deals originating from leads)
+        var leadsQuery = _db.Leads.AsNoTracking();
+        if (companyId.HasValue && companyId.Value > 0)
+            leadsQuery = leadsQuery.Where(l => l.CompanyId == companyId.Value);
+
+        var matchingLeads = await leadsQuery
+            .Where(l => candidateIds.Contains(l.Id) || candidateNames.Contains(l.Name.ToLower()))
+            .ToListAsync(ct);
+
+        var leadsById = matchingLeads.ToDictionary(l => l.Id);
+        var leadsByName = matchingLeads
+            .GroupBy(l => l.Name.Trim().ToLower())
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // 2. Check Customers table by name (for deals where CustomerId wasn't set or was a lead ID)
+        var customersQuery = _db.Customers.AsNoTracking();
+        if (companyId.HasValue && companyId.Value > 0)
+            customersQuery = customersQuery.Where(c => c.CompanyId == companyId.Value);
+
+        var matchingCustomers = await customersQuery
+            .Where(c => candidateNames.Contains(c.Name.ToLower()))
+            .ToListAsync(ct);
+
+        var customersByName = matchingCustomers
+            .GroupBy(c => c.Name.Trim().ToLower())
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // 3. Check Investors table (for deals linked to HNW investors)
+        var investorsQuery = _db.Investors.AsNoTracking();
+        if (companyId.HasValue && companyId.Value > 0)
+            investorsQuery = investorsQuery.Where(i => i.CompanyId == companyId.Value);
+
+        var matchingInvestors = await investorsQuery
+            .Where(i => candidateIds.Contains(i.Id) || candidateNames.Contains(i.Name.ToLower()))
+            .ToListAsync(ct);
+
+        var investorsById = matchingInvestors.ToDictionary(i => i.Id);
+        var investorsByName = matchingInvestors
+            .GroupBy(i => i.Name.Trim().ToLower())
+            .ToDictionary(g => g.Key, g => g.First());
+
+        foreach (var item in unresolved)
+        {
+            var deal = item.Deal;
+            var dto = item.Dto;
+            var nameKey = deal.CustomerName.Trim().ToLower();
+
+            // Match Lead: ID first, then Name
+            Lead? matchedLead = null;
+            if (deal.CustomerId.HasValue && leadsById.TryGetValue(deal.CustomerId.Value, out var lById))
+                matchedLead = lById;
+            else if (!string.IsNullOrWhiteSpace(nameKey) && leadsByName.TryGetValue(nameKey, out var lByName))
+                matchedLead = lByName;
+
+            // Match Customer: Name
+            Customer? matchedCust = null;
+            if (!string.IsNullOrWhiteSpace(nameKey) && customersByName.TryGetValue(nameKey, out var cByName))
+                matchedCust = cByName;
+
+            // Match Investor: ID first, then Name
+            Investor? matchedInv = null;
+            if (deal.CustomerId.HasValue && investorsById.TryGetValue(deal.CustomerId.Value, out var iById))
+                matchedInv = iById;
+            else if (!string.IsNullOrWhiteSpace(nameKey) && investorsByName.TryGetValue(nameKey, out var iByName))
+                matchedInv = iByName;
+
+            // Fallback order: Customer -> Lead -> Investor
+            if (string.IsNullOrWhiteSpace(dto.Phone))
+            {
+                dto.Phone = !string.IsNullOrWhiteSpace(matchedLead?.Phone)
+                    ? matchedLead.Phone
+                    : (!string.IsNullOrWhiteSpace(matchedCust?.Phone)
+                        ? matchedCust.Phone
+                        : matchedInv?.Phone);
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Email))
+            {
+                dto.Email = !string.IsNullOrWhiteSpace(matchedLead?.Email)
+                    ? matchedLead.Email
+                    : (!string.IsNullOrWhiteSpace(matchedCust?.Email)
+                        ? matchedCust.Email
+                        : matchedInv?.Email);
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Location))
+            {
+                dto.Location = !string.IsNullOrWhiteSpace(matchedLead?.Location)
+                    ? matchedLead.Location
+                    : matchedCust?.Location;
+            }
+        }
+    }
+
+    private async Task EnsureStageIsolationForDealAsync(GhlDeal deal, CancellationToken ct)
+    {
+        var stage = (deal.Stage ?? string.Empty).Trim().ToLowerInvariant();
+        var kycAndAbove = new[] { "qualified_investor", "qualified", "investment_opportunity", "opportunity", "term_sheet", "committed", "converted", "won" };
+        if (!kycAndAbove.Contains(stage)) return;
+
+        var companyId = deal.CompanyId;
+        var custName = (deal.CustomerName ?? string.Empty).Trim().ToLower();
+
+        // Find matching lead
+        var matchingLeads = await _db.Leads
+            .Where(l => l.CompanyId == companyId &&
+                ((deal.CustomerId.HasValue && l.Id == deal.CustomerId.Value) ||
+                 (!string.IsNullOrWhiteSpace(custName) && l.Name.ToLower() == custName)))
+            .ToListAsync(ct);
+
+        bool changesMade = false;
+        string targetStatus = "KYC In Progress";
+        if (stage == "investment_opportunity" || stage == "opportunity" || stage == "term_sheet" || stage == "committed")
+            targetStatus = "In Opportunity";
+        else if (stage == "converted" || stage == "won")
+            targetStatus = "Converted";
+
+        foreach (var l in matchingLeads)
+        {
+            if (l.Status != targetStatus)
+            {
+                l.Status = targetStatus;
+                l.UpdatedAt = DateTime.UtcNow;
+                changesMade = true;
+            }
+        }
+
+        // Complete any pending followups for this contact
+        var matchingLeadIds = matchingLeads.Select(l => l.Id.ToString()).ToList();
+        var matchingPhones = matchingLeads.Select(l => l.Phone).Where(p => !string.IsNullOrEmpty(p)).ToList();
+
+        var pendingFollowups = await _db.Followups
+            .Where(f => f.CompanyId == companyId && f.Status == FollowupStatus.Pending &&
+                ((f.ContactId != null && matchingLeadIds.Contains(f.ContactId)) ||
+                 (deal.CustomerId.HasValue && f.ContactId == deal.CustomerId.Value.ToString()) ||
+                 (!string.IsNullOrWhiteSpace(custName) && f.ContactName.ToLower() == custName) ||
+                 (f.ContactPhone != null && matchingPhones.Contains(f.ContactPhone))))
+            .ToListAsync(ct);
+
+        foreach (var pf in pendingFollowups)
+        {
+            pf.Status = FollowupStatus.Completed;
+            pf.CompletedAt = DateTime.UtcNow;
+            pf.UpdatedAt = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(pf.Notes) && !pf.Notes.Contains("Auto-completed"))
+                pf.Notes += " | Auto-completed: deal advanced to KYC/Opportunities stage";
+            else if (string.IsNullOrWhiteSpace(pf.Notes))
+                pf.Notes = "Auto-completed: deal advanced to KYC/Opportunities stage";
+            changesMade = true;
+        }
+
+        if (changesMade)
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+    }
 }

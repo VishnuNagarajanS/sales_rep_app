@@ -16,47 +16,60 @@ public static class ServiceExtensions
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
+        services.Configure<SmtpSettings>(configuration.GetSection(SmtpSettings.SectionName));
+        services.Configure<TwilioSettings>(configuration.GetSection(TwilioSettings.SectionName));
+
         // 1. Database Context - prioritize .env DATABASE_URL / DB_* parameters
+        services.AddMemoryCache();
+        services.AddHttpClient("TwilioRecordings");
+
         var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL")
-                               ?? configuration.GetConnectionString("DefaultConnection");
+                               ?? configuration.GetConnectionString("DefaultConnection")
+                               ?? configuration["ConnectionStrings:DefaultConnection"]
+                               ?? configuration["ConnectionString:DefaultConnection"];
 
         var dbHost = Environment.GetEnvironmentVariable("DB_HOST");
         if (!string.IsNullOrEmpty(dbHost) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DATABASE_URL")))
         {
             var port = Environment.GetEnvironmentVariable("DB_PORT") ?? "5432";
-            var db = Environment.GetEnvironmentVariable("DB_NAME") ?? "neondb";
-            var user = Environment.GetEnvironmentVariable("DB_USER") ?? "neondb_owner";
+            var db = Environment.GetEnvironmentVariable("DB_NAME") ?? "defaultdb";
+            var user = Environment.GetEnvironmentVariable("DB_USER") ?? "postgres";
             var pass = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "";
-            var ssl = Environment.GetEnvironmentVariable("DB_SSL_MODE") ?? "Require";
+            var ssl = Environment.GetEnvironmentVariable("DB_SSL_MODE") ?? "Prefer";
             connectionString = $"Host={dbHost};Port={port};Database={db};Username={user};Password={pass};SSL Mode={ssl};Trust Server Certificate=true;Keepalive=30;Timeout=30;Command Timeout=60;Pooling=true";
         }
 
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            throw new InvalidOperationException("Database connection string is not configured in .env or appsettings.json.");
-        }
+        var hasValidConnectionString = !string.IsNullOrWhiteSpace(connectionString) && !connectionString.Equals("InMemory", StringComparison.OrdinalIgnoreCase);
+        var useInMemory = configuration.GetValue<bool>("UseInMemoryDatabase", !hasValidConnectionString) || !hasValidConnectionString;
 
         services.AddDbContext<ApplicationDbContext>(options =>
-            options.UseNpgsql(connectionString, npgsqlOptions =>
+        {
+            if (useInMemory)
             {
-                npgsqlOptions.EnableRetryOnFailure(
-                    maxRetryCount: 5,
-                    maxRetryDelay: TimeSpan.FromSeconds(10),
-                    errorCodesToAdd: null);
-                npgsqlOptions.CommandTimeout(60);
-            }));
+                options.UseInMemoryDatabase("NexusSalesDb");
+            }
+            else
+            {
+                options.UseNpgsql(connectionString, npgsqlOptions =>
+                {
+                    npgsqlOptions.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(10),
+                        errorCodesToAdd: null);
+                    npgsqlOptions.CommandTimeout(60);
+                });
+            }
+        });
 
         // 2. Options pattern & Caching
         services.Configure<JwtSettings>(configuration.GetSection(JwtSettings.SectionName));
-        services.Configure<SmtpSettings>(configuration.GetSection(SmtpSettings.SectionName));
-        services.AddMemoryCache();
 
         // 3. Repositories
         services.AddScoped<IUserRepository, UserRepository>();
-        services.AddScoped<IInvestorRepository, InvestorRepository>();
         services.AddScoped<IConsultationRepository, ConsultationRepository>();
         services.AddScoped<IFollowupRepository, FollowupRepository>();
         services.AddScoped<IInvestorCallRepository, InvestorCallRepository>();
+        services.AddScoped<IInvestorRepository, InvestorRepository>();
         services.AddScoped<IIrmPipelineRepository, IrmPipelineRepository>();
         services.AddScoped<IKycRepository, KycRepository>();
         services.AddScoped<IOpportunityRepository, OpportunityRepository>();
@@ -65,6 +78,8 @@ public static class ServiceExtensions
         services.AddScoped<IJwtService, JwtService>();
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
+        services.AddScoped<ITotpService, TotpService>();
+        services.AddScoped<IReportService, ReportService>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IAdminUserService, AdminUserService>();
         services.AddScoped<ILeadService, LeadService>();
@@ -76,11 +91,55 @@ public static class ServiceExtensions
         services.AddScoped<IOtpService, OtpService>();
         services.AddScoped<IInvestorService, InvestorService>();
         services.AddScoped<IIrmDashboardService, IrmDashboardService>();
-        services.AddScoped<IKycService, KycService>();
-        services.AddScoped<IOpportunityService, OpportunityService>();
         services.AddScoped<IInvestorCallService, InvestorCallService>();
         services.AddScoped<IIrmFollowupService, IrmFollowupService>();
         services.AddScoped<IIrmPipelineService, IrmPipelineService>();
+        services.AddScoped<IKycService, KycService>();
+        services.AddScoped<IOpportunityService, OpportunityService>();
+        services.AddScoped<IIrmOtherService, IrmOtherService>();
+        services.AddScoped<IWorkHandoverService, WorkHandoverService>();
+        services.AddScoped<ILeaveRequestService, LeaveRequestService>();
+        services.AddScoped<ICompanyClock, CompanyClock>();
+
+        // AI Services
+        services.Configure<backend.Services.Ai.AiSettings>(configuration.GetSection("Ai"));
+        services.AddHttpClient<backend.Services.Ai.ILlmClient, backend.Services.Ai.OpenAiCompatibleLlmClient>((sp, client) =>
+        {
+            var settings = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<backend.Services.Ai.AiSettings>>().Value;
+            if (!string.IsNullOrEmpty(settings.Primary.BaseUrl))
+            {
+                client.BaseAddress = new Uri(settings.Primary.BaseUrl);
+                if (!client.BaseAddress.AbsoluteUri.EndsWith("/"))
+                    client.BaseAddress = new Uri(client.BaseAddress.AbsoluteUri + "/");
+            }
+            if (!string.IsNullOrEmpty(settings.Primary.ApiKey))
+            {
+                client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.Primary.ApiKey);
+            }
+        });
+        services.AddScoped<backend.Services.Ai.AiToolRegistry>(sp =>
+        {
+            var registry = new backend.Services.Ai.AiToolRegistry();
+            registry.Register(new backend.Services.Ai.Tools.DeclineOutOfScopeTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchLeadsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchFollowupsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchDealsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchUsersTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchInvestorsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchCustomersTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchLeaveRequestsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchCallsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchConsultationsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchWorkHandoversTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchNotificationsTool());
+            registry.Register(new backend.Services.Ai.Tools.SearchCompanyKnowledgeTool());
+            return registry;
+        });
+        services.AddScoped<backend.Services.Ai.AiAssistantService>();
+
+        // Background job: notify admins when a handover's PlannedEndAt has passed (never auto-reverts)
+        services.AddHostedService<backend.Services.BackgroundJobs.HandoverDueDateCheckerService>();
+        services.AddHostedService<backend.Services.BackgroundJobs.LeaveReminderBackgroundService>();
 
         services.AddDev1Services();
         services.AddDev2Services();

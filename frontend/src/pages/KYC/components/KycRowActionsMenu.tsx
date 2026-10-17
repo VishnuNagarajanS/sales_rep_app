@@ -10,8 +10,10 @@ import {
   FileCheck,
   Phone,
   ArrowRight,
+  UserCheck,
 } from 'lucide-react';
 import { Deal } from '../../../types';
+import { getAuthHeaders } from '../../../utils/authHeaders';
 import './KycLinkComponents.css';
 
 interface KycRowActionsMenuProps {
@@ -20,6 +22,7 @@ interface KycRowActionsMenuProps {
   onShowToast: (msg: string) => void;
   onViewProfile?: (deal: Deal) => void;
   onEditKyc?: (deal: Deal) => void;
+  onAssistedKyc?: (deal: Deal) => void;
   onCallInvestor?: (deal: Deal) => void;
   onAdvanceStage?: (deal: Deal) => void;
 }
@@ -30,6 +33,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
   onShowToast,
   onViewProfile,
   onEditKyc,
+  onAssistedKyc,
   onCallInvestor,
   onAdvanceStage,
 }) => {
@@ -83,54 +87,161 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
 
   const handleReview = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     onOpenReview(deal);
   };
 
-  const handleCopy = (e: React.MouseEvent) => {
+  const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
-    // TODO(logic): Generate real dynamic customer token
-    const mockToken = `tok_${(deal.id || 'demo').replace(/[^a-zA-Z0-9]/g, '').slice(-8)}`;
-    const link = `${window.location.origin}/kyc/${mockToken}`;
-    navigator.clipboard?.writeText(link);
-    onShowToast(`KYC Link copied for ${deal.customerName} (demo)`);
+    try {
+      const kycId = (deal as any).kycId || (deal as any).kycRecordId;
+      if (kycId) {
+        const res = await fetch(`/api/irm/kyc/${kycId}`, { headers: getAuthHeaders() });
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.success && json?.data?.kycLinkToken) {
+            const link = `${window.location.origin}/kyc/${json.data.kycLinkToken}`;
+            await navigator.clipboard?.writeText(link);
+            onShowToast(`KYC Link copied for ${deal.customerName}`);
+            return;
+          }
+        }
+      }
+
+      // If no token on KYC yet, fetch/create real link from backend
+      const sendRes = await fetch('/api/irm/kyc/send-link', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          dealId: deal.id,
+          investorId: deal.customerId || deal.id,
+          customerName: deal.customerName,
+          email: deal.email || '',
+          phone: deal.phone || '',
+          baseUrl: window.location.origin,
+        }),
+      });
+      const sendJson = await sendRes.json();
+      if (sendRes.ok && sendJson?.success && sendJson?.data?.link) {
+        await navigator.clipboard?.writeText(sendJson.data.link);
+        onShowToast(`KYC Link copied for ${deal.customerName}`);
+      } else {
+        throw new Error(sendJson?.message || 'Could not copy link');
+      }
+    } catch (err: any) {
+      onShowToast(err.message || `Failed to copy KYC link for ${deal.customerName}`);
+    }
   };
 
-  const handleResend = (e: React.MouseEvent) => {
+  const handleResend = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
-    // TODO(logic): Connect to IRM notification / SMS / WhatsApp dispatch
-    onShowToast(`KYC Link resent to ${deal.customerName} (demo)`);
+    try {
+      const kycId = (deal as any).kycId || (deal as any).kycRecordId;
+      if (kycId) {
+        const res = await fetch(`/api/irm/kyc/${kycId}/resend-link`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify({ baseUrl: window.location.origin }),
+        });
+        const json = await res.json();
+        if (res.ok && json?.success) {
+          onShowToast(`KYC Link resent to ${deal.customerName}`);
+          return;
+        }
+      }
+
+      // Fallback to send-link endpoint
+      const sendRes = await fetch('/api/irm/kyc/send-link', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          dealId: deal.id,
+          investorId: deal.customerId || deal.id,
+          customerName: deal.customerName,
+          email: deal.email || '',
+          phone: deal.phone || '',
+          forceNewToken: true,
+          baseUrl: window.location.origin,
+        }),
+      });
+      const sendJson = await sendRes.json();
+      if (sendRes.ok && sendJson?.success) {
+        onShowToast(`KYC Link resent to ${deal.customerName}`);
+      } else {
+        throw new Error(sendJson?.message || 'Could not resend KYC link');
+      }
+    } catch (err: any) {
+      onShowToast(err.message || `Failed to resend KYC link for ${deal.customerName}`);
+    }
   };
 
-  const handleRevoke = (e: React.MouseEvent) => {
+  const handleRevoke = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
-    // TODO(logic): Invalidate link token in backend database
-    onShowToast(`KYC Link revoked for ${deal.customerName} (demo)`);
+    try {
+      const kycId = (deal as any).kycId || (deal as any).kycRecordId;
+      if (!kycId) {
+        onShowToast(`No active KYC link to revoke for ${deal.customerName}`);
+        return;
+      }
+      const res = await fetch(`/api/irm/kyc/${kycId}/revoke-link`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+      });
+      const json = await res.json();
+      if (res.ok && json?.success) {
+        onShowToast(`KYC Link revoked for ${deal.customerName}`);
+        window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
+      } else {
+        throw new Error(json?.message || 'Failed to revoke link');
+      }
+    } catch (err: any) {
+      onShowToast(err.message || `Failed to revoke KYC link for ${deal.customerName}`);
+    }
   };
 
   const handleProfile = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     if (onViewProfile) onViewProfile(deal);
   };
 
   const handleEditKyc = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     if (onEditKyc) onEditKyc(deal);
   };
 
   const handleCall = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     if (onCallInvestor) onCallInvestor(deal);
   };
 
   const handleAdvance = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsOpen(false);
     if (onAdvanceStage) onAdvanceStage(deal);
   };
@@ -218,6 +329,38 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
               <span>View Full Profile</span>
             </button>
           )}
+
+          {onAssistedKyc && (() => {
+            const draftRaw = localStorage.getItem(`nexus_kyc_draft_${deal.id}`);
+            let hasDraft = (deal as any).customerKycStatus === 'Assisted Draft';
+            let draftStep = 1;
+            if (draftRaw) {
+              try {
+                const parsed = JSON.parse(draftRaw);
+                if (parsed.isAssisted || parsed.step) {
+                  hasDraft = true;
+                  draftStep = parsed.step || 1;
+                }
+              } catch {}
+            }
+            return (
+              <button
+                type="button"
+                className="kyc-link-menu-item"
+                role="menuitem"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setIsOpen(false);
+                  onAssistedKyc(deal);
+                }}
+                style={{ color: hasDraft ? '#d97706' : '#7c3aed', fontWeight: 600 }}
+              >
+                <UserCheck size={14} color={hasDraft ? '#d97706' : '#7c3aed'} />
+                <span>{hasDraft ? `Resume Assisted KYC (Draft Step ${draftStep})` : 'Fill KYC on Behalf (Assisted)'}</span>
+              </button>
+            );
+          })()}
 
           {onEditKyc && (
             <button

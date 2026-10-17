@@ -69,10 +69,50 @@
   color: var(--text-secondary);
 }
 
-.document-item-delete-btn {
+.document-item-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
   flex-shrink: 0;
-  color: var(--danger);
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-md);
+}
+
+.document-action-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: none;
+  border: 1px solid var(--border-base);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.document-action-btn:hover {
+  background-color: var(--bg-surface-hover);
+  border-color: var(--border-base-hover);
+}
+
+.document-action-btn.whatsapp-btn {
+  border-color: rgba(37,211,102,0.3);
+  color: #25D366;
+}
+
+.document-action-btn.whatsapp-btn:hover {
+  background-color: rgba(37,211,102,0.1);
+  border-color: rgba(37,211,102,0.6);
+}
+
+.document-action-btn.delete-btn {
+  border-color: rgba(239,68,68,0.35);
+  background: rgba(239,68,68,0.1);
+  color: #f87171;
+}
+
+.document-action-btn.delete-btn:hover {
+  background: rgba(239,68,68,0.25);
+  border-color: rgba(239,68,68,0.6);
 }

@@ -247,6 +247,9 @@ export interface LogCallPayload {
   notes: string;
   leadId?: number | string;
   customerId?: number | string;
+  module?: string;
+  reason?: string;
+  twilioCallSid?: string;
 }
 
 // ==========================================
@@ -386,6 +389,9 @@ export const callsApi = {
       ...payload,
       leadId: payload.leadId ? Number(payload.leadId) : undefined,
       customerId: payload.customerId ? Number(payload.customerId) : undefined,
+      module: payload.module,
+      reason: payload.reason,
+      twilioCallSid: payload.twilioCallSid,
     };
     const res = await apiClient.post<ApiResponse<CallRecordDto>>('/sales-executive/calls', formatted);
     return res.data;
@@ -402,9 +408,31 @@ export const callsApi = {
     followupAt?: string;
     leadId?: number;
     customerId?: number;
+    module?: string;
+    reason?: string;
   }): Promise<CallRecordDto> {
     const res = await apiClient.post<ApiResponse<CallRecordDto>>('/sales-executive/calls/disposition', payload);
     return res.data;
+  },
+
+  async getIrmOtherRecords(params?: { module?: string; search?: string }): Promise<any[]> {
+    try {
+      const res = await apiClient.get<ApiResponse<any[]>>('/irm/other', params);
+      return res.data || [];
+    } catch {
+      const fallbackRes = await apiClient.get<ApiResponse<any[]>>('/sales-executive/calls/other', params);
+      return fallbackRes.data || [];
+    }
+  },
+
+  async getIrmCallOutcomes(module?: string): Promise<Record<string, string[]>> {
+    try {
+      const res = await apiClient.get<ApiResponse<Record<string, string[]>>>('/irm/call-outcomes', module ? { module } : undefined);
+      return res.data || {};
+    } catch {
+      const fallbackRes = await apiClient.get<ApiResponse<Record<string, string[]>>>('/sales-executive/calls/outcomes', module ? { module } : undefined);
+      return fallbackRes.data || {};
+    }
   },
 };
 

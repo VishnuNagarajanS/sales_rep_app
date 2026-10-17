@@ -41,7 +41,11 @@ public class ConsultationService : IConsultationService
         var consultantId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Consultations.AsNoTracking().Include(c => c.Consultant).AsQueryable();
+        var query = _context.Consultations.AsNoTracking()
+            .Include(c => c.Consultant)
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .AsQueryable();
 
         if (role == "super_admin")
         {
@@ -57,7 +61,9 @@ public class ConsultationService : IConsultationService
 
         if (role == "sales_executive" && consultantId.HasValue)
         {
-            query = query.Where(c => c.ConsultantId == consultantId.Value);
+            var agentUser = _context.Users.FirstOrDefault(u => u.Id == consultantId.Value);
+            var agentName = agentUser?.Name;
+            query = query.Where(c => c.ConsultantId == consultantId.Value || (agentName != null && c.ReferredByAgentName != null && EF.Functions.ILike(c.ReferredByAgentName, agentName)));
         }
 
         return query;
@@ -83,7 +89,9 @@ public class ConsultationService : IConsultationService
 
         if (role == "sales_executive" && consultantId.HasValue)
         {
-            query = query.Where(c => c.ConsultantId == consultantId.Value);
+            var agentUser = await _context.Users.FirstOrDefaultAsync(u => u.Id == consultantId.Value, ct);
+            var agentName = agentUser?.Name;
+            query = query.Where(c => c.ConsultantId == consultantId.Value || (agentName != null && c.ReferredByAgentName != null && EF.Functions.ILike(c.ReferredByAgentName, agentName)));
         }
 
         return await query.FirstOrDefaultAsync(ct);
@@ -138,22 +146,53 @@ public class ConsultationService : IConsultationService
     public async Task<ApiResponse<ConsultationResponseDto>> ScheduleConsultationAsync(
         ScheduleConsultationDto dto, CancellationToken ct = default)
     {
-        var consultantId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
+        var consultantId = _currentUser.UserId;
+        if (!consultantId.HasValue || consultantId.Value <= 0)
+            return ApiResponse<ConsultationResponseDto>.FailureResult("Unauthorized: User ID is missing.");
 
-        int.TryParse(dto.InvestorId, out var investorId);
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return ApiResponse<ConsultationResponseDto>.FailureResult("Unauthorized: Company ID is missing.");
+
+        int? finalInvestorId = null;
+        if (int.TryParse(dto.InvestorId, out var parsedInvId) && parsedInvId > 0)
+        {
+            var invExists = await _context.Investors.AnyAsync(i => i.Id == parsedInvId && i.CompanyId == companyId.Value, ct);
+            if (invExists) finalInvestorId = parsedInvId;
+        }
+
+        if (!finalInvestorId.HasValue && !string.IsNullOrWhiteSpace(dto.InvestorPhone))
+        {
+            var cleanPhone = dto.InvestorPhone.Trim();
+            var existingInv = await _context.Investors.FirstOrDefaultAsync(i => i.CompanyId == companyId.Value && i.Phone == cleanPhone, ct);
+            if (existingInv != null)
+            {
+                finalInvestorId = existingInv.Id;
+            }
+        }
+
+        var callerUser = await _context.Users.FirstOrDefaultAsync(u => u.Id == consultantId.Value, ct);
+        var targetConsultantId = dto.ConsultantId.HasValue && dto.ConsultantId.Value > 0
+            ? dto.ConsultantId.Value
+            : consultantId.Value;
+
+        var consultantUser = await _context.Users.FirstOrDefaultAsync(u => u.Id == targetConsultantId && u.CompanyId == companyId.Value, ct);
 
         var consultation = new Consultation
         {
-            CompanyId = companyId,
-            ConsultantId = consultantId,
-            InvestorId = investorId,
+            CompanyId = companyId.Value,
+            ConsultantId = targetConsultantId,
+            ConsultantName = consultantUser?.Name ?? (!string.IsNullOrWhiteSpace(dto.ConsultantName) ? dto.ConsultantName.Trim() : (callerUser?.Name ?? string.Empty)),
+            InvestorId = finalInvestorId,
             InvestorName = dto.InvestorName.Trim(),
             InvestorPhone = dto.InvestorPhone.Trim(),
             ScheduledAt = dto.ScheduledAt,
             Status = ConsultationStatus.Scheduled,
             Agenda = dto.Agenda?.Trim() ?? string.Empty,
             OutcomeNotes = dto.Notes?.Trim() ?? string.Empty,
+            ReferredByAgentName = !string.IsNullOrWhiteSpace(dto.ReferredByAgentName)
+                ? dto.ReferredByAgentName.Trim()
+                : (_currentUser.Role == "sales_executive" ? callerUser?.Name : null),
             CreatedAt = DateTime.UtcNow
         };
 
@@ -223,10 +262,26 @@ public class ConsultationService : IConsultationService
             Status = ConsultationStatus.Scheduled,
             Agenda = dto.Agenda,
             ReferredByAgentName = dto.ReferredByAgentName,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            HandoverId = investor?.HandoverId,
+            OriginalOwnerId = investor?.OriginalOwnerId
         };
 
         var created = await _consultationRepo.CreateAsync(consultation, ct);
+
+        if (investor?.HandoverId != null)
+        {
+            _context.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = investor.HandoverId.Value,
+                EntityType = "Consultation",
+                EntityId = created.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync(ct);
+        }
+
         return ApiResponse<ConsultationDto>.SuccessResponse(MapToIrmDto(created), "Consultation scheduled successfully");
     }
 
@@ -296,22 +351,27 @@ public class ConsultationService : IConsultationService
             CompanyId = c.CompanyId,
             ConsultantId = c.ConsultantId,
             ConsultantName = c.Consultant?.Name ?? c.ConsultantName,
-            InvestorId = c.InvestorId.ToString(),
+            InvestorId = c.InvestorId?.ToString() ?? string.Empty,
             InvestorName = c.InvestorName,
             InvestorPhone = c.InvestorPhone,
             ScheduledAt = c.ScheduledAt,
             Status = c.Status.ToString(),
             Agenda = c.Agenda,
             OutcomeNotes = c.OutcomeNotes ?? string.Empty,
+            ReferredByAgentName = c.ReferredByAgentName,
             CreatedAt = c.CreatedAt,
-            UpdatedAt = c.UpdatedAt
+            UpdatedAt = c.UpdatedAt,
+            HandoverId = c.HandoverId,
+            HandedOverFromName = c.OriginalOwner?.Name,
+            HandoverPlannedEnd = c.Handover?.PlannedEndAt,
+            OriginalOwnerId = c.OriginalOwnerId
         };
     }
 
     private static ConsultationDto MapToIrmDto(Consultation c) => new()
     {
         Id = c.Id,
-        InvestorId = c.InvestorId,
+        InvestorId = c.InvestorId ?? 0,
         CompanyId = c.CompanyId,
         ConsultantId = c.ConsultantId,
         ConsultantName = c.ConsultantName,
@@ -323,6 +383,51 @@ public class ConsultationService : IConsultationService
         OutcomeNotes = c.OutcomeNotes,
         ReferredByAgentName = c.ReferredByAgentName,
         CreatedAt = c.CreatedAt,
-        UpdatedAt = c.UpdatedAt
+        UpdatedAt = c.UpdatedAt,
+        HandoverId = c.HandoverId,
+        HandedOverFromName = c.OriginalOwner?.Name,
+        HandoverPlannedEnd = c.Handover?.PlannedEndAt,
+        OriginalOwnerId = c.OriginalOwnerId
     };
+
+    public async Task<ApiResponse<List<IrmUserDto>>> GetCompanyIrmsAsync(CancellationToken ct = default)
+    {
+        var companyId = _currentUser.CompanyId ?? 1;
+
+        var query = _context.Users
+            .AsNoTracking()
+            .Include(u => u.Role)
+            .Where(u => u.Role != null && (u.Role.Code == "irm" || u.Role.Name.ToLower().Contains("irm") || u.Role.Name.ToLower().Contains("investor relationship")))
+            .Where(u => u.Status == UserStatus.Active);
+
+        var companyIrms = await query
+            .Where(u => u.CompanyId == companyId)
+            .Select(u => new IrmUserDto
+            {
+                Id = u.Id,
+                Name = u.Name,
+                Email = u.Email,
+                Phone = u.Phone,
+                Status = "Available",
+                Specialization = "Wealth & Private Advisory"
+            })
+            .ToListAsync(ct);
+
+        if (companyIrms.Count == 0)
+        {
+            companyIrms = await query
+                .Select(u => new IrmUserDto
+                {
+                    Id = u.Id,
+                    Name = u.Name,
+                    Email = u.Email,
+                    Phone = u.Phone,
+                    Status = "Available",
+                    Specialization = "Wealth & Private Advisory"
+                })
+                .ToListAsync(ct);
+        }
+
+        return ApiResponse<List<IrmUserDto>>.SuccessResult(companyIrms, "Active IRMs retrieved successfully.");
+    }
 }

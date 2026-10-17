@@ -6,6 +6,7 @@ import { FEATURES } from '../../constants/features';
 import { getLeads, getDeals, getCalls, getConsultations, getOpportunities, getFollowups, getCustomers } from '../../services/ghlApiService';
 import { EmptyState } from '../../components/common/EmptyState';
 import { Lead, Deal, CallRecord, SiteVisit, Booking, Consultation, InvestmentOpportunity, Followup, Customer, User } from '../../types';
+import { IrmReportsView } from './components/IrmReportsView';
 import './ReportsPage.css';
 
 import { jaminApiService } from '../../services/jaminApiService';
@@ -14,6 +15,12 @@ import { isTenantMatch } from '../../services/ghlApiService';
 
 export const ReportsPage: React.FC = () => {
   const { tenant, user, enabledFeatures } = useAuth();
+  const isIrm = user?.role?.code === 'irm';
+
+  if (isIrm) {
+    return <IrmReportsView />;
+  }
+
   const [period, setPeriod] = useState<'week' | 'month' | 'quarter'>('month');
   const [myPerfPeriod, setMyPerfPeriod] = useState<'week' | 'month' | 'year'>('month');
 
@@ -804,11 +811,11 @@ export const ReportsPage: React.FC = () => {
           ? bookings.filter(b => (b.agentId && b.agentId === user?.id) || (b.agentName && b.agentName === user?.name))
           : bookings;
 
-        const periodVisits = scopedVisits.filter(v => isWithinPeriod(v.scheduledAt, period));
+        const periodVisits = scopedVisits.filter(v => Boolean(v.scheduledAt && isWithinPeriod(v.scheduledAt, period)));
         const completedVisits = periodVisits.filter(v => v.status === 'Completed').length;
         const noShowVisits = periodVisits.filter(v => v.status === 'No-show').length;
 
-        const periodBookings = scopedBookings.filter(b => isWithinPeriod(b.bookingDate, period));
+        const periodBookings = scopedBookings.filter(b => Boolean(b.bookingDate && isWithinPeriod(b.bookingDate, period)));
         const bookingRate = periodVisits.length > 0 ? ((periodBookings.length / periodVisits.length) * 100).toFixed(1) : null;
         const totalBookingValue = periodBookings.reduce((acc, b) => acc + (b.totalAmount || 0), 0);
 

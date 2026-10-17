@@ -4,7 +4,24 @@ using backend.Models.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 
+// S1: Load .env file (if present) before any configuration is read.
+// This allows developers to keep secrets out of appsettings.json by placing
+// a backend/.env file with environment-variable-style overrides, e.g.:
+//   ConnectionStrings__DefaultConnection=Host=...
+//   JwtSettings__SecretKey=...
+// The file is optional; if missing, standard env vars / appsettings.json apply.
+DotNetEnv.Env.TraversePath().Load();
+
+// Ensure wwwroot directory exists to avoid PhysicalFileProvider DirectoryNotFoundException
+var wwwrootDirectory = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+if (!Directory.Exists(wwwrootDirectory))
+{
+    Directory.CreateDirectory(wwwrootDirectory);
+}
+
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddUserSecrets<Program>(optional: true);
+
 
 // Load .env if present in root directory
 var envFilePath = Path.Combine(builder.Environment.ContentRootPath, ".env");
@@ -43,6 +60,7 @@ builder.Services.AddHostedService<backend.Services.Implementations.JaminHoldExpi
 // 3. Add JWT Authentication & Authorization
 builder.Services.AddJwtAuthentication(builder.Configuration);
 builder.Services.AddAuthorization();
+builder.Services.AddSignalR();
 
 // 4. Configure CORS
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
@@ -71,6 +89,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 
     c.CustomSchemaIds(type => type.FullName?.Replace("+", ".") ?? type.Name);
+    c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First());
 
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
@@ -102,191 +121,275 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
-    var useInMemory = config.GetValue<bool>("UseInMemoryDatabase", false);
+    var connectionString = config.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        connectionString = config["ConnectionStrings:DefaultConnection"]
+            ?? config["ConnectionString:DefaultConnection"];
+    }
+    var hasValidConnectionString = !string.IsNullOrWhiteSpace(connectionString) && !connectionString.Equals("InMemory", StringComparison.OrdinalIgnoreCase);
+    var useInMemory = config.GetValue<bool>("UseInMemoryDatabase", !hasValidConnectionString) || !hasValidConnectionString;
     var db = scope.ServiceProvider.GetRequiredService<backend.Data.ApplicationDbContext>();
     if (useInMemory)
     {
+        Console.WriteLine("[Database] WARNING: Running with in-memory database. Password changes and state will not persist across restarts.");
         db.Database.EnsureCreated();
     }
     else
     {
+        Console.WriteLine($"[Database] Connected to persistent database provider: {db.Database.ProviderName}");
+        string? migrationError = null;
         try
         {
-            if (db.Database.GetPendingMigrations().Any())
+            Console.WriteLine("[Database] Applying database migrations to PostgreSQL...");
+            db.Database.Migrate();
+            Console.WriteLine("[Database] Database migrations applied successfully.");
+        }
+        catch (Exception migEx)
+        {
+            migrationError = migEx.Message;
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[Database Migration Error] {migEx.Message}");
+            if (migEx.InnerException != null)
             {
-                db.Database.Migrate();
+                Console.WriteLine($"[Database Migration Inner Exception] {migEx.InnerException.Message}");
             }
-        }
-        catch (Exception migrateEx)
-        {
-            Console.WriteLine($"[Database Migration Warning] {migrateEx.Message}");
+            Console.ResetColor();
         }
 
-        // Schema Auto-Patch: Ensure any added entity columns exist in PostgreSQL tables
+        if (!string.IsNullOrEmpty(migrationError))
+        {
+            throw new InvalidOperationException($"Application startup aborted: Database migration failed ({migrationError}). Background services and seeders will not run on an unmigrated database.", new Exception(migrationError));
+        }
+
+
+
+        // Patch: ensure tenants have EnabledFeatures populated
         try
         {
-            var alterQueries = new[]
+            var tenants = db.Tenants.ToList();
+            bool patched = false;
+            foreach (var t in tenants)
             {
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""ReadyToRegister"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""TargetDevelopment"" VARCHAR(200);",
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""BudgetRange"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""AssetClass"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""Horizon"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""InvestorType"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""CustomFieldsJson"" TEXT;",
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""PreferredVisitDate"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""PreferredTimeSlot"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""AnythingWeShouldKnow"" VARCHAR(2000);",
-                @"ALTER TABLE IF EXISTS ""leads"" ADD COLUMN IF NOT EXISTS ""WhatAreYouLookingFor"" VARCHAR(2000);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""ReadyToRegister"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""TargetDevelopment"" VARCHAR(200);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""BudgetRange"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""AssetClass"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""Horizon"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""InvestorType"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""CustomFieldsJson"" TEXT;",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""PreferredVisitDate"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""PreferredTimeSlot"" VARCHAR(100);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""AnythingWeShouldKnow"" VARCHAR(2000);",
-                @"ALTER TABLE IF EXISTS leads ADD COLUMN IF NOT EXISTS ""WhatAreYouLookingFor"" VARCHAR(2000);",
-                @"ALTER TABLE IF EXISTS ""followups"" ADD COLUMN IF NOT EXISTS ""FollowupType"" VARCHAR(50);",
-                @"ALTER TABLE IF EXISTS followups ADD COLUMN IF NOT EXISTS ""FollowupType"" VARCHAR(50);",
-                @"ALTER TABLE IF EXISTS ""followups"" ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS ""followups"" ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"ALTER TABLE IF EXISTS followups ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS followups ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"CREATE INDEX IF NOT EXISTS ""IX_followups_LeadId"" ON ""followups"" (""LeadId"");",
-                @"CREATE INDEX IF NOT EXISTS ""IX_followups_CustomerId"" ON ""followups"" (""CustomerId"");",
+                if (t.EnabledFeatures == null || t.EnabledFeatures.Count == 0)
+                {
+                    if (t.Slug == "ghl")
+                    {
+                        t.EnabledFeatures = new List<string>
+                        {
+                            "leads", "customers", "deals", "followups", "calls", "call-recording",
+                            "call-transcription", "investors", "consultations", "investment-opportunities",
+                            "reports", "users", "roles", "company-settings", "audit-logs"
+                        };
+                        patched = true;
+                    }
+                    else if (t.Slug == "jamin")
+                    {
+                        t.EnabledFeatures = new List<string>
+                        {
+                            "leads", "customers", "deals", "followups", "calls", "call-recording",
+                            "call-transcription", "properties", "site-visits", "bookings",
+                            "reports", "users", "roles", "company-settings", "audit-logs"
+                        };
+                        patched = true;
+                    }
+                }
+            }
+            if (patched) db.SaveChanges();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Tenant Feature Patch Warning] {ex.Message}");
+        }
 
-                @"ALTER TABLE IF EXISTS ""site_visits"" ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS ""site_visits"" ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"ALTER TABLE IF EXISTS site_visits ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS site_visits ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"CREATE INDEX IF NOT EXISTS ""IX_site_visits_LeadId"" ON ""site_visits"" (""LeadId"");",
-                @"CREATE INDEX IF NOT EXISTS ""IX_site_visits_CustomerId"" ON ""site_visits"" (""CustomerId"");",
+        // Patch: remove sales_manager role and migrate any users with sales_manager to sales_executive
+        try
+        {
+            var salesManagerRole = db.Roles.FirstOrDefault(r => r.Code == "sales_manager" || r.Id == 5);
+            var salesExecutiveRole = db.Roles.FirstOrDefault(r => r.Code == "sales_executive" || r.Id == 3);
 
-                @"ALTER TABLE IF EXISTS ""jamin_bookings"" ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS ""jamin_bookings"" ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"CREATE INDEX IF NOT EXISTS ""IX_jamin_bookings_LeadId"" ON ""jamin_bookings"" (""LeadId"");",
-                @"CREATE INDEX IF NOT EXISTS ""IX_jamin_bookings_CustomerId"" ON ""jamin_bookings"" (""CustomerId"");",
-
-                @"ALTER TABLE IF EXISTS ""call_records"" ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS ""call_records"" ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"ALTER TABLE IF EXISTS call_records ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS call_records ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"CREATE INDEX IF NOT EXISTS ""IX_call_records_LeadId"" ON ""call_records"" (""LeadId"");",
-                @"CREATE INDEX IF NOT EXISTS ""IX_call_records_CustomerId"" ON ""call_records"" (""CustomerId"");",
-
-                @"ALTER TABLE IF EXISTS ""Notifications"" ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS ""Notifications"" ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"ALTER TABLE IF EXISTS ""notifications"" ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS ""notifications"" ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"CREATE INDEX IF NOT EXISTS ""IX_Notifications_LeadId"" ON ""Notifications"" (""LeadId"");",
-                @"CREATE INDEX IF NOT EXISTS ""IX_Notifications_CustomerId"" ON ""Notifications"" (""CustomerId"");",
-
-                @"ALTER TABLE IF EXISTS ""AuditLogs"" ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS ""AuditLogs"" ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"ALTER TABLE IF EXISTS ""audit_logs"" ADD COLUMN IF NOT EXISTS ""LeadId"" integer;",
-                @"ALTER TABLE IF EXISTS ""audit_logs"" ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;",
-                @"CREATE INDEX IF NOT EXISTS ""IX_AuditLogs_LeadId"" ON ""AuditLogs"" (""LeadId"");",
-                @"CREATE INDEX IF NOT EXISTS ""IX_AuditLogs_CustomerId"" ON ""AuditLogs"" (""CustomerId"");",
-
-                // Allow storing full Base64 image data for project master layout blueprints
-                @"ALTER TABLE IF EXISTS jamin_projects ALTER COLUMN ""ImageUrl"" TYPE TEXT;",
-
-                // Jamin Bookings: Separate PaymentStatus, Financial Breakdown, and Cancellation Audit
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""PaymentStatus"" VARCHAR(50) NOT NULL DEFAULT 'Pending';",
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""HoldExpiresAt"" timestamp with time zone;",
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""BasePrice"" numeric(18,2) NOT NULL DEFAULT 0;",
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""DevelopmentCharges"" numeric(18,2) NOT NULL DEFAULT 0;",
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""ApprovedDiscounts"" numeric(18,2) NOT NULL DEFAULT 0;",
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""CancelledAt"" timestamp with time zone;",
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""CancelledByUserId"" integer;",
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""CancelledByName"" VARCHAR(150);",
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""CancellationReason"" VARCHAR(2000);",
-                @"ALTER TABLE IF EXISTS jamin_bookings ADD COLUMN IF NOT EXISTS ""RefundAmount"" numeric(18,2) NOT NULL DEFAULT 0;",
-
-                // Guard foreign key constraint for CancelledByUserId
-                @"DO $$ BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM information_schema.table_constraints 
-                        WHERE constraint_schema = 'public' AND table_name = 'jamin_bookings' AND constraint_name = 'FK_jamin_bookings_users_CancelledByUserId'
-                    ) THEN
-                        ALTER TABLE jamin_bookings ADD CONSTRAINT ""FK_jamin_bookings_users_CancelledByUserId"" 
-                            FOREIGN KEY (""CancelledByUserId"") REFERENCES users (""Id"") ON DELETE SET NULL;
-                    END IF;
-                END $$;",
-
-                // PostgreSQL Partial Index: Verify if legacy duplicates exist before enforcing UNIQUE
-                @"DO $$ BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_indexes 
-                        WHERE schemaname = 'public' AND tablename = 'jamin_bookings' AND indexname = 'IX_jamin_bookings_CompanyId_PlotId_Active'
-                    ) THEN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM (
-                                SELECT ""CompanyId"", ""PlotId"" 
-                                FROM jamin_bookings 
-                                WHERE ""PlotId"" IS NOT NULL 
-                                  AND ""Status"" IN ('Hold', 'Pending Verification', 'Booking Pending Verification', 'Token Paid', 'Token Verified', 'Agreement Signed', 'Registration Completed')
-                                GROUP BY ""CompanyId"", ""PlotId"" 
-                                HAVING COUNT(*) > 1
-                            ) dupes
-                        ) THEN
-                            CREATE UNIQUE INDEX ""IX_jamin_bookings_CompanyId_PlotId_Active"" 
-                            ON jamin_bookings (""CompanyId"", ""PlotId"") 
-                            WHERE ""PlotId"" IS NOT NULL AND ""Status"" IN ('Hold', 'Pending Verification', 'Booking Pending Verification', 'Token Paid', 'Token Verified', 'Agreement Signed', 'Registration Completed');
-                        ELSE
-                            CREATE INDEX ""IX_jamin_bookings_CompanyId_PlotId_Active"" 
-                            ON jamin_bookings (""CompanyId"", ""PlotId"") 
-                            WHERE ""PlotId"" IS NOT NULL AND ""Status"" IN ('Hold', 'Pending Verification', 'Booking Pending Verification', 'Token Paid', 'Token Verified', 'Agreement Signed', 'Registration Completed');
-                        END IF;
-                    END IF;
-                END $$;",
-
-                // Jamin Payment Ledger Table (with RESTRICT on BookingId to protect audit history)
-                @"CREATE TABLE IF NOT EXISTS jamin_payments (
-                    ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                    ""CompanyId"" integer NOT NULL,
-                    ""BookingId"" integer NOT NULL,
-                    ""CustomerId"" integer,
-                    ""LeadId"" integer,
-                    ""Amount"" numeric(18,2) NOT NULL,
-                    ""PaymentType"" character varying(50) NOT NULL DEFAULT 'Token',
-                    ""PaymentMode"" character varying(100) NOT NULL DEFAULT 'Bank Transfer / NEFT',
-                    ""TransactionReference"" character varying(200) NOT NULL DEFAULT '',
-                    ""Status"" character varying(50) NOT NULL DEFAULT 'Pending',
-                    ""VerifiedAt"" timestamp with time zone,
-                    ""VerifiedByUserId"" integer,
-                    ""VerifiedByName"" character varying(150),
-                    ""ReceiptNumber"" character varying(100),
-                    ""Notes"" character varying(2000),
-                    ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT (NOW()),
-                    ""UpdatedAt"" timestamp with time zone,
-                    CONSTRAINT ""FK_jamin_payments_tenants_CompanyId"" FOREIGN KEY (""CompanyId"") REFERENCES tenants (""Id"") ON DELETE CASCADE,
-                    CONSTRAINT ""FK_jamin_payments_jamin_bookings_BookingId"" FOREIGN KEY (""BookingId"") REFERENCES jamin_bookings (""Id"") ON DELETE RESTRICT,
-                    CONSTRAINT ""FK_jamin_payments_customers_CustomerId"" FOREIGN KEY (""CustomerId"") REFERENCES customers (""Id"") ON DELETE SET NULL,
-                    CONSTRAINT ""FK_jamin_payments_leads_LeadId"" FOREIGN KEY (""LeadId"") REFERENCES leads (""Id"") ON DELETE SET NULL,
-                    CONSTRAINT ""FK_jamin_payments_users_VerifiedByUserId"" FOREIGN KEY (""VerifiedByUserId"") REFERENCES users (""Id"") ON DELETE SET NULL
-                );",
-                @"CREATE INDEX IF NOT EXISTS ""IX_jamin_payments_BookingId"" ON jamin_payments (""BookingId"");",
-                @"CREATE INDEX IF NOT EXISTS ""IX_jamin_payments_CustomerId"" ON jamin_payments (""CustomerId"");",
-                @"CREATE INDEX IF NOT EXISTS ""IX_jamin_payments_LeadId"" ON jamin_payments (""LeadId"");",
-                @"CREATE INDEX IF NOT EXISTS ""IX_jamin_payments_Status"" ON jamin_payments (""Status"");"
-            };
-
-            foreach (var q in alterQueries)
+            if (salesExecutiveRole != null)
             {
-                try { db.Database.ExecuteSqlRaw(q); } catch { }
+                var managerUsers = db.Users.Where(u => u.RoleId == 5 || (salesManagerRole != null && u.RoleId == salesManagerRole.Id)).ToList();
+                if (managerUsers.Any())
+                {
+                    foreach (var u in managerUsers)
+                    {
+                        u.RoleId = salesExecutiveRole.Id;
+                        Console.WriteLine($"[Role Migration] Migrated user '{u.Email}' (ID: {u.Id}) from sales_manager to sales_executive.");
+                    }
+                    db.SaveChanges();
+                }
+
+                if (salesManagerRole != null)
+                {
+                    db.Roles.Remove(salesManagerRole);
+                    db.SaveChanges();
+                    Console.WriteLine("[Role Migration] Removed obsolete 'sales_manager' role from database.");
+                }
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Schema Auto-Patch Warning] {ex.Message}");
+            Console.WriteLine($"[Role Migration Warning] {ex.Message}");
+        }
+
+        // Patch: ensure roles have Permissions populated
+        try
+        {
+            var allRoles = db.Roles.ToList();
+            bool rolePatched = false;
+            var allPerms = new[] {
+                "leads.view","leads.create","leads.update","leads.delete","leads.assign","leads.export","leads.import","leads.convert",
+                "customers.view","customers.create","customers.update","customers.delete",
+                "deals.view","deals.create","deals.update","deals.delete",
+                "calls.make","calls.receive","calls.view","calls.recordings.play",
+                "followups.view","followups.create","followups.update",
+                "properties.view","properties.update","site-visits.view","site-visits.create","bookings.view","bookings.create",
+                "investors.view","investors.create","investors.update",
+                "consultations.view","consultations.create","consultations.update",
+                "opportunities.view","opportunities.create","opportunities.update",
+                "reports.view","reports.export",
+                "users.view","users.manage","roles.view","settings.view","settings.update","audit.view",
+                "chat.view","chat.send","kyc.view","kyc.approve"
+            };
+            foreach (var role in allRoles)
+            {
+                if (role.Permissions == null || role.Permissions.Count == 0)
+                {
+                    if (role.Code == "super_admin" || role.Code == "company_admin")
+                        role.Permissions = allPerms.ToList();
+                    else if (role.Code == "irm")
+                        role.Permissions = new List<string> {
+                            "leads.view","leads.create","leads.update",
+                            "followups.view","followups.create","followups.update",
+                            "investors.view","investors.create","investors.update",
+                            "consultations.view","consultations.create","consultations.update",
+                            "opportunities.view","opportunities.create","opportunities.update",
+                            "deals.view","deals.create","deals.update",
+                            "kyc.view","kyc.approve",
+                            "calls.make","calls.receive","calls.view","reports.view","chat.view","chat.send"
+                        };
+                    else // sales_executive
+                        role.Permissions = new List<string> {
+                            "leads.view","leads.create","leads.update","leads.convert",
+                            "customers.view","customers.create","customers.update",
+                            "deals.view","deals.create","deals.update",
+                            "calls.make","calls.receive","calls.view",
+                            "followups.view","followups.create","followups.update","chat.view","chat.send"
+                        };
+                    rolePatched = true;
+                }
+            }
+            if (rolePatched) db.SaveChanges();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Role Permissions Patch Warning] {ex.Message}");
+        }
+
+        // Startup deduplication & cleanup for followups table
+        try
+        {
+            // 1. Remove all old superseded placeholder rows created by superseded loops
+            var supersededFollowups = db.Followups.Where(f => f.Notes != null && f.Notes.Contains("Superseded by follow-up scheduled for")).ToList();
+            if (supersededFollowups.Any())
+            {
+                db.Followups.RemoveRange(supersededFollowups);
+                db.SaveChanges();
+                Console.WriteLine($"[Followup Cleanup] Removed {supersededFollowups.Count} superseded placeholder follow-up rows.");
+            }
+
+            // 2. Deduplicate pending followups per company & contact/phone
+            var allPendingFollowups = db.Followups.Where(f => f.Status == backend.Models.Enums.FollowupStatus.Pending).ToList();
+            var groupedPending = allPendingFollowups
+                .GroupBy(f => new
+                {
+                    f.CompanyId,
+                    Key = !string.IsNullOrWhiteSpace(f.ContactId) && f.ContactId != "contact-new" ? f.ContactId.Trim() : (f.ContactPhone != null && f.ContactPhone.Length >= 10 ? f.ContactPhone[^10..] : (f.ContactPhone ?? string.Empty))
+                })
+                .Where(g => !string.IsNullOrEmpty(g.Key.Key) && g.Count() > 1);
+
+            bool dupsCleaned = false;
+            foreach (var group in groupedPending)
+            {
+                var sorted = group.OrderByDescending(f => f.UpdatedAt ?? f.CreatedAt).ThenByDescending(f => f.Id).ToList();
+                var toRemove = sorted.Skip(1).ToList();
+                db.Followups.RemoveRange(toRemove);
+                dupsCleaned = true;
+            }
+            if (dupsCleaned)
+            {
+                db.SaveChanges();
+                Console.WriteLine("[Followup Cleanup] Deduplicated multiple pending follow-up records.");
+            }
+
+            // 3. For any lead that is currently in 'Callback' or 'No Response' or 'New' or 'Contacted',
+            // remove any followup record mistakenly created for it so the lead stays strictly in My Leads.
+            var myLeadsStatuses = new[] { "Callback", "No Response", "New", "Contacted" };
+            var activeMyLeads = db.Leads.Where(l => myLeadsStatuses.Contains(l.Status)).ToList();
+            var activeMyLeadPhones = activeMyLeads.Select(l => l.Phone?.Length >= 10 ? l.Phone[^10..] : l.Phone ?? "").Where(p => !string.IsNullOrEmpty(p)).ToHashSet();
+            var activeMyLeadIds = activeMyLeads.Select(l => l.Id.ToString()).ToHashSet();
+
+            var strayFollowups = db.Followups
+                .Where(f =>
+                    (f.ContactId != null && activeMyLeadIds.Contains(f.ContactId)) ||
+                    (f.ContactPhone != null && activeMyLeadPhones.Contains(f.ContactPhone.Length >= 10 ? f.ContactPhone.Substring(f.ContactPhone.Length - 10) : f.ContactPhone)))
+                .ToList();
+
+            if (strayFollowups.Any())
+            {
+                db.Followups.RemoveRange(strayFollowups);
+                db.SaveChanges();
+                Console.WriteLine($"[Followup Cleanup] Removed {strayFollowups.Count} stray follow-up records for leads that belong in My Leads.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Followup Cleanup Warning] {ex.Message}");
+        }
+
+        try
+        {
+            var pendingMigrations = db.Database.GetPendingMigrations().ToList();
+            if (pendingMigrations.Any())
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("================================================================================");
+                Console.WriteLine($"[WARNING] There are {pendingMigrations.Count} pending EF Core migration(s) not yet applied to the database:");
+                foreach (var m in pendingMigrations)
+                {
+                    Console.WriteLine($"  - {m}");
+                }
+                Console.WriteLine("Run 'dotnet ef database update' in backend/ to apply pending migrations.");
+                Console.WriteLine("================================================================================");
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.WriteLine("[Database] All EF Core migrations are up to date.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Database Migration Check Warning] {ex.Message}");
+
+        }
+
+        try
+        {
+            var superAdmin = db.Users.FirstOrDefault(u => u.Id == 1 || u.Email == "yanosh@ghlindiaventures.com");
+            if (superAdmin != null && string.IsNullOrWhiteSpace(superAdmin.PasswordHash))
+            {
+                superAdmin.PasswordHash = backend.Helpers.PasswordHasher.HashPassword("Password@123");
+                superAdmin.IsProtected = true;
+                db.SaveChanges();
+                Console.WriteLine("[Security Init] Initialized empty Super Admin password hash.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Security Init Warning] {ex.Message}");
         }
     }
 
@@ -389,127 +492,51 @@ using (var scope = app.Services.CreateScope())
         Console.WriteLine($"[Role Permissions Patch Warning] {ex.Message}");
     }
 
-    // Patch: ensure real sample follow-ups exist in PostgreSQL if table is empty
+    // Clean up any old mock follow-ups or legacy mock user accounts
     try
     {
-        if (!db.Followups.Any())
+        var mockFollowups = db.Followups
+            .Where(f => (f.AssignedToName != null && f.AssignedToName.Contains("Rajesh")) ||
+                        (f.Notes != null && f.Notes.Contains("Initial introductory call completed successfully")) ||
+                        (f.Notes != null && f.Notes.Contains("Discussion on portfolio allocation and investment ticket size")) ||
+                        (f.Notes != null && f.Notes.Contains("Quarterly wealth check-in and investment strategy review")))
+            .ToList();
+        if (mockFollowups.Any())
         {
-            var leads = db.Leads.Take(10).ToList();
-            var customers = db.Customers.Take(10).ToList();
-            var users = db.Users.ToList();
+            db.Followups.RemoveRange(mockFollowups);
+            db.SaveChanges();
+            Console.WriteLine($"[Cleanup] Removed {mockFollowups.Count} mock follow-up records.");
+        }
 
-            var seedFollowups = new List<backend.Models.Entities.Followup>();
-
-            // 1. GHL Lead follow-up
-            var ghlLead = leads.FirstOrDefault(l => l.CompanyId == 1);
-            var ghlAgent = users.FirstOrDefault(u => u.CompanyId == 1 && u.RoleId == 4)
-                        ?? users.FirstOrDefault(u => u.CompanyId == 1)
-                        ?? users.FirstOrDefault();
-            if (ghlLead != null)
-            {
-                seedFollowups.Add(new backend.Models.Entities.Followup
-                {
-                    CompanyId = 1,
-                    AssignedAgentId = ghlAgent?.Id,
-                    AssignedToName = ghlAgent?.Name ?? "Naveen",
-                    AssignedToRole = "sales_executive",
-                    ContactId = ghlLead.Id.ToString(),
-                    ContactType = "lead",
-                    ContactName = ghlLead.Name,
-                    ContactPhone = ghlLead.Phone,
-                    ScheduledAt = DateTime.UtcNow.AddDays(1).Date.AddHours(11), // Tomorrow 11:00 AM UTC
-                    Priority = "High",
-                    Status = backend.Models.Enums.FollowupStatus.Pending,
-                    Notes = "Discussion on portfolio allocation and investment ticket size",
-                    FollowupType = "call",
-                    CreatedAt = DateTime.UtcNow
-                });
-            }
-
-            // 2. GHL Customer follow-up
-            var ghlCust = customers.FirstOrDefault(c => c.CompanyId == 1);
-            if (ghlCust != null)
-            {
-                seedFollowups.Add(new backend.Models.Entities.Followup
-                {
-                    CompanyId = 1,
-                    AssignedAgentId = ghlAgent?.Id,
-                    AssignedToName = ghlAgent?.Name ?? "Naveen",
-                    AssignedToRole = "sales_executive",
-                    ContactId = ghlCust.Id.ToString(),
-                    ContactType = "customer",
-                    ContactName = ghlCust.Name,
-                    ContactPhone = ghlCust.Phone,
-                    ScheduledAt = DateTime.UtcNow.AddDays(2).Date.AddHours(14), // In 2 days 2:00 PM UTC
-                    Priority = "Medium",
-                    Status = backend.Models.Enums.FollowupStatus.Pending,
-                    Notes = "Quarterly wealth check-in and investment strategy review",
-                    FollowupType = "meeting",
-                    CreatedAt = DateTime.UtcNow
-                });
-            }
-
-            // 3. Jamin Lead follow-up
-            var jaminLead = leads.FirstOrDefault(l => l.CompanyId == 2);
-            var jaminAgent = users.FirstOrDefault(u => u.CompanyId == 2 && u.RoleId == 4)
-                          ?? users.FirstOrDefault(u => u.CompanyId == 2)
-                          ?? users.FirstOrDefault();
-            if (jaminLead != null)
-            {
-                seedFollowups.Add(new backend.Models.Entities.Followup
-                {
-                    CompanyId = 2,
-                    AssignedAgentId = jaminAgent?.Id,
-                    AssignedToName = jaminAgent?.Name ?? "Rajesh Sharma",
-                    AssignedToRole = "sales_executive",
-                    ContactId = jaminLead.Id.ToString(),
-                    ContactType = "lead",
-                    ContactName = jaminLead.Name,
-                    ContactPhone = jaminLead.Phone,
-                    ScheduledAt = DateTime.UtcNow.AddHours(18),
-                    Priority = "High",
-                    Status = backend.Models.Enums.FollowupStatus.Pending,
-                    Notes = string.Empty,
-                    FollowupType = "whatsapp",
-                    CreatedAt = DateTime.UtcNow
-                });
-            }
-
-            // 4. Completed follow-up record for audit history
-            if (ghlLead != null)
-            {
-                seedFollowups.Add(new backend.Models.Entities.Followup
-                {
-                    CompanyId = 1,
-                    AssignedAgentId = ghlAgent?.Id,
-                    AssignedToName = ghlAgent?.Name ?? "Naveen",
-                    AssignedToRole = "sales_executive",
-                    ContactId = ghlLead.Id.ToString(),
-                    ContactType = "lead",
-                    ContactName = ghlLead.Name,
-                    ContactPhone = ghlLead.Phone,
-                    ScheduledAt = DateTime.UtcNow.AddDays(-2),
-                    Priority = "Medium",
-                    Status = backend.Models.Enums.FollowupStatus.Completed,
-                    CompletedAt = DateTime.UtcNow.AddDays(-2).AddMinutes(35),
-                    Notes = "Initial introductory call completed successfully",
-                    FollowupType = "call",
-                    CreatedAt = DateTime.UtcNow.AddDays(-3)
-                });
-            }
-
-            if (seedFollowups.Any())
-            {
-                db.Followups.AddRange(seedFollowups);
-                db.SaveChanges();
-            }
+        var legacyRajeshUsers = db.Users.Where(u => u.Email.Contains("rajesh@") || u.Name.Contains("Rajesh Sharma")).ToList();
+        if (legacyRajeshUsers.Any())
+        {
+            db.Users.RemoveRange(legacyRajeshUsers);
+            db.SaveChanges();
+            Console.WriteLine($"[Cleanup] Removed {legacyRajeshUsers.Count} legacy Rajesh user account(s).");
         }
     }
-    catch (Exception seedEx)
+    catch (Exception ex)
     {
-        Console.WriteLine($"[Followups Seeder Warning] {seedEx.Message}");
+        Console.WriteLine($"[Cleanup Warning] {ex.Message}");
     }
+
+    try
+    {
+        var helpMeDecide = db.Leads.Count(l => l.CustomFieldsJson != null && l.CustomFieldsJson.Contains("help me decide"));
+        var notConfirmed = db.Leads.Count(l => l.CustomFieldsJson != null && (l.CustomFieldsJson.Contains("\"assetClass\":\"") || l.CustomFieldsJson.Contains("\"preferredAssetClass\":\"")) && !l.CustomFieldsJson.Contains("\"irmPreferencesConfirmed\":true"));
+        Console.WriteLine($"[DIAGNOSTIC] Count with help me decide: {helpMeDecide}");
+        Console.WriteLine($"[DIAGNOSTIC] Count with asset class but not confirmed: {notConfirmed}");
+    }
+    catch { }
 }
+
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor 
+                     | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto 
+                     | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost
+});
 
 // Global Exception Handling Middleware
 app.UseMiddleware<ExceptionHandlingMiddleware>();
@@ -543,11 +570,27 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("DefaultCorsPolicy");
 
+// Serve uploaded documents, but never let the browser render them inline as HTML/scripts.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        var path = ctx.Context.Request.Path.Value ?? string.Empty;
+        if (path.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            ctx.Context.Response.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+            ctx.Context.Response.Headers["Content-Disposition"] = "attachment";
+        }
+    }
+});
+
 app.UseAuthentication();
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<backend.Hubs.PlatformHub>("/hubs/platform");
 
 app.Run();
 

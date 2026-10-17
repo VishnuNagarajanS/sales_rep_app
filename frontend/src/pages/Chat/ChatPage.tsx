@@ -45,8 +45,8 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
       id: String(user.id),
       name: user.name,
       email: user.email,
-      roleCode: user.role?.code || 'sales_executive',
-      roleName: user.role?.name || 'Sales Executive',
+      roleCode: user.role?.code || '',
+      roleName: user.role?.name || '',
       companyId: String(companyId),
       status: currentPresenceStatus,
     };
@@ -103,6 +103,7 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
 
   const loadData = useCallback(() => {
     if (!companyId) return;
+
 
     // Load conversations or initialize team channel
     let convs = cs.getConversations(companyId);

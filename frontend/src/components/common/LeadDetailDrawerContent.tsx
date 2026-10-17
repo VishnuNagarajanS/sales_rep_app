@@ -15,12 +15,14 @@ import {
   User,
   MapPin,
 } from 'lucide-react';
-import { AuditLog, CallDisposition, CallRecord, Consultation, SiteVisit, Followup } from '../../types';
+import { AuditLog, CallDisposition, CallRecord, Consultation, SiteVisit, Followup, Lead } from '../../types';
 import { storageService } from '../../services/storageService';
 import { jaminApiService } from '../../services/jaminApiService';
-import { getAuditLogs, getFollowups, getCalls } from '../../services/ghlApiService';
+import { getAuditLogs, getFollowups, getCalls, saveLead as apiSaveLead } from '../../services/ghlApiService';
 import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from './StatusChip';
+
+export type Lead360Tab = 'overview' | 'followups' | 'siteVisits' | 'callRecordings' | 'timeline';
 
 interface LeadDetailDrawerContentProps {
   /** The contact's display name */
@@ -39,9 +41,7 @@ interface LeadDetailDrawerContentProps {
   onCall: () => void;
   /**
    * Optional whitelist of dispositions to include in call history.
-   * When undefined or empty, ALL dispositions are shown (suitable for
-   * Junk / Not Interested pages that need the full history).
-   * Follow-up page passes ['Follow-up Required', 'Call Back'].
+   * When undefined or empty, ALL dispositions are shown.
    */
   callDispositionFilter?: CallDisposition[];
   /** Optional — shown as the last row in the Lead/Investor Details card when provided */
@@ -50,8 +50,18 @@ interface LeadDetailDrawerContentProps {
   consultationHistory?: Consultation[];
   /** Optional — when true, strips system-generated disposition lines from Notes & Requirements */
   hideAutoNotes?: boolean;
-  /** Optional — when provided, renders only the specified sections */
-  sectionsOnly?: ('callRecordings' | 'summary' | 'details' | 'consultations')[];
+  /** Optional — when provided, renders only the specified sections without tab navigation */
+  sectionsOnly?: ('callRecordings' | 'summary' | 'details' | 'consultations' | 'followups' | 'siteVisits' | 'timeline')[];
+  /** Optional — explicitly provided call records */
+  calls?: CallRecord[];
+  /** Optional — explicitly provided lead entity */
+  lead?: Lead | null;
+  /** Optional — custom overview content provided by parent page */
+  overviewContent?: React.ReactNode;
+  /** Optional — initial active tab */
+  initialTab?: Lead360Tab;
+  /** Optional callback to open the conversion modal from within the drawer */
+  onConvertToCustomer?: (lead: Lead) => void;
 }
 
 export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = ({
@@ -66,16 +76,20 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   consultationHistory,
   hideAutoNotes = false,
   sectionsOnly,
+  calls,
+  lead,
+  overviewContent,
+  initialTab = 'overview',
+  onConvertToCustomer,
 }) => {
   const { user, tenant } = useAuth();
   const isGhl = tenant?.slug === 'ghl' || tenantId === 't-ghl-01';
   const isSalesExecutive = user?.role?.code === 'sales_executive';
 
+  const [activeTab, setActiveTab] = useState<Lead360Tab>(initialTab);
   const [expandedTranscripts, setExpandedTranscripts] = useState<Record<string, boolean>>({});
   const [callTab, setCallTab] = useState<'agent' | 'irm'>('agent');
   const [isPreviousConsultationsOpen, setIsPreviousConsultationsOpen] = useState(true);
-  const [isSiteVisitsOpen, setIsSiteVisitsOpen] = useState(true);
-  const [isActivityOpen, setIsActivityOpen] = useState(true);
   const [, setSiteVisitsVersion] = useState(0);
   const [apiSiteVisits, setApiSiteVisits] = useState<SiteVisit[]>([]);
   const [apiFollowups, setApiFollowups] = useState<Followup[]>([]);
@@ -83,37 +97,63 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   const [apiCalls, setApiCalls] = useState<CallRecord[]>([]);
 
   useEffect(() => {
+    setActiveTab(initialTab);
+  }, [contactId, initialTab]);
+
+  useEffect(() => {
     setCallTab('agent');
   }, [contactPhone, contactId, contactType]);
 
+  // ── Canonical Primary Key Resolution ────────────────────────────────────
+  const rawIdStr = String(lead?.id || contactId || '').trim();
+  const primaryKeyNum = Number(rawIdStr.replace(/^(db-|lead-|customer-)/i, ''));
+  const hasValidPrimaryKey = Boolean(
+    rawIdStr &&
+    rawIdStr !== 'contact-new' &&
+    (!isNaN(primaryKeyNum) ? primaryKeyNum > 0 : rawIdStr.length > 0)
+  );
+  const primaryKeyStr = hasValidPrimaryKey
+    ? (Number.isInteger(primaryKeyNum) && primaryKeyNum > 0 ? String(primaryKeyNum) : rawIdStr)
+    : '';
+
   useEffect(() => {
     let isMounted = true;
-    const parsedContactId = Number(String(contactId || '').replace(/^(db-|lead-|customer-)/i, ''));
-    const isValidId = Number.isInteger(parsedContactId) && parsedContactId > 0;
+    if (!hasValidPrimaryKey || primaryKeyNum <= 0) {
+      if (isMounted) {
+        setApiSiteVisits([]);
+        setApiFollowups([]);
+        setApiCalls([]);
+      }
+      return;
+    }
+
+    const lId = contactType !== 'customer' ? primaryKeyNum : undefined;
+    const cId = contactType === 'customer' ? primaryKeyNum : undefined;
 
     const fetchSiteVisits = () => {
-      if (!isValidId) {
-        if (isMounted) setApiSiteVisits([]);
-        return;
-      }
-      const lId = contactType !== 'customer' ? parsedContactId : undefined;
-      const cId = contactType === 'customer' ? parsedContactId : undefined;
       jaminApiService.getSiteVisits(true, undefined, undefined, lId, cId).then(visits => {
         if (isMounted) setApiSiteVisits(visits || []);
       }).catch(() => { if (isMounted) setApiSiteVisits([]); });
     };
+
     fetchSiteVisits();
     window.addEventListener('nexus_storage_updated', fetchSiteVisits);
 
-    const lId = contactType !== 'customer' && isValidId ? parsedContactId : undefined;
-    const cId = contactType === 'customer' && isValidId ? parsedContactId : undefined;
+    const fetchFollowups = () => {
+      const p = !isGhl
+        ? jaminApiService.getFollowups(true, undefined, undefined, lId, cId)
+        : getFollowups(tenantId || tenant?.id, lId, cId);
 
-    getFollowups(tenantId || tenant?.id, lId, cId).then(followupItems => {
-      if (isMounted && followupItems) {
-        setApiFollowups(followupItems);
-      }
-    }).catch(() => { if (isMounted) setApiFollowups([]); });
-    
+      p.then(followupItems => {
+        if (isMounted && followupItems) {
+          setApiFollowups(followupItems);
+        }
+      }).catch(() => { if (isMounted) setApiFollowups([]); });
+    };
+
+    fetchFollowups();
+    window.addEventListener('nexus_storage_updated', fetchFollowups);
+
     const fetchCalls = () => {
       getCalls(tenantId || tenant?.id, lId, cId).then(records => {
         if (isMounted && records) {
@@ -123,60 +163,17 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
         if (isMounted) setApiCalls([]);
       });
     };
+
     fetchCalls();
     window.addEventListener('nexus_storage_updated', fetchCalls);
 
-    return () => { 
-      isMounted = false; 
+    return () => {
+      isMounted = false;
       window.removeEventListener('nexus_storage_updated', fetchCalls);
       window.removeEventListener('nexus_storage_updated', fetchSiteVisits);
+      window.removeEventListener('nexus_storage_updated', fetchFollowups);
     };
-  }, [contactPhone, contactId, contactType, tenantId, tenant?.id]);
-
-  useEffect(() => {
-    let isMounted = true;
-    const parsedId = Number(String(contactId || '').replace(/^(db-|lead-|customer-)/i, ''));
-    if (!Number.isInteger(parsedId) || parsedId <= 0) {
-      setApiAuditLogs([]);
-      return () => { isMounted = false; };
-    }
-    const filter = contactType === 'customer' ? { customerId: parsedId } : { leadId: parsedId };
-    getAuditLogs(tenantId || tenant?.id, filter)
-      .then(logs => { if (isMounted) setApiAuditLogs(logs); })
-      .catch(err => {
-        console.warn('Failed to load lead activity logs from backend:', err);
-        if (isMounted) setApiAuditLogs([]);
-      });
-    return () => { isMounted = false; };
-  }, [contactId, contactType, tenantId, tenant?.id]);
-
-  // ── Lead record lookup ───────────────────────────────────────────────────────
-  const selectedLead = (() => {
-    const leads = storageService.getLeads(tenantId) || [];
-    if (!contactId || contactId === 'contact-new') return null;
-    return leads.find(l => l.id === contactId || String(l.id) === String(contactId)) || null;
-  })();
-
-  // ── Lead Activity & Audit History Lookup directly from backend ──────────
-  const leadAuditLogs = useMemo(() => {
-    return [...apiAuditLogs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  }, [apiAuditLogs]);
-
-  // ── Site Visits lookup strictly via backend primary keys ─────────────────
-  const leadSiteVisits = useMemo(() => {
-    const parsedId = Number(String(contactId || '').replace(/^(db-|lead-|customer-)/i, ''));
-    if (!Number.isInteger(parsedId) || parsedId <= 0) return [];
-
-    return apiSiteVisits.filter(v => {
-      if (contactType === 'customer') {
-        const cId = Number(String(v.customerId || '').replace(/^(db-|customer-)/i, ''));
-        return cId === parsedId;
-      } else {
-        const lId = Number(String(v.leadId || '').replace(/^(db-|lead-)/i, ''));
-        return lId === parsedId;
-      }
-    });
-  }, [apiSiteVisits, contactId, contactType]);
+  }, [hasValidPrimaryKey, primaryKeyNum, contactType, tenantId, tenant?.id, isGhl]);
 
   const handleConfirmLeadSiteVisit = async (sv: SiteVisit) => {
     try {
@@ -200,56 +197,154 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     }
   };
 
-  // ── Call history lookup ──────────────────────────────────────────────────────
-  const selectedCalls = useMemo(() => {
-    const rawContactId = String(contactId || '').trim();
-    if (!rawContactId || rawContactId === 'contact-new') return [];
-
-    let numericId: number | null = null;
-    if (/^\d+$/.test(rawContactId)) {
-      numericId = parseInt(rawContactId, 10);
-    } else if (/^(db-|lead-|customer-)(\d+)$/i.test(rawContactId)) {
-      numericId = parseInt(rawContactId.replace(/^(db-|lead-|customer-)/i, ''), 10);
+  useEffect(() => {
+    let isMounted = true;
+    if (!hasValidPrimaryKey || primaryKeyNum <= 0) {
+      setApiAuditLogs([]);
+      return () => { isMounted = false; };
     }
+    const filter = contactType === 'customer' ? { customerId: primaryKeyNum } : { leadId: primaryKeyNum };
+    getAuditLogs(tenantId || tenant?.id, filter)
+      .then(logs => { if (isMounted) setApiAuditLogs(logs || []); })
+      .catch(err => {
+        console.warn('Failed to load lead activity logs from backend:', err);
+        if (isMounted) setApiAuditLogs([]);
+      });
+    return () => { isMounted = false; };
+  }, [hasValidPrimaryKey, primaryKeyNum, contactType, tenantId, tenant?.id]);
 
-    return apiCalls.filter(c => {
-      let isMatch = false;
-      if (numericId) {
-        if (contactType === 'customer') {
-          const cCustId = Number(String(c.customerId || '').replace(/^(db-|customer-)/i, ''));
-          isMatch = cCustId === numericId;
-        } else {
-          const cLeadId = Number(String(c.leadId || '').replace(/^(db-|lead-)/i, ''));
-          isMatch = cLeadId === numericId;
-        }
-      } else {
-        isMatch = (contactType === 'customer' ? c.customerId === rawContactId : c.leadId === rawContactId);
+  // ── Lead record lookup strictly by Primary Key ───────────────────
+  const selectedLead = lead || (() => {
+    const leads = storageService.getLeads(tenantId) || [];
+    if (hasValidPrimaryKey) {
+      return leads.find(l => {
+        if (String(l.id) === primaryKeyStr || String(l.id) === rawIdStr) return true;
+        const lNum = Number(String(l.id).replace(/^(db-|lead-|customer-)/i, ''));
+        return primaryKeyNum > 0 && lNum === primaryKeyNum;
+      }) || null;
+    }
+    return null;
+  })();
+
+  const leadAuditLogs = useMemo(
+    () =>
+      apiAuditLogs
+        .filter(l => {
+          if (!hasValidPrimaryKey || primaryKeyNum <= 0) return false;
+          if (l.leadId && Number(l.leadId) === primaryKeyNum) return true;
+          if (l.entityId && (String(l.entityId) === primaryKeyStr || Number(l.entityId) === primaryKeyNum)) return true;
+          return true; // backend already filtered by leadId in query
+        })
+        .sort(
+          (a, b) =>
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        ),
+    [apiAuditLogs, hasValidPrimaryKey, primaryKeyNum, primaryKeyStr]
+  );
+
+  // ── Site Visits strictly matching Primary Key ─────────────────────
+  const leadSiteVisits = useMemo(() => {
+    if (!hasValidPrimaryKey) return [];
+    return apiSiteVisits.filter(v => {
+      if (contactType === 'customer') {
+        const cId = Number(String(v.customerId || '').replace(/^(db-|customer-)/i, ''));
+        return (primaryKeyNum > 0 && cId === primaryKeyNum) || String(v.customerId) === primaryKeyStr;
       }
-
-      if (!isMatch) return false;
-
-      if (callDispositionFilter && callDispositionFilter.length > 0) {
-        return callDispositionFilter.includes(c.disposition as CallDisposition);
-      }
-      return true;
+      const lId = Number(String(v.leadId || '').replace(/^(db-|lead-)/i, ''));
+      return (primaryKeyNum > 0 && lId === primaryKeyNum) || String(v.leadId) === primaryKeyStr;
     });
-  }, [apiCalls, contactId, contactType, callDispositionFilter]);
+  }, [apiSiteVisits, hasValidPrimaryKey, primaryKeyNum, primaryKeyStr, contactType]);
 
-  const isIrmCall = (c: any) =>
-    (c.notes || '').startsWith('Connected to IRM:') ||
-    (c.agentId || '').toLowerCase().includes('irm') ||
+  const allCalls =
+    (calls && calls.length > 0 ? calls : null) ||
+    (apiCalls.length > 0 ? apiCalls : null) ||
+    storageService.getCalls(tenantId) ||
+    [];
+
+  // ── Calls strictly matching Primary Key ───────────────────────────
+  const selectedCalls = useMemo(() => {
+    if (!hasValidPrimaryKey) return [];
+    return allCalls
+      .filter(c => {
+        const cLeadId = c.leadId !== undefined && c.leadId !== null ? String(c.leadId) : '';
+        const cContactId = (c as any).contactId !== undefined && (c as any).contactId !== null ? String((c as any).contactId) : '';
+        const cCustId = c.customerId !== undefined && c.customerId !== null ? String(c.customerId) : '';
+        const cInvId = (c as any).investorId !== undefined && (c as any).investorId !== null ? String((c as any).investorId) : '';
+
+        // Match Primary Key string directly
+        if (cLeadId === primaryKeyStr || cLeadId === rawIdStr ||
+          cContactId === primaryKeyStr || cContactId === rawIdStr ||
+          cCustId === primaryKeyStr || cCustId === rawIdStr ||
+          cInvId === primaryKeyStr || cInvId === rawIdStr) {
+          return true;
+        }
+
+        // Match Primary Key numeric ID
+        if (primaryKeyNum > 0) {
+          const numLead = Number(cLeadId.replace(/^(db-|lead-|customer-)/i, ''));
+          const numContact = Number(cContactId.replace(/^(db-|lead-|customer-)/i, ''));
+          const numCust = Number(cCustId.replace(/^(db-|lead-|customer-)/i, ''));
+          if ((numLead > 0 && numLead === primaryKeyNum) ||
+            (numContact > 0 && numContact === primaryKeyNum) ||
+            (numCust > 0 && numCust === primaryKeyNum)) {
+            return true;
+          }
+        }
+
+        return false;
+      })
+      .filter(
+        c =>
+          !callDispositionFilter ||
+          callDispositionFilter.length === 0 ||
+          callDispositionFilter.includes(c.disposition)
+      );
+  }, [allCalls, hasValidPrimaryKey, primaryKeyStr, rawIdStr, primaryKeyNum, callDispositionFilter]);
+
+  const isIrmCall = (c: CallRecord) =>
+    c.source === 'irm' ||
+    (c.agentRole || '').toLowerCase() === 'irm' ||
+    (c.notes || '').includes('Connect via IRM') ||
+    (c.notes || '').includes('Connected to IRM') ||
+    (c.agentId || '').toString().toLowerCase().includes('irm') ||
     (c.agentName || '').toLowerCase().includes('irm');
 
   const agentCalls = selectedCalls.filter(c => !isIrmCall(c));
   const irmCalls = selectedCalls.filter(c => isIrmCall(c));
   const tabCalls = isGhl ? (callTab === 'agent' ? agentCalls : irmCalls) : selectedCalls;
 
-  // ── Active follow-up count ───────────────────────────────────────────────────
-  const followups = apiFollowups;
-  const activeFollowupCount = followups.filter(f => {
-    return f.status === 'Pending' && f.contactType === contactType &&
-      Boolean(contactId && contactId !== 'contact-new' && String(f.contactId) === String(contactId));
-  }).length;
+  // ── Follow-up strictly matching Primary Key ───────────────────────
+  const leadFollowups = useMemo(() => {
+    if (!hasValidPrimaryKey) return [];
+    return apiFollowups.filter(f => {
+      const fLeadId = f.leadId !== undefined && f.leadId !== null ? String(f.leadId) : '';
+      const fContactId = f.contactId !== undefined && f.contactId !== null ? String(f.contactId) : '';
+      const fCustId = f.customerId !== undefined && f.customerId !== null ? String(f.customerId) : '';
+
+      // Match Primary Key string directly
+      if (fLeadId === primaryKeyStr || fLeadId === rawIdStr ||
+        fContactId === primaryKeyStr || fContactId === rawIdStr ||
+        fCustId === primaryKeyStr || fCustId === rawIdStr) {
+        return true;
+      }
+
+      // Match Primary Key numeric ID
+      if (primaryKeyNum > 0) {
+        const numLead = Number(fLeadId.replace(/^(db-|lead-|customer-)/i, ''));
+        const numContact = Number(fContactId.replace(/^(db-|lead-|customer-)/i, ''));
+        const numCust = Number(fCustId.replace(/^(db-|lead-|customer-)/i, ''));
+        if ((numLead > 0 && numLead === primaryKeyNum) ||
+          (numContact > 0 && numContact === primaryKeyNum) ||
+          (numCust > 0 && numCust === primaryKeyNum)) {
+          return true;
+        }
+      }
+
+      return false;
+    });
+  }, [apiFollowups, hasValidPrimaryKey, primaryKeyStr, rawIdStr, primaryKeyNum]);
+
+  const activeFollowupCount = leadFollowups.filter(f => f.status === 'Pending').length;
 
   const toggleTranscript = (callId: string) => {
     setExpandedTranscripts(prev => ({ ...prev, [callId]: !prev[callId] }));
@@ -283,7 +378,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
         timestamp: selectedLead.createdAt,
         action: 'LEAD_INTAKE',
         actor: selectedLead.source || 'Website Inbound',
-        details: `Lead registered via ${selectedLead.source || 'Inbound'}${selectedLead.targetDevelopment ? ` for project ${selectedLead.targetDevelopment}` : ''}${selectedLead.location ? ` in ${selectedLead.location}` : ''}. Status: ${selectedLead.status || 'New'}, Priority: ${selectedLead.priority || 'Medium'}.`,
+        details: `Lead registered via ${selectedLead.source || 'Inbound'}${selectedLead.targetDevelopment ? ` for project ${selectedLead.targetDevelopment}` : ''}${selectedLead.location ? `, Location: ${selectedLead.location}` : ''}. Status: ${selectedLead.status || 'New'}, Priority: ${selectedLead.priority || 'Medium'}.`,
         type: 'intake',
         badgeColor: '#0284c7',
         badgeBg: '#e0f2fe',
@@ -338,10 +433,6 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
     });
 
     // 5. Follow-ups
-    const leadFollowups = followups.filter(f => {
-      return f.contactType === contactType && Boolean(contactId && contactId !== 'contact-new' && String(f.contactId) === String(contactId));
-    });
-
     leadFollowups.forEach(f => {
       events.push({
         id: `fu-${f.id}`,
@@ -371,6 +462,23 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
       });
     });
 
+    // 7. Lead Conversion Milestone
+    if (selectedLead?.status === 'Converted') {
+      events.push({
+        id: `conversion-${selectedLead.id}`,
+        timestamp: (selectedLead as any).updatedAt || (selectedLead as any).convertedAt || selectedLead.createdAt || new Date().toISOString(),
+        action: 'LEAD_CONVERTED',
+        actor: selectedLead.assignedAgentName && selectedLead.assignedAgentName !== 'Unassigned' ? selectedLead.assignedAgentName : 'System',
+        details: isGhl
+          ? 'Lead successfully converted and promoted to Customer 360.'
+          : 'Lead formalized into official Customer 360 via verified plot booking token payment.',
+        type: 'audit',
+        badgeColor: '#059669',
+        badgeBg: '#d1fae5',
+        dotColor: '#10b981',
+      });
+    }
+
     // Deduplicate by ID and sort descending by timestamp
     const seen = new Set<string>();
     const unique = events.filter(e => {
@@ -384,337 +492,378 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
       const tb = new Date(b.timestamp).getTime();
       return (isNaN(tb) ? 0 : tb) - (isNaN(ta) ? 0 : ta);
     });
-  }, [selectedLead, selectedCalls, leadSiteVisits, leadAuditLogs, contactPhone, contactId, tenantId]);
+  }, [selectedLead, selectedCalls, leadSiteVisits, leadFollowups, leadAuditLogs]);
 
-  // ── Customer Notes (from form/source) vs Agent Reason (from disposition) ───
-  const customerNotes = (() => {
-    if (!selectedLead) return '';
-    if (selectedLead.customFields?.customerNotes && typeof selectedLead.customFields.customerNotes === 'string' && selectedLead.customFields.customerNotes.trim()) {
-      return selectedLead.customFields.customerNotes.trim();
-    }
-    if (!selectedLead.notes) return '';
-    const cleaned = selectedLead.notes
-      .split(/\n\n?\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*Not Interested Reason:?/i)[0]
-      .replace(/(?:\[.*?\]\s*)?Not Interested Reason:[\s\S]*$/i, '')
-      .trim();
-    return cleaned;
-  })();
-
-  const agentReason = (() => {
-    if (!selectedLead) return '';
-    if (selectedLead.customFields?.dispositionReason && typeof selectedLead.customFields.dispositionReason === 'string' && selectedLead.customFields.dispositionReason.trim()) {
-      return selectedLead.customFields.dispositionReason.trim();
-    }
-    if (selectedLead.notes) {
-      const match = selectedLead.notes.match(/Not Interested Reason:\s*([^\n\r]+)/i);
-      if (match && match[1]?.trim()) {
-        return match[1].trim();
-      }
-    }
-    const niCall = selectedCalls.find(c => c.disposition === 'Not Interested');
-    if (niCall?.notes) {
-      const match = niCall.notes.match(/Reason:\s*([^\n\r]+)/i);
-      if (match && match[1]?.trim()) {
-        return match[1].trim();
-      }
-      return niCall.notes.trim();
-    }
-    return '';
-  })();
+  // If a legacy caller specifically asks for only one section (like 'callRecordings' alone)
+  const isConstrainedMode = Boolean(sectionsOnly && sectionsOnly.length > 0);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-      {/* ── Activity Summary Badge ───────────────────────────────────────────── */}
-      {(!sectionsOnly || sectionsOnly.includes('summary')) && (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* ── Lead 360 Tab Navigation Bar ───────────────────────────────────────── */}
+      {!isConstrainedMode && (
         <div
           style={{
-            backgroundColor: 'var(--bg-surface-hover)',
-            border: '1px solid var(--border-base)',
-            borderRadius: 'var(--radius-lg)',
-            padding: '14px 18px',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
+            gap: 6,
+            borderBottom: '1px solid var(--border-base)',
+            paddingBottom: 10,
+            overflowX: 'auto',
           }}
         >
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700 }}>
-              Total Activity Summary
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2, color: 'var(--primary-600)' }}>
-              {selectedCalls.length} {selectedCalls.length === 1 ? 'Call Recorded' : 'Calls Recorded'}
-              {activeFollowupCount > 0 && ` • ${activeFollowupCount} Active Follow-up${activeFollowupCount > 1 ? 's' : ''}`}
-            </div>
-          </div>
-          <button className="btn btn-call btn-sm" onClick={onCall}>
-            <Phone size={13} /> Call Now
+          <button
+            type="button"
+            onClick={() => setActiveTab('overview')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 13px',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: activeTab === 'overview' ? '1px solid var(--primary-500, #3b82f6)' : '1px solid transparent',
+              backgroundColor: activeTab === 'overview' ? 'var(--primary-50, rgba(59, 130, 246, 0.12))' : 'transparent',
+              color: activeTab === 'overview' ? 'var(--primary-600, #2563eb)' : 'var(--text-secondary)',
+              transition: 'all 0.15s ease',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <User size={15} />
+            <span>Personal Info</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('followups')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 13px',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: activeTab === 'followups' ? '1px solid var(--primary-500, #3b82f6)' : '1px solid transparent',
+              backgroundColor: activeTab === 'followups' ? 'var(--primary-50, rgba(59, 130, 246, 0.12))' : 'transparent',
+              color: activeTab === 'followups' ? 'var(--primary-600, #2563eb)' : 'var(--text-secondary)',
+              transition: 'all 0.15s ease',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <Clock size={15} />
+            <span>Follow-ups</span>
+            {leadFollowups.length > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  padding: '1px 6px',
+                  borderRadius: 10,
+                  backgroundColor: activeTab === 'followups' ? 'var(--primary-600, #2563eb)' : 'var(--bg-surface-hover)',
+                  color: activeTab === 'followups' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: 700,
+                }}
+              >
+                {leadFollowups.length}
+              </span>
+            )}
+          </button>
+
+          {(!isGhl || leadSiteVisits.length > 0) && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('siteVisits')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '7px 13px',
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                border: activeTab === 'siteVisits' ? '1px solid var(--primary-500, #3b82f6)' : '1px solid transparent',
+                backgroundColor: activeTab === 'siteVisits' ? 'var(--primary-50, rgba(59, 130, 246, 0.12))' : 'transparent',
+                color: activeTab === 'siteVisits' ? 'var(--primary-600, #2563eb)' : 'var(--text-secondary)',
+                transition: 'all 0.15s ease',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <MapPin size={15} />
+              <span>Site Visits</span>
+              {leadSiteVisits.length > 0 && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    padding: '1px 6px',
+                    borderRadius: 10,
+                    backgroundColor: activeTab === 'siteVisits' ? 'var(--primary-600, #2563eb)' : 'var(--bg-surface-hover)',
+                    color: activeTab === 'siteVisits' ? '#ffffff' : 'var(--text-secondary)',
+                    fontWeight: 700,
+                  }}
+                >
+                  {leadSiteVisits.length}
+                </span>
+              )}
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('callRecordings')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 13px',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: activeTab === 'callRecordings' ? '1px solid var(--primary-500, #3b82f6)' : '1px solid transparent',
+              backgroundColor: activeTab === 'callRecordings' ? 'var(--primary-50, rgba(59, 130, 246, 0.12))' : 'transparent',
+              color: activeTab === 'callRecordings' ? 'var(--primary-600, #2563eb)' : 'var(--text-secondary)',
+              transition: 'all 0.15s ease',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <Phone size={15} />
+            <span>Call Recordings</span>
+            {selectedCalls.length > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  padding: '1px 6px',
+                  borderRadius: 10,
+                  backgroundColor: activeTab === 'callRecordings' ? 'var(--primary-600, #2563eb)' : 'var(--bg-surface-hover)',
+                  color: activeTab === 'callRecordings' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: 700,
+                }}
+              >
+                {selectedCalls.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('timeline')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 13px',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: activeTab === 'timeline' ? '1px solid var(--primary-500, #3b82f6)' : '1px solid transparent',
+              backgroundColor: activeTab === 'timeline' ? 'var(--primary-50, rgba(59, 130, 246, 0.12))' : 'transparent',
+              color: activeTab === 'timeline' ? 'var(--primary-600, #2563eb)' : 'var(--text-secondary)',
+              transition: 'all 0.15s ease',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <History size={15} />
+            <span>Activity Logs</span>
+            {unifiedTimelineEvents.length > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  padding: '1px 6px',
+                  borderRadius: 10,
+                  backgroundColor: activeTab === 'timeline' ? 'var(--primary-600, #2563eb)' : 'var(--bg-surface-hover)',
+                  color: activeTab === 'timeline' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: 700,
+                }}
+              >
+                {unifiedTimelineEvents.length}
+              </span>
+            )}
           </button>
         </div>
       )}
 
-      {/* ── Lead / Investor Details ──────────────────────────────────────────── */}
-      {(!sectionsOnly || sectionsOnly.includes('details')) && (
-        <div className="card">
-          <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Building2 size={16} color="var(--primary-600)" /> {isGhl ? 'Lead / Investor Details' : 'Lead Details'}
-          </h4>
-
-          {selectedLead ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 13 }}>
-              {selectedLead.name && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>FULL NAME</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.name}</div>
-                </div>
-              )}
-              {selectedLead.phone && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PHONE NUMBER</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.phone}</div>
-                </div>
-              )}
-              {selectedLead.email && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>EMAIL</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.email}</div>
-                </div>
-              )}
-              {selectedLead.location && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>LOCATION</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.location}</div>
-                </div>
-              )}
-              {selectedLead.source && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>SOURCE</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.source}</div>
-                </div>
-              )}
-              {selectedLead.status && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>STATUS</span>
-                  <div><StatusChip status={selectedLead.status} size="sm" /></div>
-                </div>
-              )}
-              {selectedLead.priority && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PRIORITY</span>
-                  <div><StatusChip status={selectedLead.priority} size="sm" /></div>
-                </div>
-              )}
-              {selectedLead.createdAt && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>INTAKE DATE</span>
-                  <div style={{ fontWeight: 600 }}>{selectedLead.createdAt}</div>
-                </div>
-              )}
-              {(selectedLead.targetDevelopment || selectedLead.customFields?.targetDevelopment || selectedLead.customFields?.project) && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>TARGET DEVELOPMENT</span>
-                  <div style={{ fontWeight: 600, color: '#059669' }}>
-                    {selectedLead.targetDevelopment || selectedLead.customFields?.targetDevelopment || selectedLead.customFields?.project}
-                  </div>
-                </div>
-              )}
-              {(selectedLead.budgetRange || selectedLead.customFields?.budgetRange || (selectedLead as any).customFields?.investmentCapacity) && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>BUDGET RANGE</span>
-                  <div style={{ fontWeight: 600 }}>
-                    {selectedLead.budgetRange || selectedLead.customFields?.budgetRange || (selectedLead as any).customFields?.investmentCapacity}
-                  </div>
-                </div>
-              )}
-              {(selectedLead.readyToRegister || selectedLead.customFields?.readyToRegister) && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>READY TO REGISTER</span>
-                  <div style={{ fontWeight: 600, color: '#059669' }}>
-                    {String(selectedLead.readyToRegister || selectedLead.customFields?.readyToRegister)}
-                  </div>
-                </div>
-              )}
-              {((selectedLead as any).preferredVisitDate || (selectedLead as any).preferredTimeSlot) && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PREFERRED VISIT</span>
-                  <div style={{ fontWeight: 600 }}>
-                    {[(selectedLead as any).preferredVisitDate, (selectedLead as any).preferredTimeSlot].filter(Boolean).join(' • ')}
-                  </div>
-                </div>
-              )}
-              {(selectedLead as any).preferredLanguage && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PREFERRED LANGUAGE</span>
-                  <div style={{ fontWeight: 600 }}>{(selectedLead as any).preferredLanguage}</div>
-                </div>
-              )}
-              {(selectedLead as any).preferredContactTime && (
-                <div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PREFERRED CONTACT TIME</span>
-                  <div style={{ fontWeight: 600 }}>{(selectedLead as any).preferredContactTime}</div>
-                </div>
-              )}
-              {(() => {
-                // Strip legacy "[date] ... Reason: ..." lines that were previously
-                // appended to notes before reason was stored separately.
-                const reasonLinePattern = /^\[[\d/]+\]\s.*(Reason|Wrong Number|Not Interested).*/i;
-
-                let notesContent = '';
-                if (
-                  selectedLead.customFields?.customerNotes &&
-                  typeof selectedLead.customFields.customerNotes === 'string' &&
-                  selectedLead.customFields.customerNotes.trim()
-                ) {
-                  notesContent = selectedLead.customFields.customerNotes.trim();
-                } else {
-                  const autoNotePattern1 =
-                    /^\[\d{1,2}\/\d{1,2}\/\d{4}[^\]]*\]\s*(Interested|Follow-up|Call Back|No Response|Converted|Not Interested|Wrong Number|Site Visit)/i;
-                  const autoNotePattern2 = /^\[Call Disposition\s*-.*?\]:/i;
-
-                  notesContent = (selectedLead.notes || '')
-                    .split('\n')
-                    .filter(line => {
-                      const trimmed = line.trim();
-                      if (reasonLinePattern.test(trimmed)) return false;
-                      if (autoNotePattern1.test(trimmed)) return false;
-                      if (autoNotePattern2.test(trimmed)) return false;
-                      return true;
-                    })
-                    .join('\n')
-                    .trim();
-                }
-
-                if (!notesContent) return null;
-
-                let cleanNotes = notesContent;
-                if (cleanNotes.includes('Visitor Note:')) {
-                  const match = cleanNotes.match(/Visitor Note:\s*"?([^"]*)"?/i);
-                  if (match && match[1]) {
-                    cleanNotes = match[1].trim();
-                  } else {
-                    cleanNotes = cleanNotes.replace(/^Direct from [^:]+:\s*/i, '').replace(/^Visitor Note:\s*/i, '').replace(/^"|"$/g, '').trim();
-                  }
-                } else if (cleanNotes.startsWith('Direct from')) {
-                  cleanNotes = cleanNotes.replace(/^Direct from [^.]*\.\s*/i, '').trim();
-                }
-
-                const srcLower = (selectedLead.source || '').toLowerCase();
-                const isSiteVisitSource = srcLower.includes('site visit');
-                const isCallbackSource = srcLower.includes('callback') || srcLower.includes('call back');
-
-                const label = isSiteVisitSource
-                  ? 'MESSAGE FROM VISITOR (Anything we should know?)'
-                  : isCallbackSource
-                  ? 'MESSAGE FROM VISITOR (What are you looking for?)'
-                  : 'NOTES & REQUIREMENTS';
-
-                return (
-                  <div style={{ gridColumn: 'span 2' }}>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>{label}</span>
-                    <div style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '8px 12px', borderRadius: 6, marginTop: 4, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                      {cleanNotes}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {selectedLead.customFields?.dispositionReason && (
-                <div style={{ gridColumn: 'span 2' }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>REASON</span>
-                  <div style={{ backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)', padding: '8px 12px', borderRadius: 6, marginTop: 4, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                    {selectedLead.customFields.dispositionReason as string}
-                  </div>
-                </div>
-              )}
-              {consultationReason && (
-                <div style={{ gridColumn: 'span 2' }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>REASON FOR CONSULTATION</span>
-                  <div style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '8px 12px', borderRadius: 6, marginTop: 4 }}>
-                    {consultationReason}
-                  </div>
-                </div>
-              )}
-
-              {/* Custom Fields - Only show distinct non-empty custom attributes not already displayed in standard fields */}
-              {(() => {
-                const knownStandardKeys = new Set([
-                  'name',
-                  'phone',
-                  'email',
-                  'location',
-                  'preferredLocation',
-                  'source',
-                  'status',
-                  'priority',
-                  'targetDevelopment',
-                  'project',
-                  'preferredProject',
-                  'budgetRange',
-                  'budget',
-                  'plotBudgetRange',
-                  'readyToRegister',
-                  'preferredVisitDate',
-                  'preferredTimeSlot',
-                  'preferredLanguage',
-                  'preferredContactTime',
-                  'dispositionReason',
-                  'customerNotes',
-                  'notes',
-                  'leadScore',
-                  'message',
-                  'userMessage',
-                ]);
-
-                const activeDefs = storageService
-                  .getCustomFieldDefinitions(tenantId)
-                  .filter(d => d.active !== false && (d.module === 'leads' || !d.module))
-                  .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-
-                const rows: Array<{ id: string; label: string; value: string }> = [];
-
-                activeDefs.forEach(def => {
-                  const key = def.fieldKey || def.id;
-                  if (knownStandardKeys.has(key)) return;
-                  if (isSalesExecutive && key === 'preferredAssetClass') return;
-
-                  const rawVal = selectedLead.customFields?.[key] ?? (selectedLead as any)[key];
-                  if (rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '' && String(rawVal).trim() !== '—') {
-                    rows.push({
-                      id: def.id,
-                      label: def.label || key.replace(/([A-Z])/g, ' $1'),
-                      value: String(rawVal),
-                    });
-                  }
-                });
-
-                if (rows.length === 0) return null;
-
-                return (
-                  <div style={{ gridColumn: 'span 2', marginTop: 8 }}>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>CUSTOM ATTRIBUTES</span>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
-                      {rows.map(item => (
-                        <div key={item.id} style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '6px 10px', borderRadius: 6 }}>
-                          <span style={{ fontSize: 10, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{item.label}</span>
-                          <div style={{ fontWeight: 600 }}>{item.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
+      {/* ── TAB 1: OVERVIEW ───────────────────────────────────────────────────── */}
+      {(!isConstrainedMode ? activeTab === 'overview' : (sectionsOnly?.includes('details') || sectionsOnly?.includes('summary'))) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {overviewContent ? (
+            overviewContent
           ) : (
-            <div>
-              <div style={{ padding: '16px', backgroundColor: 'var(--bg-surface-hover)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
-                Lead details unavailable
-              </div>
-              {consultationReason && (
-                <div style={{ marginTop: 12 }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>REASON FOR CONSULTATION</span>
-                  <div style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '8px 12px', borderRadius: 6, marginTop: 4 }}>
-                    {consultationReason}
+            <>
+              {/* Fallback default Lead Details card for callers that do not supply overviewContent */}
+              <div className="card">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <h4 style={{ fontSize: 15, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Building2 size={16} color="var(--primary-600)" /> {isGhl ? 'Lead / Investor Details' : 'Lead Details'}
+                  </h4>
+                  {onConvertToCustomer && selectedLead && selectedLead.status !== 'Converted' && (
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => onConvertToCustomer(selectedLead)}
+                      style={{
+                        fontSize: '11px',
+                        padding: '4px 10px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        backgroundColor: !isGhl ? '#0284c7' : '#10b981',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 6,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                      title={!isGhl ? "Formalize plot booking & convert lead via verified token payment" : "Convert this lead into an active Customer record"}
+                    >
+                      {!isGhl ? <Building2 size={12} /> : <CheckCircle2 size={12} />} {!isGhl ? 'Book Plot / Convert' : 'Convert to Customer'}
+                    </button>
+                  )}
+                </div>
+                {selectedLead ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 13 }}>
+                    {selectedLead.name && (
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>FULL NAME</span>
+                        <div style={{ fontWeight: 600 }}>{selectedLead.name}</div>
+                      </div>
+                    )}
+                    {selectedLead.phone && (
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PHONE NUMBER</span>
+                        <div style={{ fontWeight: 600 }}>{selectedLead.phone}</div>
+                      </div>
+                    )}
+                    {selectedLead.email && (
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>EMAIL</span>
+                        <div style={{ fontWeight: 600 }}>{selectedLead.email}</div>
+                      </div>
+                    )}
+                    {selectedLead.location && (
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>LOCATION</span>
+                        <div style={{ fontWeight: 600 }}>{selectedLead.location}</div>
+                      </div>
+                    )}
+                    {selectedLead.source && (
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>SOURCE</span>
+                        <div style={{ fontWeight: 600 }}>{selectedLead.source}</div>
+                      </div>
+                    )}
+                    {selectedLead.status && (
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>STATUS</span>
+                        <div><StatusChip status={selectedLead.status} size="sm" /></div>
+                      </div>
+                    )}
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PRIORITY</span>
+                      <div style={{ marginTop: 2 }}>
+                        <span className={`badge badge-priority-${(selectedLead.priority || 'medium').toLowerCase()}`}>
+                          {selectedLead.priority || 'Medium'}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>PREFERRED PROJECT</span>
+                      <div style={{ fontWeight: 700, color: '#059669', fontSize: 13, paddingTop: 2 }}>
+                        {selectedLead.targetDevelopment || selectedLead.customFields?.targetDevelopment || '—'}
+                      </div>
+                    </div>
+                    {(selectedLead.budgetRange || selectedLead.customFields?.budgetRange || (selectedLead as any).customFields?.investmentCapacity) && (
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>BUDGET RANGE</span>
+                        <div style={{ fontWeight: 600 }}>
+                          {selectedLead.budgetRange || selectedLead.customFields?.budgetRange || (selectedLead as any).customFields?.investmentCapacity}
+                        </div>
+                      </div>
+                    )}
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>REGISTRATION TIMELINE</span>
+                      <div style={{ fontWeight: 600, color: '#0284c7', marginTop: 2 }}>
+                        {selectedLead.readyToRegister || (selectedLead as any).customFields?.readyToRegister || 'Immediate'}
+                      </div>
+                    </div>
+                    {selectedLead.notes && (
+                      <div style={{ gridColumn: 'span 2' }}>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>NOTES &amp; REQUIREMENTS</span>
+                        <div style={{ backgroundColor: 'var(--bg-surface-hover)', padding: '8px 12px', borderRadius: 6, marginTop: 4, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                          {selectedLead.notes}
+                        </div>
+                      </div>
+                    )}
                   </div>
+                ) : (
+                  <div style={{ padding: '16px', backgroundColor: 'var(--bg-surface-hover)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
+                    Lead details unavailable
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Previous Consultations (if any) */}
+          {consultationHistory && consultationHistory.length > 0 && (
+            <div className="card">
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  cursor: 'pointer',
+                  marginBottom: isPreviousConsultationsOpen ? 12 : 0,
+                }}
+                onClick={() => setIsPreviousConsultationsOpen(prev => !prev)}
+              >
+                <h4 style={{ fontSize: 15, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Calendar size={16} color="var(--primary-600)" /> Previous Consultations ({consultationHistory.length})
+                </h4>
+                <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '2px 6px' }}>
+                  {isPreviousConsultationsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+              </div>
+
+              {isPreviousConsultationsOpen && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {consultationHistory.map(item => (
+                    <div
+                      key={item.id}
+                      style={{
+                        border: '1px solid var(--border-base)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '12px 14px',
+                        backgroundColor: 'var(--bg-surface)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, backgroundColor: 'var(--bg-surface-hover)', color: 'var(--text-primary)' }}>
+                            <Clock size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: '-1px' }} />
+                            {item.scheduledAt}
+                          </span>
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                            Consultant: <strong>{item.consultantName}</strong>
+                          </span>
+                        </div>
+                        <StatusChip status={item.status} size="sm" />
+                      </div>
+                      {item.agenda && (
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
+                          <strong>Reason / Agenda:</strong> {item.agenda}
+                        </div>
+                      )}
+                      {item.outcomeNotes && (
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                          <strong>Outcome Notes:</strong> {item.outcomeNotes}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -722,98 +871,100 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
         </div>
       )}
 
-      {/* ── Previous Consultations ─────────────────────────────────────── */}
-      {(!sectionsOnly || sectionsOnly.includes('consultations')) && consultationHistory && consultationHistory.length > 0 && (
-        <div className="card">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              cursor: 'pointer',
-              marginBottom: isPreviousConsultationsOpen ? 12 : 0,
-            }}
-            onClick={() => setIsPreviousConsultationsOpen(prev => !prev)}
-          >
-            <h4
-              style={{
-                fontSize: 15,
-                fontWeight: 700,
-                margin: 0,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              <Calendar size={16} color="var(--primary-600)" /> Previous Consultations ({consultationHistory.length})
+      {/* ── TAB 2: FOLLOW-UPS ─────────────────────────────────────────────────── */}
+      {(!isConstrainedMode ? activeTab === 'followups' : sectionsOnly?.includes('followups')) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h4 style={{ fontSize: 15, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Clock size={16} color="var(--primary-600)" /> Follow-up Schedule &amp; History ({leadFollowups.length})
             </h4>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              style={{ padding: '2px 6px' }}
-              onClick={e => {
-                e.stopPropagation();
-                setIsPreviousConsultationsOpen(prev => !prev);
-              }}
-            >
-              {isPreviousConsultationsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </button>
           </div>
 
-          {isPreviousConsultationsOpen && (
+          {leadFollowups.length === 0 ? (
+            <div
+              style={{
+                padding: '36px 20px',
+                backgroundColor: 'var(--bg-surface-hover)',
+                borderRadius: 10,
+                border: '1px dashed var(--border-base)',
+                textAlign: 'center',
+                color: 'var(--text-muted)',
+              }}
+            >
+              <Clock size={32} style={{ margin: '0 auto 10px', opacity: 0.5 }} />
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>No Follow-ups Logged</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                There are no scheduled or past follow-up tasks recorded for this lead yet.
+              </div>
+            </div>
+          ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {consultationHistory.map(item => (
+              {leadFollowups.map(f => (
                 <div
-                  key={item.id}
+                  key={f.id}
                   style={{
                     border: '1px solid var(--border-base)',
                     borderRadius: 'var(--radius-md)',
-                    padding: '12px 14px',
+                    padding: '14px 16px',
                     backgroundColor: 'var(--bg-surface)',
                   }}
                 >
-                  {/* Header row: slot (scheduledAt) and StatusChip */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 8,
-                      flexWrap: 'wrap',
-                    }}
-                  >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span
                         style={{
                           fontSize: 11,
                           fontWeight: 700,
-                          padding: '2px 8px',
+                          padding: '3px 9px',
                           borderRadius: 10,
                           backgroundColor: 'var(--bg-surface-hover)',
                           color: 'var(--text-primary)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
                         }}
                       >
-                        <Clock size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: '-1px' }} />
-                        {item.scheduledAt}
+                        <Clock size={12} />
+                        {f.scheduledAt || (f.scheduledDate ? `${f.scheduledDate} ${f.scheduledTime || ''}` : 'Scheduled')}
                       </span>
-                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                        Consultant: <strong>{item.consultantName}</strong>
+                      <span className={`badge badge-priority-${(f.priority || 'medium').toLowerCase()}`}>
+                        {f.priority || 'Medium'} Priority
                       </span>
                     </div>
-                    <StatusChip status={item.status} size="sm" />
+                    <StatusChip status={f.status} size="sm" />
                   </div>
 
-                  {/* Agenda / Reason */}
-                  {item.agenda && (
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
-                      <strong>Reason / Agenda:</strong> {item.agenda}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10, fontSize: 12 }}>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>Assigned Agent:</span>
+                      <div style={{ fontWeight: 600 }}>{f.assignedAgentName || f.assignedToName || 'Agent'}</div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>Follow-up Channel:</span>
+                      <div style={{ fontWeight: 600, textTransform: 'capitalize' }}>{f.followupType || 'Call'}</div>
+                    </div>
+                  </div>
+
+                  {f.notes && (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        padding: '8px 12px',
+                        backgroundColor: 'var(--bg-surface-hover)',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        color: 'var(--text-primary)',
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      <strong style={{ color: 'var(--text-secondary)' }}>Notes: </strong>
+                      {f.notes}
                     </div>
                   )}
 
-                  {/* Outcome Notes (if any) */}
-                  {item.outcomeNotes && (
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                      <strong>Outcome Notes:</strong> {item.outcomeNotes}
+                  {f.completedAt && (
+                    <div style={{ fontSize: 11, color: '#059669', marginTop: 8, fontWeight: 500 }}>
+                      ✓ Completed on {new Date(f.completedAt).toLocaleString()}
                     </div>
                   )}
                 </div>
@@ -823,45 +974,33 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
         </div>
       )}
 
-      {/* ── Site Visits (Jamin Bazaar only - never GHL) ─────────────────────────────────── */}
-      {(!sectionsOnly || sectionsOnly.includes('details')) && !isGhl && leadSiteVisits.length > 0 && (
-        <div className="card">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              cursor: 'pointer',
-              marginBottom: isSiteVisitsOpen ? 12 : 0,
-            }}
-            onClick={() => setIsSiteVisitsOpen(prev => !prev)}
-          >
-            <h4
-              style={{
-                fontSize: 15,
-                fontWeight: 700,
-                margin: 0,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              <Calendar size={16} color="#dc2626" /> Site Visits ({leadSiteVisits.length})
+      {/* ── TAB 3: SITE VISITS ────────────────────────────────────────────────── */}
+      {(!isConstrainedMode ? activeTab === 'siteVisits' : sectionsOnly?.includes('siteVisits')) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h4 style={{ fontSize: 15, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Calendar size={16} color="#dc2626" /> Site Visits History &amp; Schedule ({leadSiteVisits.length})
             </h4>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              style={{ padding: '2px 6px' }}
-              onClick={e => {
-                e.stopPropagation();
-                setIsSiteVisitsOpen(prev => !prev);
-              }}
-            >
-              {isSiteVisitsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </button>
           </div>
 
-          {isSiteVisitsOpen && (
+          {leadSiteVisits.length === 0 ? (
+            <div
+              style={{
+                padding: '36px 20px',
+                backgroundColor: 'var(--bg-surface-hover)',
+                borderRadius: 10,
+                border: '1px dashed var(--border-base)',
+                textAlign: 'center',
+                color: 'var(--text-muted)',
+              }}
+            >
+              <Calendar size={32} style={{ margin: '0 auto 10px', opacity: 0.5 }} />
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>No Site Visits Scheduled</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                No site visits have been requested or scheduled for this lead yet.
+              </div>
+            </div>
+          ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {leadSiteVisits.map(sv => (
                 <div
@@ -869,39 +1008,33 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                   style={{
                     border: '1px solid var(--border-base)',
                     borderRadius: 'var(--radius-md)',
-                    padding: '12px 14px',
+                    padding: '14px 16px',
                     backgroundColor: 'var(--bg-surface)',
                   }}
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 8,
-                      flexWrap: 'wrap',
-                    }}
-                  >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span
                         style={{
                           fontSize: 11,
                           fontWeight: 700,
-                          padding: '2px 8px',
+                          padding: '3px 9px',
                           borderRadius: 10,
                           backgroundColor: 'var(--bg-surface-hover)',
                           color: 'var(--text-primary)',
                         }}
                       >
                         <Clock size={11} style={{ display: 'inline', marginRight: 4, verticalAlign: '-1px' }} />
-                        {sv.scheduledAt}
+                        {sv.scheduledAt || (sv.scheduledDate ? `${sv.scheduledDate} ${sv.scheduledTimeSlot || ''}` : 'Scheduled')}
                       </span>
                       <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                        {sv.projectName} {sv.plotNumber && sv.plotNumber !== '—' ? `• ${sv.plotNumber}` : ''}
+                        {sv.projectName} {sv.plotNumber && sv.plotNumber !== '—' ? `• Plot ${sv.plotNumber}` : ''}
                       </span>
                     </div>
+
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <StatusChip status={sv.status} size="sm" />
+
                       {(sv.status === 'Pending' || sv.status === 'Requested') && (
                         <button
                           type="button"
@@ -917,6 +1050,7 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                           <CheckCircle2 size={12} style={{ marginRight: 4 }} /> Confirm Visit
                         </button>
                       )}
+
                       {(sv.status === 'Scheduled' || sv.status === 'Rescheduled') && (
                         <button
                           type="button"
@@ -938,8 +1072,19 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
                     Host Agent: <strong>{sv.assignedAgentName || 'Agent'}</strong>
                   </div>
+
                   {(sv.outcomeNotes || sv.visitorNote) && (
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--text-primary)',
+                        marginTop: 8,
+                        padding: '8px 12px',
+                        backgroundColor: 'var(--bg-surface-hover)',
+                        borderRadius: 6,
+                        fontStyle: 'italic',
+                      }}
+                    >
                       "{sv.outcomeNotes || sv.visitorNote}"
                     </div>
                   )}
@@ -950,15 +1095,17 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
         </div>
       )}
 
-      {/* ── Call Recordings ────────────────────────────────────────────── */}
-      {(!sectionsOnly || sectionsOnly.includes('callRecordings')) && (
-        <div className="card">
-          <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Phone size={16} color="var(--primary-600)" /> Call Recordings
-          </h4>
+      {/* ── TAB 4: CALL RECORDINGS ────────────────────────────────────────────── */}
+      {(!isConstrainedMode ? activeTab === 'callRecordings' : sectionsOnly?.includes('callRecordings')) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h4 style={{ fontSize: 15, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Phone size={16} color="var(--primary-600)" /> Call History &amp; Audio Recordings ({tabCalls.length})
+            </h4>
+          </div>
 
           {isGhl && (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
               <button
                 type="button"
                 className={`btn btn-sm ${callTab === 'agent' ? 'btn-primary' : 'btn-ghost'}`}
@@ -977,8 +1124,21 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
           )}
 
           {tabCalls.length === 0 ? (
-            <div style={{ padding: '16px', backgroundColor: 'var(--bg-surface-hover)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
-              No calls in this category yet.
+            <div
+              style={{
+                padding: '36px 20px',
+                backgroundColor: 'var(--bg-surface-hover)',
+                borderRadius: 10,
+                border: '1px dashed var(--border-base)',
+                textAlign: 'center',
+                color: 'var(--text-muted)',
+              }}
+            >
+              <Phone size={32} style={{ margin: '0 auto 10px', opacity: 0.5 }} />
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>No Calls Recorded</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                No inbound or outbound calls recorded for this lead yet.
+              </div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -990,18 +1150,17 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                     style={{
                       border: '1px solid var(--border-base)',
                       borderRadius: 'var(--radius-md)',
-                      padding: '12px 14px',
+                      padding: '14px 16px',
                       backgroundColor: 'var(--bg-surface)',
                     }}
                   >
-                    {/* Call header row */}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span
                           style={{
                             fontSize: 11,
                             fontWeight: 700,
-                            padding: '2px 8px',
+                            padding: '3px 8px',
                             borderRadius: 10,
                             backgroundColor: c.direction === 'inbound' ? '#dcfce7' : '#e0f2fe',
                             color: c.direction === 'inbound' ? '#15803d' : '#0369a1',
@@ -1016,14 +1175,12 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                       <StatusChip status={c.disposition} size="sm" />
                     </div>
 
-                    {/* Notes */}
                     {c.notes && (
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
                         <strong>Notes:</strong> {c.notes}
                       </div>
                     )}
 
-                    {/* Reason (from Call Wrap-up & Disposition) */}
                     {(c as any).reason && (
                       <div style={{ fontSize: 12, marginTop: 6, backgroundColor: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)', padding: '5px 10px', borderRadius: 5 }}>
                         <strong style={{ color: 'var(--text-secondary)' }}>Reason:</strong>{' '}
@@ -1031,17 +1188,15 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                       </div>
                     )}
 
-                    {/* Audio Player */}
                     {c.recordingUrl && (
                       <div style={{ marginTop: 10 }}>
                         <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-                          <Volume2 size={12} /> Call Recording Audio
+                          <Volume2 size={12} /> Call Audio Recording
                         </div>
                         <audio controls src={c.recordingUrl} style={{ width: '100%', height: 36 }} />
                       </div>
                     )}
 
-                    {/* Collapsible Transcription */}
                     {c.transcription && (
                       <div style={{ marginTop: 8 }}>
                         <button
@@ -1054,7 +1209,6 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
                           {isExpanded ? 'Hide Transcription' : 'View Automated Transcription'}
                           {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                         </button>
-
                         {isExpanded && (
                           <div
                             style={{
@@ -1081,155 +1235,121 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
         </div>
       )}
 
-      {/* ── Activity & Audit History Timeline (Jamin Only) ───────────────────────────── */}
-      {(!sectionsOnly || sectionsOnly.includes('details')) && !isGhl && (
-        <div className="card">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              cursor: 'pointer',
-              marginBottom: isActivityOpen ? 12 : 0,
-            }}
-            onClick={() => setIsActivityOpen(prev => !prev)}
-          >
-            <h4
-              style={{
-                fontSize: 15,
-                fontWeight: 700,
-                margin: 0,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              <History size={16} color="var(--primary-600)" /> Activity & Audit Timeline ({unifiedTimelineEvents.length})
+      {/* ── TAB 5: ACTIVITY & AUDIT TIMELINE ─────────────────────────────────── */}
+      {(!isConstrainedMode ? activeTab === 'timeline' : sectionsOnly?.includes('timeline')) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h4 style={{ fontSize: 15, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <History size={16} color="var(--primary-600)" /> Activity &amp; Audit Timeline ({unifiedTimelineEvents.length})
             </h4>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              style={{ padding: '2px 6px' }}
-              onClick={e => {
-                e.stopPropagation();
-                setIsActivityOpen(prev => !prev);
-              }}
-            >
-              {isActivityOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </button>
           </div>
 
-          {isActivityOpen && (
-            <div>
-              {unifiedTimelineEvents.length === 0 ? (
-                <div
-                  style={{
-                    padding: '16px',
-                    backgroundColor: 'var(--bg-surface-hover)',
-                    borderRadius: 8,
-                    color: 'var(--text-muted)',
-                    fontSize: 13,
-                    textAlign: 'center',
-                  }}
-                >
-                  No activities or audits recorded for this lead yet.
-                </div>
-              ) : (
-                <div
-                  role="region"
-                  aria-label="Lead activity and audit history"
-                  tabIndex={0}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    position: 'relative',
-                    maxHeight: 460,
-                    overflowY: 'auto',
-                    overscrollBehavior: 'contain',
-                    padding: '2px 10px 2px 0',
-                    paddingLeft: 18,
-                    borderLeft: '2px solid var(--border-base)',
-                    gap: 14,
-                    marginLeft: 6,
-                  }}
-                >
-                  {unifiedTimelineEvents.map((ev, idx) => {
-                    let formattedTime = ev.timestamp || '';
-                    if (formattedTime) {
-                      const d = new Date(formattedTime);
-                      if (!isNaN(d.getTime())) {
-                        formattedTime = d.toLocaleString('en-IN', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          hour12: true,
-                        });
-                      }
-                    }
-
-                    return (
-                      <div
-                        key={ev.id || idx}
-                        style={{
-                          position: 'relative',
-                          backgroundColor: 'var(--bg-surface)',
-                          border: '1px solid var(--border-base)',
-                          borderRadius: 'var(--radius-md)',
-                          padding: '10px 14px',
-                        }}
-                      >
-                        {/* Timeline dot */}
-                        <div
+          {unifiedTimelineEvents.length === 0 ? (
+            <div
+              style={{
+                padding: '36px 20px',
+                backgroundColor: 'var(--bg-surface-hover)',
+                borderRadius: 10,
+                border: '1px dashed var(--border-base)',
+                textAlign: 'center',
+                color: 'var(--text-muted)',
+              }}
+            >
+              <History size={32} style={{ margin: '0 auto 10px', opacity: 0.5 }} />
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>No Activity Logs Recorded</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                No activity or audit events recorded for this lead yet.
+              </div>
+            </div>
+          ) : (
+            <div
+              className="lead-activity-timeline"
+              role="region"
+              aria-label="Lead activity and audit history"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                position: 'relative',
+                paddingLeft: 22,
+                borderLeft: '2px solid var(--border-base)',
+                gap: 14,
+                marginLeft: 10,
+                marginRight: 4,
+              }}
+            >
+              {unifiedTimelineEvents.map((ev, idx) => {
+                let formattedTime = ev.timestamp || '';
+                if (formattedTime) {
+                  const d = new Date(formattedTime);
+                  if (!isNaN(d.getTime())) {
+                    formattedTime = d.toLocaleString('en-IN', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: true,
+                    });
+                  }
+                }
+                return (
+                  <div
+                    key={ev.id || idx}
+                    style={{
+                      position: 'relative',
+                      backgroundColor: 'var(--bg-surface)',
+                      border: '1px solid var(--border-base)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '12px 14px',
+                      boxShadow: 'var(--shadow-xs, 0 1px 2px rgba(0,0,0,0.04))',
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: -29,
+                        top: 14,
+                        width: 12,
+                        height: 12,
+                        borderRadius: '50%',
+                        backgroundColor: ev.dotColor || 'var(--primary-600)',
+                        border: '2px solid #ffffff',
+                        boxShadow: '0 0 0 2px var(--border-base)',
+                        zIndex: 1,
+                      }}
+                    />
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span
                           style={{
-                            position: 'absolute',
-                            left: -25,
-                            top: 14,
-                            width: 12,
-                            height: 12,
-                            borderRadius: '50%',
-                            backgroundColor: ev.dotColor || 'var(--primary-600)',
-                            border: '2px solid #ffffff',
-                            boxShadow: '0 0 0 2px var(--border-base)',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            backgroundColor: ev.badgeBg || '#e0e7ff',
+                            color: ev.badgeColor || '#4338ca',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.04em',
                           }}
-                        />
-
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span
-                              style={{
-                                fontSize: 10,
-                                fontWeight: 700,
-                                padding: '2px 6px',
-                                borderRadius: 4,
-                                backgroundColor: ev.badgeBg || '#e0e7ff',
-                                color: ev.badgeColor || '#4338ca',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.04em',
-                              }}
-                            >
-                              {ev.action.replace(/_/g, ' ')}
-                            </span>
-                            <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                              <User size={11} /> <strong>{ev.actor || 'System'}</strong>
-                            </span>
-                          </div>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
-                            {formattedTime}
-                          </span>
-                        </div>
-
-                        {ev.details && (
-                          <div style={{ fontSize: 12, color: 'var(--text-primary)', marginTop: 6, lineHeight: 1.45 }}>
-                            {ev.details}
-                          </div>
-                        )}
+                        >
+                          {ev.action.replace(/_/g, ' ')}
+                        </span>
+                        <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <User size={11} /> <strong>{ev.actor || 'System'}</strong>
+                        </span>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
+                        {formattedTime}
+                      </span>
+                    </div>
+                    {ev.details && (
+                      <div style={{ fontSize: 12, color: 'var(--text-primary)', marginTop: 6, lineHeight: 1.45 }}>
+                        {ev.details}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

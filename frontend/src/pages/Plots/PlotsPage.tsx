@@ -551,10 +551,12 @@ export const PlotsPage: React.FC = () => {
         {/* Project Selector, Refresh, Add Plot */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Project:</span>
+            <label htmlFor="plots-project-selector" style={{ fontSize: 13, fontWeight: 600 }}>Project:</label>
             <select
+              id="plots-project-selector"
+              name="selectedProject"
               className="form-select plots-project-selector"
-              value={currentProjectId}
+              value={currentProjectId || selectedProject}
               onChange={e => handleProjectChange(e.target.value)}
             >
               <option value="" disabled>-- Select Project --</option>
@@ -568,7 +570,7 @@ export const PlotsPage: React.FC = () => {
 
           <button
             className="btn btn-secondary btn-sm"
-            onClick={() => loadData(selectedProject)}
+            onClick={() => loadData(selectedProject || currentProjectId)}
             disabled={loading}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
           >
@@ -1034,8 +1036,10 @@ export const PlotsPage: React.FC = () => {
           {holdSourceType === 'custom' && (
             <>
               <div className="form-group">
-                <label className="form-label">Client Name *</label>
+                <label htmlFor="plot-hold-customer" className="form-label">Client Name *</label>
                 <input
+                  id="plot-hold-customer"
+                  name="holdCustomer"
                   type="text"
                   className="form-input"
                   required
@@ -1058,8 +1062,10 @@ export const PlotsPage: React.FC = () => {
           )}
 
           <div className="form-group">
-            <label className="form-label">Hold Validity Duration</label>
+            <label htmlFor="plot-hold-days" className="form-label">Hold Validity Duration</label>
             <select
+              id="plot-hold-days"
+              name="holdDays"
               className="form-select"
               value={holdDays}
               onChange={e => setHoldDays(e.target.value)}

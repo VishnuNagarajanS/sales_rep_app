@@ -175,6 +175,9 @@ export const FileShareModal: React.FC<Props> = ({
       <div className="file-share-dialog-content">
         {/* Hidden native file input inside the modal */}
         <input
+          id="chat-file-share-input"
+          name="chatFile"
+          aria-label="Upload file to share"
           type="file"
           ref={fileInputRef}
           style={{ display: 'none' }}
@@ -239,7 +242,8 @@ export const FileShareModal: React.FC<Props> = ({
           </div>
           <div className="file-share-permissions-grid">
             {permissions.map(p => (
-              <div
+              <label
+                htmlFor={`file-perm-${p.id}`}
                 key={p.id}
                 className={`file-perm-card-col ${permission === p.id ? 'active' : ''}`}
                 onClick={() => setPermission(p.id)}
@@ -248,6 +252,7 @@ export const FileShareModal: React.FC<Props> = ({
                   <span className="file-perm-icon">{p.icon}</span>
                   <span className={`file-perm-badge badge-${p.id}`}>{p.badge}</span>
                   <input
+                    id={`file-perm-${p.id}`}
                     type="radio"
                     name="file_permission"
                     checked={permission === p.id}
@@ -257,7 +262,7 @@ export const FileShareModal: React.FC<Props> = ({
                 </div>
                 <div className="file-perm-col-title">{p.label}</div>
                 <div className="file-perm-col-desc">{p.desc}</div>
-              </div>
+              </label>
             ))}
           </div>
         </div>

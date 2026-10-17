@@ -30,6 +30,8 @@ public class UpdateGhlDealDto
     public string? PreferredAssetClass { get; set; }
     public string? Priority { get; set; }
     public DateTime? StageEnteredAt { get; set; }
+    public bool? InvestmentAmountConfirmed { get; set; }
+    public string? KycStatus { get; set; }
 }
 
 /// <summary>
@@ -76,6 +78,26 @@ public class GhlDealResponseDto
     public DateTime? StageEnteredAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    public bool InvestmentAmountConfirmed { get; set; }
+    public string? KycStatus { get; set; }
+    public int? KycId { get; set; }
+    public string? CustomerKycStatus { get; set; }
+    public string? VerifiedBy { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? Remarks { get; set; }
+    public string? FlaggedSections { get; set; }
+
+    /// <summary>Contact phone resolved from the linked Customer record, then the denormalised CustomerName fallback.</summary>
+    public string? Phone { get; set; }
+    /// <summary>Contact email resolved from the linked Customer record.</summary>
+    public string? Email { get; set; }
+    /// <summary>Location resolved from the linked Customer record.</summary>
+    public string? Location { get; set; }
+
+    public int? HandoverId { get; set; }
+    public string? HandedOverFromName { get; set; }
+    public DateTime? HandoverPlannedEnd { get; set; }
+    public int? OriginalOwnerId { get; set; }
 }
 
 public class GhlDealActivityResponseDto

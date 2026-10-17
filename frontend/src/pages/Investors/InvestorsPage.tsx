@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { TrendingUp, Phone, ExternalLink, Edit2, Trash2, Download, Plus } from 'lucide-react';
+﻿import React, { useState, useEffect } from 'react';
+import { TrendingUp, Phone, ExternalLink, Edit2, Trash2, Download } from 'lucide-react';
 import { Investor, CallRecord, Consultation, InvestmentOpportunity, Followup, Deal } from '../../types';
 import Papa from 'papaparse';
 import { useAuth } from '../../context/AuthContext';
@@ -8,11 +8,11 @@ import { storageService } from '../../services/storageService';
 import { getInvestors, saveInvestor as apiSaveInvestor, deleteInvestor as apiDeleteInvestor, getDeals, getCalls, getConsultations, getOpportunities, getFollowups } from '../../services/ghlApiService';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
-import { Drawer } from '../../components/common/Drawer';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
+import { Investor360Modal } from './Investor360Modal';
 import './InvestorsPage.css';
 
 // ─── Form state shape ────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ const BLANK_FORM: InvestorForm = {
   name: '',
   phone: '',
   email: '',
-  status: 'Lead',
+  status: 'Active Investor',
   investmentCapacity: '',
   preferredAssetClass: '',
   assignedAgentId: '',
@@ -53,11 +53,13 @@ export const InvestorsPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
-  // ── Role scoping ───────────────────────────────────────────────────────────
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isIrm = roleCode === 'irm';
   const isGhlIrm = isIrm && tenant?.slug === 'ghl';
+  const isGhlAdmin =
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1') &&
+    ['company_admin', 'admin', 'super_admin', 'ghl_admin'].includes(roleCode as string);
 
   // ── Core data ─────────────────────────────────────────────────────────────
   const [investors, setInvestors] = useState<Investor[]>([]);
@@ -72,6 +74,7 @@ export const InvestorsPage: React.FC = () => {
   const [drawerTab, setDrawerTab] = useState<
     'overview' | 'calls' | 'consultations' | 'opportunities' | 'followups' | 'documents'
   >('overview');
+  const [docsTab, setDocsTab] = useState<'investor' | 'company'>('investor');
 
   // ── Filters ───────────────────────────────────────────────────────────────
   const [statusFilter, setStatusFilter] = useState('All');
@@ -84,29 +87,52 @@ export const InvestorsPage: React.FC = () => {
   const [form, setForm] = useState<InvestorForm>(BLANK_FORM);
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof InvestorForm, string>>>({});
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = async () => {
     try {
-      const [apiInvestors, apiDeals, apiFollowups] = await Promise.all([
+      setLoadError(null);
+      // Load each related list independently so secondary failures do not block investors.
+      const [resInv, resDeals, resCalls, resConsultations, resOpps, resFollowups] = await Promise.allSettled([
         getInvestors(tenant?.id),
         getDeals(tenant?.id),
+        getCalls(tenant?.id),
+        getConsultations(tenant?.id),
+        getOpportunities(tenant?.id),
         getFollowups(tenant?.id),
       ]);
-      setInvestors(apiInvestors || []);
-      setDeals(apiDeals || []);
-      setAllFollowups(apiFollowups || []);
-    } catch {
-      setInvestors(storageService.getInvestors(tenant?.id));
-      setDeals(storageService.getDeals(tenant?.id));
-      setAllFollowups([]);
-    }
-    setAllCalls(storageService.getCalls(tenant?.id));
-    setAllConsultations(storageService.getConsultations(tenant?.id));
-    setAllOpportunities(storageService.getOpportunities(tenant?.id));
-    if (tenant?.id) {
-      getFollowups(tenant.id).then(setAllFollowups).catch(() => setAllFollowups([]));
-    } else {
-      setAllFollowups([]);
+      const val = <T,>(r: PromiseSettledResult<T>, fallback: T): T =>
+        r.status === 'fulfilled' ? r.value : fallback;
+
+      if (resInv.status === 'rejected') {
+        throw resInv.reason;
+      }
+
+      setInvestors(val(resInv, []));
+      setDeals(val(resDeals, []));
+      setAllCalls(val(resCalls, []));
+      setAllConsultations(val(resConsultations, []));
+      setAllOpportunities(val(resOpps, []));
+      setAllFollowups(val(resFollowups, []));
+    } catch (err: unknown) {
+      console.error('Failed to load investor data:', err);
+      if (storageService.isMockMode()) {
+        setInvestors(storageService.getInvestors(tenant?.id));
+        setDeals(storageService.getDeals(tenant?.id));
+        setAllCalls(storageService.getCalls(tenant?.id));
+        setAllConsultations(storageService.getConsultations(tenant?.id));
+        setAllOpportunities(storageService.getOpportunities(tenant?.id));
+        setAllFollowups(storageService.getFollowups(tenant?.id));
+      } else {
+        setInvestors([]);
+        setDeals([]);
+        setAllCalls([]);
+        setAllConsultations([]);
+        setAllOpportunities([]);
+        setAllFollowups([]);
+        setLoadError(err instanceof Error ? err.message : 'Failed to load investor records from server.');
+      }
     }
   };
 
@@ -123,58 +149,55 @@ export const InvestorsPage: React.FC = () => {
   }, [selectedInvestor?.id]);
 
   // ── Role-based scoping ────────────────────────────────────────────────────
-  // For IRM on GHL: show ONLY investors who completed the full pipeline with a deal at stage === 'converted'
-  // sales_executive sees only their own investors; managers/admins see all
-  const convertedDeals = deals.filter(d => d.stage === 'converted');
-  const convertedCustomerIds = new Set(convertedDeals.map(d => d.customerId));
-  const convertedCustomerNames = new Set(convertedDeals.map(d => d.customerName.toLowerCase()));
-
-  const scopedInvestors = isGhlIrm
-    ? [
-      ...investors.filter(inv =>
-        convertedCustomerIds.has(inv.id) ||
-        convertedCustomerNames.has(inv.name.toLowerCase())
-      ),
-      ...convertedDeals
-        .filter(d => !investors.some(inv => inv.id === d.customerId || inv.name.toLowerCase() === d.customerName.toLowerCase()))
-        .map((d): Investor => ({
-          id: d.customerId || `inv-${d.id}`,
-          companyId: d.companyId,
-          name: d.customerName,
-          phone: d.phone || '',
-          email: d.email || '',
-          status: 'Active Investor',
-          investmentCapacity: d.investmentRange || (d.value >= 10000000 ? `₹${(d.value / 10000000).toFixed(2)} Cr` : `₹${d.value}`),
-          preferredAssetClass: d.preferredAssetClass || 'Commercial Pre-Leased',
-          assignedAgentId: d.assignedAgentId,
-          assignedAgentName: d.assignedAgentName,
-          referralSource: 'Pipeline Mandate Converted',
-          createdAt: d.createdAt,
-          committedAUM: d.investmentRange || (d.value >= 10000000 ? `₹${(d.value / 10000000).toFixed(2)} Cr` : `₹${d.value}`),
-          notes: d.notes,
-          investmentMandate: '',
-          riskTolerance: undefined,
-        }))
-    ]
-    : isExec
-      ? investors.filter(
+  // sales_executive and IRM see only their own investors; managers/admins see all
+  const isScopedUser = isExec || isGhlIrm || isIrm;
+  const scopedInvestors = isScopedUser
+    ? investors.filter(
         inv =>
-          (inv.assignedAgentId && inv.assignedAgentId === user?.id) ||
-          (inv.assignedAgentName && inv.assignedAgentName === user?.name),
+          (inv.assignedAgentId && String(inv.assignedAgentId) === String(user?.id)) ||
+          (inv.assignedAgentName && inv.assignedAgentName === user?.name)
       )
-      : investors;
+    : investors;
+
+  // Helper: locate matching deal for an investor record
+  const getMatchingDeal = (inv: Investor): Deal | undefined => {
+    const fDigits = (inv.phone || '').replace(/\D/g, '').slice(-10);
+    return deals.find(d => {
+      if (d.customerId && String(d.customerId) === String(inv.id)) return true;
+      const dDigits = (d.phone || '').replace(/\D/g, '').slice(-10);
+      if (fDigits && dDigits && dDigits === fDigits) return true;
+      if (d.email && inv.email && d.email.trim().toLowerCase() === inv.email.trim().toLowerCase()) return true;
+      if (d.customerName && inv.name && d.customerName.trim().toLowerCase() === inv.name.trim().toLowerCase()) return true;
+      return false;
+    });
+  };
+
+  // Only converted customers/investors belong in Investor 360
+  const isConvertedInvestor = (inv: Investor): boolean => {
+    const norm = (inv.status || '').toLowerCase().replace(/[\s_-]/g, '');
+    if (norm === 'activeinvestor' || norm === 'hnwinvestor' || norm === 'active' || norm === 'converted') {
+      return true;
+    }
+    const match = getMatchingDeal(inv);
+    if (match && (match.stage === 'converted' || match.stage === 'won')) {
+      return true;
+    }
+    return false;
+  };
+
+  const convertedInvestors = scopedInvestors.filter(isConvertedInvestor);
 
   // ── Filter options ────────────────────────────────────────────────────────
-  const assetClassOptions = Array.from(new Set(scopedInvestors.map(inv => inv.preferredAssetClass)))
+  const assetClassOptions = Array.from(new Set(convertedInvestors.map(inv => inv.preferredAssetClass)))
     .filter(Boolean)
     .map(cls => ({ value: cls, label: cls }));
 
-  const consultantOptions = Array.from(new Set(scopedInvestors.map(inv => inv.assignedAgentName)))
+  const consultantOptions = Array.from(new Set(convertedInvestors.map(inv => inv.assignedAgentName)))
     .filter(Boolean)
     .map(name => ({ value: name, label: name }));
 
   // ── Filtered list ─────────────────────────────────────────────────────────
-  const filteredInvestors = scopedInvestors.filter(inv => {
+  const filteredInvestors = convertedInvestors.filter(inv => {
     if (statusFilter !== 'All' && inv.status !== statusFilter) return false;
     if (assetClassFilter !== 'All' && inv.preferredAssetClass !== assetClassFilter) return false;
     if (consultantFilter !== 'All' && inv.assignedAgentName !== consultantFilter) return false;
@@ -207,18 +230,6 @@ export const InvestorsPage: React.FC = () => {
   );
 
   // ── Modal helpers ─────────────────────────────────────────────────────────
-  const openNewModal = () => {
-    setEditingInvestor(null);
-    setForm({
-      ...BLANK_FORM,
-      // Lock exec to themselves
-      assignedAgentId: isExec ? (user?.id ?? '') : '',
-      assignedAgentName: isExec ? (user?.name ?? '') : '',
-    });
-    setFormErrors({});
-    setIsModalOpen(true);
-  };
-
   const openEditModal = (inv: Investor) => {
     setEditingInvestor(inv);
     setForm({
@@ -252,7 +263,9 @@ export const InvestorsPage: React.FC = () => {
     if (formErrors[key]) setFormErrors(prev => ({ ...prev, [key]: undefined }));
   };
 
-  const handleSaveInvestor = () => {
+  const handleSaveInvestor = async () => {
+    if (!editingInvestor) return;
+
     const errors: Partial<Record<keyof InvestorForm, string>> = {};
     if (!form.name.trim()) errors.name = 'Name is required.';
     if (!form.phone.trim()) errors.phone = 'Phone is required.';
@@ -261,9 +274,8 @@ export const InvestorsPage: React.FC = () => {
       return;
     }
 
-    const now = new Date().toISOString().split('T')[0];
-    const investor: Investor = {
-      id: editingInvestor ? editingInvestor.id : `inv-${Date.now()}`,
+    const investorPayload: Investor = {
+      id: editingInvestor.id,
       companyId: tenant?.id ?? '',
       name: form.name.trim(),
       phone: form.phone.trim(),
@@ -274,16 +286,21 @@ export const InvestorsPage: React.FC = () => {
       assignedAgentId: form.assignedAgentId.trim() || (user?.id ?? ''),
       assignedAgentName: form.assignedAgentName.trim() || (user?.name ?? ''),
       referralSource: form.referralSource.trim() || undefined,
-      createdAt: editingInvestor ? editingInvestor.createdAt : now,
+      createdAt: editingInvestor.createdAt,
       notes: form.notes.trim(),
       ...(form.committedAUM.trim() ? { committedAUM: form.committedAUM.trim() } : {}),
       ...(form.investmentMandate.trim() ? { investmentMandate: form.investmentMandate.trim() } : {}),
       ...(form.riskTolerance ? { riskTolerance: form.riskTolerance as Investor['riskTolerance'] } : {}),
     };
 
-    apiSaveInvestor(investor).catch(console.error);
-    closeModal();
-    setSelectedInvestor(investor);
+    try {
+      const saved = await apiSaveInvestor(investorPayload);
+      closeModal();
+      setSelectedInvestor(saved);
+      loadData();
+    } catch (err) {
+      console.error('[InvestorsPage] Failed to save investor:', err);
+    }
   };
 
   // ── CSV Export ────────────────────────────────────────────────────────────
@@ -341,26 +358,43 @@ export const InvestorsPage: React.FC = () => {
       key: 'investmentCapacity',
       header: 'Capital Capacity',
       sortable: true,
-      render: inv => (
-        <span className="investor-capacity-badge">{inv.investmentCapacity}</span>
-      ),
+      render: inv => {
+        const cap = inv.investmentCapacity;
+        const hasCap = cap && cap !== '—' && cap.trim() !== '' && cap.toLowerCase() !== 'not specified';
+        return hasCap ? (
+          <span className="investor-capacity-badge">{cap}</span>
+        ) : (
+          <span className="not-specified-badge">Not Specified</span>
+        );
+      },
     },
     ...(isExec ? [] : [{
       key: 'preferredAssetClass',
       header: 'Preferred Asset Class',
       sortable: true,
-      render: (inv: Investor) => <span style={{ fontSize: 12 }}>{inv.preferredAssetClass}</span>,
+      render: (inv: Investor) => {
+        const pref = inv.preferredAssetClass;
+        const hasPref = pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified';
+        return hasPref ? (
+          <span style={{ fontSize: 12 }}>{pref}</span>
+        ) : (
+          <span className="not-specified-badge">Not Specified</span>
+        );
+      },
     } as Column<Investor>]),
     ...(isGhlIrm ? [{
-      key: 'investorType' as any,
-      header: 'Structure',
+      key: 'investmentAmount' as any,
+      header: 'Investment Amount',
+      sortable: true,
       render: (inv: Investor) => {
-        const matchingDeal = convertedDeals.find(d => d.customerId === inv.id || d.customerName.toLowerCase() === inv.name.toLowerCase());
-        const type = matchingDeal?.investorType || 'AIF';
-        return (
-          <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 4, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-            {type}
+        const matchingDeal = getMatchingDeal(inv);
+        const amt = matchingDeal?.value || (inv.committedAUM && !isNaN(Number(inv.committedAUM)) && Number(inv.committedAUM) > 0 ? Number(inv.committedAUM) : null);
+        return amt ? (
+          <span style={{ fontWeight: 700, color: '#059669', fontSize: 13 }}>
+            {`₹${amt.toLocaleString('en-IN')}`}
           </span>
+        ) : (
+          <span className="not-specified-badge">Not Specified</span>
         );
       },
     } as Column<Investor>] : []),
@@ -368,7 +402,13 @@ export const InvestorsPage: React.FC = () => {
       key: 'status',
       header: 'KYC / Investor Status',
       sortable: true,
-      render: inv => <StatusChip status={inv.status} size="sm" />,
+      render: inv => {
+        const match = getMatchingDeal(inv);
+        const displayStatus = (match && (match.stage === 'converted' || match.stage === 'won') && inv.status === 'Lead')
+          ? 'Active Investor'
+          : inv.status;
+        return <StatusChip status={displayStatus} size="sm" />;
+      },
     },
     {
       key: 'assignedAgentName',
@@ -381,7 +421,7 @@ export const InvestorsPage: React.FC = () => {
     {
       label: 'Call Customer',
       icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
-      onClick: inv => initiateCall(inv.name, inv.phone, 'customer', inv.id),
+      onClick: inv => initiateCall(inv.name, inv.phone, 'customer', inv.id, undefined, 'investor_360'),
     },
     {
       label: 'View Investor 360',
@@ -392,11 +432,13 @@ export const InvestorsPage: React.FC = () => {
       label: 'Edit Investor',
       icon: <Edit2 size={14} color="var(--primary-600)" style={{ marginRight: 6 }} />,
       onClick: inv => openEditModal(inv),
+      hidden: () => isGhlAdmin,
     },
     {
       label: 'Delete Investor',
       icon: <Trash2 size={14} color="#dc2626" style={{ marginRight: 6 }} />,
       onClick: inv => handleDeleteInvestor(inv),
+      hidden: () => isIrm || isGhlAdmin,
     },
   ];
 
@@ -418,192 +460,131 @@ export const InvestorsPage: React.FC = () => {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="investors-page-container">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">
-            <TrendingUp size={24} color={isGhlIrm ? '#10b981' : '#0284c7'} />{' '}
-            {isGhlIrm ? 'Converted Investors 360' : 'High Net-Worth Investors 360'}
-          </h1>
-          <p className="page-subtitle">
-            {isGhlIrm
-              ? 'HNIs, family offices, and institutional partners who have completed the full pipeline and committed capital.'
-              : `Private wealth client directory, institutional capital allocation, and mandate tracking for ${tenant?.name}.`}
-          </p>
-        </div>
-
-        {/* Header actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button
-            id="investors-export-csv"
-            className="btn btn-secondary"
-            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
-            onClick={handleExportCSV}
-          >
-            <Download size={15} /> Export CSV
-          </button>
-          <button
-            id="investors-new-investor"
-            className="btn btn-primary"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: 13,
-            }}
-            onClick={openNewModal}
-          >
-            <Plus size={15} /> New Investor
-          </button>
-        </div>
-      </div>
-
-      {/* ── Data table ───────────────────────────────────────────────────── */}
-      <DataTable
-        columns={columns}
-        data={filteredInvestors}
-        keyExtractor={inv => inv.id}
-        rowActions={rowActions}
-        onRowClick={inv => setSelectedInvestor(inv)}
-        searchPlaceholder="Search investors by name, asset class, or capacity..."
-        filtersNode={
-          <FilterBar
-            filters={[
-              {
-                key: 'status',
-                label: 'Status',
-                value: statusFilter,
-                onChange: setStatusFilter,
-                options: [
-                  { value: 'Lead', label: 'Lead' },
-                  { value: 'Active Investor', label: 'Active Investor' },
-                  { value: 'HNW Investor', label: 'HNW Investor' },
-                  { value: 'Inactive', label: 'Inactive' },
-                ],
-              },
-              ...(isExec ? [] : [{
-                key: 'assetClass',
-                label: 'Asset Class',
-                value: assetClassFilter,
-                onChange: setAssetClassFilter,
-                options: assetClassOptions,
-              }]),
-              {
-                key: 'consultant',
-                label: 'Consultant',
-                value: consultantFilter,
-                onChange: setConsultantFilter,
-                options: consultantOptions,
-              },
-            ]}
-            onClearAll={() => {
-              setStatusFilter('All');
-              setAssetClassFilter('All');
-              setConsultantFilter('All');
-            }}
-          />
-        }
-      />
-
-      {/* ── Investor 360 Drawer ──────────────────────────────────────────── */}
-      <Drawer
-        isOpen={!!selectedInvestor}
-        onClose={() => setSelectedInvestor(null)}
-        title={selectedInvestor?.name || 'Investor Overview'}
-        subtitle={isExec ? undefined : `Mandate: ${selectedInvestor?.preferredAssetClass ?? ''}`}
-        width={720}
-      >
-        {selectedInvestor && (
-          <div className="investor-drawer-body">
-            <div className="investor-quick-card">
-              <div>
-                <StatusChip status={selectedInvestor.status} />
-                <div className="investor-partner-label">
-                  Lead Wealth Partner: <strong>{selectedInvestor.assignedAgentName}</strong>
-                </div>
-              </div>
-
-              <button
-                className="btn btn-primary btn-sm investor-call-btn-blue"
-                onClick={() => initiateCall(selectedInvestor.name, selectedInvestor.phone, 'customer', selectedInvestor.id)}
-              >
-                <Phone size={13} /> Call Customer
-              </button>
-            </div>
-
-            <div className="card investor-info-card">
-              <h4 className="investor-info-title">
-                Investment Allocation & Capacity
-              </h4>
-              <div className="investor-details-grid">
-                <div>
-                  <span style={{ color: 'var(--text-secondary)' }}>Capital Ticket:</span>
-                  <div className="investor-ticket-val">
-                    {selectedInvestor.investmentCapacity}
-                  </div>
-                </div>
-                {(() => {
-                  const matchingDeal = convertedDeals.find(d => d.customerId === selectedInvestor.id || d.customerName.toLowerCase() === selectedInvestor.name.toLowerCase());
-                  if (matchingDeal?.investorType) {
-                    return (
-                      <div>
-                        <span style={{ color: 'var(--text-secondary)' }}>Investor Structure:</span>
-                        <div style={{ fontWeight: 800, color: 'var(--primary-600)', marginTop: 4 }}>
-                          {matchingDeal.investorType}
-                        </div>
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
-              </div>
-            </div>
-
-            <div className="card investor-info-card">
-              <h4 className="investor-info-title">
-                Advisory Portfolio Notes
-              </h4>
-              <p className="investor-notes-text">
-                {selectedInvestor.notes || 'Institutional investor evaluation completed.'}
+      {selectedInvestor ? (
+        <Investor360Modal
+          isOpen={true}
+          isInline={true}
+          onClose={() => setSelectedInvestor(null)}
+          investor={selectedInvestor}
+          deals={deals}
+          calls={allCalls}
+          consultations={allConsultations}
+          opportunities={allOpportunities}
+          followups={allFollowups}
+          tenant={tenant}
+          isGhlAdmin={isGhlAdmin}
+          onEditInvestor={inv => {
+            openEditModal(inv);
+          }}
+          onCallCustomer={(name, phone, entityId) => {
+            initiateCall(name, phone, 'customer', entityId, undefined, 'investor_360');
+          }}
+        />
+      ) : (
+        <>
+          {/* Header */}
+          <div className="page-header">
+            <div>
+              <h1 className="page-title">
+                <TrendingUp size={24} color={isGhlIrm ? '#10b981' : '#0284c7'} />{' '}
+                {isGhlIrm ? 'Converted Investors 360' : 'High Net-Worth Investors 360'}
+              </h1>
+              <p className="page-subtitle">
+                {isGhlIrm
+                  ? 'HNIs, family offices, and institutional partners who have completed the full pipeline and committed capital.'
+                  : `Private wealth client directory, institutional capital allocation, and mandate tracking for ${tenant?.name}.`}
               </p>
             </div>
 
-            {/* Documents */}
-            <div className="card investor-info-card">
-              <h4 className="investor-info-title">
-                Documents
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <DocumentUploader
-                  entityType="investor"
-                  entityId={selectedInvestor.id}
-                  allowedCategories={[
-                    'KYC',
-                    'Mandate Agreement',
-                    'Term Sheet',
-                    'PAN / Aadhar',
-                    'Other',
-                  ]}
-                />
-                <DocumentList
-                  entityType="investor"
-                  entityId={selectedInvestor.id}
-                  canDelete
-                />
-              </div>
+            {/* Header actions */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                id="investors-export-csv"
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+                onClick={handleExportCSV}
+              >
+                <Download size={15} /> Export CSV
+              </button>
             </div>
           </div>
-        )}
-      </Drawer>
 
-      {/* ── Create / Edit Investor Modal ─────────────────────────────────── */}
+          {loadError && (
+            <div
+              className="alert-banner error"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 16px',
+                marginBottom: '16px',
+                borderRadius: '8px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#ef4444',
+              }}
+            >
+              <span>{loadError}</span>
+            </div>
+          )}
+
+          {/* ── Data table ───────────────────────────────────────────────────── */}
+          <DataTable
+            columns={columns}
+            data={filteredInvestors}
+            keyExtractor={inv => inv.id}
+            rowActions={rowActions}
+            onRowClick={inv => setSelectedInvestor(inv)}
+            searchPlaceholder="Search investors by name, asset class, or capacity..."
+            filtersNode={
+              <FilterBar
+                filters={[
+                  {
+                    key: 'status',
+                    label: 'Status',
+                    value: statusFilter,
+                    onChange: setStatusFilter,
+                    options: [
+                      { value: 'Active Investor', label: 'Active Investor' },
+                      { value: 'HNW Investor', label: 'HNW Investor' },
+                      { value: 'Inactive', label: 'Inactive' },
+                    ],
+                  },
+                  ...(isExec ? [] : [{
+                    key: 'assetClass',
+                    label: 'Asset Class',
+                    value: assetClassFilter,
+                    onChange: setAssetClassFilter,
+                    options: assetClassOptions,
+                  }]),
+                  {
+                    key: 'consultant',
+                    label: 'Consultant',
+                    value: consultantFilter,
+                    onChange: setConsultantFilter,
+                    options: consultantOptions,
+                  },
+                ]}
+                onClearAll={() => {
+                  setStatusFilter('All');
+                  setAssetClassFilter('All');
+                  setConsultantFilter('All');
+                }}
+              />
+            }
+          />
+        </>
+      )}
+
+      {/* ── Edit Investor Modal ─────────────────────────────────────────── */}
       <Modal
-        isOpen={isModalOpen}
+        isOpen={isModalOpen && !!editingInvestor && !isGhlAdmin}
         onClose={closeModal}
-        title={editingInvestor ? 'Edit Investor' : 'New Investor'}
+        title="Edit Investor"
         subtitle={
           editingInvestor
             ? `Editing profile for ${editingInvestor.name}.`
-            : 'Create a new HNW investor profile for your firm.'
+            : ''
         }
         maxWidth={620}
         footer={
@@ -615,7 +596,7 @@ export const InvestorsPage: React.FC = () => {
               className="btn btn-primary"
               onClick={handleSaveInvestor}
             >
-              {editingInvestor ? 'Update Investor' : 'Save Investor'}
+              Update Investor
             </button>
           </>
         }
@@ -624,9 +605,11 @@ export const InvestorsPage: React.FC = () => {
           {/* Row: Name + Phone */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Name *</label>
+              <label htmlFor="inv-form-name" className="form-label">Name *</label>
               <input
                 id="inv-form-name"
+                name="name"
+                autoComplete="name"
                 className={`form-input${formErrors.name ? ' is-invalid' : ''}`}
                 placeholder="e.g. Rajiv Mehta"
                 value={form.name}
@@ -635,9 +618,11 @@ export const InvestorsPage: React.FC = () => {
               {formErrors.name && <div className="form-error">{formErrors.name}</div>}
             </div>
             <div className="form-group">
-              <label className="form-label">Phone *</label>
+              <label htmlFor="inv-form-phone" className="form-label">Phone *</label>
               <input
                 id="inv-form-phone"
+                name="phone"
+                autoComplete="tel"
                 className={`form-input${formErrors.phone ? ' is-invalid' : ''}`}
                 placeholder="e.g. +91 98765 43210"
                 value={form.phone}
@@ -650,9 +635,11 @@ export const InvestorsPage: React.FC = () => {
           {/* Row: Email + Status */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Email</label>
+              <label htmlFor="inv-form-email" className="form-label">Email</label>
               <input
                 id="inv-form-email"
+                name="email"
+                autoComplete="email"
                 className="form-input"
                 placeholder="e.g. rajiv@example.com"
                 value={form.email}
@@ -660,14 +647,14 @@ export const InvestorsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Status</label>
+              <label htmlFor="inv-form-status" className="form-label">Status</label>
               <select
                 id="inv-form-status"
+                name="status"
                 className="form-select"
                 value={form.status}
                 onChange={e => setField('status', e.target.value as InvestorForm['status'])}
               >
-                <option value="Lead">Lead</option>
                 <option value="Active Investor">Active Investor</option>
                 <option value="HNW Investor">HNW Investor</option>
                 <option value="Inactive">Inactive</option>
@@ -678,9 +665,10 @@ export const InvestorsPage: React.FC = () => {
           {/* Row: Capital Capacity + Preferred Asset Class */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Investment Capacity</label>
+              <label htmlFor="inv-form-capacity" className="form-label">Investment Capacity</label>
               <input
                 id="inv-form-capacity"
+                name="investmentCapacity"
                 className="form-input"
                 placeholder="e.g. ₹5 Cr"
                 value={form.investmentCapacity}
@@ -689,9 +677,10 @@ export const InvestorsPage: React.FC = () => {
             </div>
             {!isExec && (
               <div className="form-group">
-                <label className="form-label">Preferred Asset Class</label>
+                <label htmlFor="inv-form-asset-class" className="form-label">Preferred Asset Class</label>
                 <input
                   id="inv-form-asset-class"
+                  name="preferredAssetClass"
                   className="form-input"
                   placeholder="e.g. Residential, Commercial"
                   value={form.preferredAssetClass}
@@ -704,9 +693,10 @@ export const InvestorsPage: React.FC = () => {
           {/* Row: Committed AUM + Risk Tolerance */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Committed AUM</label>
+              <label htmlFor="inv-form-aum" className="form-label">Committed AUM</label>
               <input
                 id="inv-form-aum"
+                name="committedAUM"
                 className="form-input"
                 placeholder="e.g. ₹2.5 Cr"
                 value={form.committedAUM}
@@ -714,9 +704,10 @@ export const InvestorsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Risk Tolerance</label>
+              <label htmlFor="inv-form-risk" className="form-label">Risk Tolerance</label>
               <select
                 id="inv-form-risk"
+                name="riskTolerance"
                 className="form-select"
                 value={form.riskTolerance}
                 onChange={e =>
@@ -736,9 +727,10 @@ export const InvestorsPage: React.FC = () => {
 
           {/* Investment Mandate */}
           <div className="form-group">
-            <label className="form-label">Investment Mandate</label>
+            <label htmlFor="inv-form-mandate" className="form-label">Investment Mandate</label>
             <input
               id="inv-form-mandate"
+              name="investmentMandate"
               className="form-input"
               placeholder="e.g. Long-term capital appreciation in Tier-1 commercial assets"
               value={form.investmentMandate}
@@ -749,9 +741,10 @@ export const InvestorsPage: React.FC = () => {
           {/* Row: Referral Source + Assigned Consultant */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="form-group">
-              <label className="form-label">Referral Source</label>
+              <label htmlFor="inv-form-referral" className="form-label">Referral Source</label>
               <input
                 id="inv-form-referral"
+                name="referralSource"
                 className="form-input"
                 placeholder="e.g. Private Network, Bank"
                 value={form.referralSource}
@@ -759,7 +752,7 @@ export const InvestorsPage: React.FC = () => {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">
+              <label htmlFor="inv-form-consultant" className="form-label">
                 Assigned Consultant
                 {isExec && (
                   <span
@@ -776,6 +769,8 @@ export const InvestorsPage: React.FC = () => {
               </label>
               {isExec ? (
                 <input
+                  id="inv-form-consultant"
+                  name="assignedAgentName"
                   className="form-input"
                   value={form.assignedAgentName}
                   readOnly
@@ -788,6 +783,7 @@ export const InvestorsPage: React.FC = () => {
               ) : (
                 <input
                   id="inv-form-consultant"
+                  name="assignedAgentName"
                   className="form-input"
                   placeholder="e.g. Ananya Iyer"
                   value={form.assignedAgentName}
@@ -802,9 +798,10 @@ export const InvestorsPage: React.FC = () => {
 
           {/* Notes */}
           <div className="form-group">
-            <label className="form-label">Notes</label>
+            <label htmlFor="inv-form-notes" className="form-label">Notes</label>
             <textarea
               id="inv-form-notes"
+              name="notes"
               className="form-input"
               rows={3}
               placeholder="Advisory notes, risk profile summary, key investment preferences…"

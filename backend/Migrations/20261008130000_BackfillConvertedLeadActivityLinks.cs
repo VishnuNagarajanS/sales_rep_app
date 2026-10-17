@@ -62,7 +62,7 @@ public sealed class BackfillConvertedLeadActivityLinks : Migration
                 "ContactType" = 'customer'
             FROM converted_leads AS x
             WHERE v."LeadId" = x."LeadId"
-              AND v."TenantId" = x."CompanyId";
+              AND v."CompanyId" = x."CompanyId";
 
             WITH converted_leads AS (
                 SELECT l."Id" AS "LeadId", l."CompanyId", MIN(c."Id") AS "CustomerId"

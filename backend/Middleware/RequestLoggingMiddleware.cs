@@ -21,6 +21,14 @@ public sealed class RequestLoggingMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception) when (context.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex,

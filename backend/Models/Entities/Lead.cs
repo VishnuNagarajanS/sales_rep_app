@@ -15,9 +15,22 @@ public class Lead
     [System.ComponentModel.DataAnnotations.Schema.NotMapped]
     public int TenantId { get => CompanyId; set => CompanyId = value; }
 
+    public DateTime? AssignedAt { get; set; }
+    public int? AssignedById { get; set; }
+    public User? AssignedBy { get; set; }
+
+    public int? HandoverId { get; set; }
+    public WorkHandover? Handover { get; set; }
+    public int? OriginalOwnerId { get; set; }
+    public User? OriginalOwner { get; set; }
+
     public string Name { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public string? NormalizedPhone { get; set; }
+    public string? NormalizedEmail { get; set; }
+    public bool IsDuplicate { get; set; } = false;
+
     public string Location { get; set; } = string.Empty;
     public string Source { get; set; } = "Website Inbound";
     public string Status { get; set; } = "New"; // New, Contacted, Callback, Interested, Follow-up Required, Not Interested, Junk, Converted
@@ -37,7 +50,8 @@ public class Lead
     public string? Horizon { get; set; }
     public string? InvestorType { get; set; }
 
-    // GHL Custom Fields (e.g. investmentCapacity, assetClass, preferredAssetClass, horizon, dispositionReason)
+    // Dropped from database: CustomFieldsJson column is no longer mapped
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
     public string? CustomFieldsJson { get; set; }
 
     public DateTime? NextFollowupDate { get; set; }

@@ -27,7 +27,21 @@ public class RoleConfiguration : IEntityTypeConfiguration<Role>
             .HasColumnType("text[]")
             .IsRequired();
 
+        builder.Property(r => r.Description)
+            .HasMaxLength(500);
+
+        builder.Property(r => r.IsSystemRole)
+            .HasDefaultValue(false);
+
+        builder.Property(r => r.IsActive)
+            .HasDefaultValue(true);
+
+        builder.Property(r => r.CreatedBy)
+            .HasMaxLength(150);
+
         builder.Property(r => r.CreatedAt)
             .HasDefaultValueSql("NOW()");
+
+        builder.Property(r => r.UpdatedAt);
     }
 }

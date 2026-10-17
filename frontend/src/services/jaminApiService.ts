@@ -119,7 +119,7 @@ export const jaminApiService = {
           status: l.status || 'New',
           priority: l.priority || 'Medium',
           assignedAgentId: l.assignedAgentId ? String(l.assignedAgentId) : undefined,
-          assignedAgentName: l.assignedAgentName || (l.assignedAgent?.name) || 'Unassigned',
+          assignedAgentName: l.assignedAgentName || (l.assignedAgent?.name) || '',
           nextFollowupDate: l.nextFollowupDate ? new Date(l.nextFollowupDate).toLocaleDateString() : undefined,
           targetDevelopment: l.targetDevelopment,
           preferredVisitDate: l.preferredVisitDate,
@@ -139,7 +139,7 @@ export const jaminApiService = {
     } catch (err) {
       console.error('Failed to get leads from backend API', err);
     }
-    return storageService.getLeads('t-jamin-02') || [];
+    return [];
   },
 
   // ── 1B. CUSTOMERS (Live backend /sales-executive/customers + converted leads) ──
@@ -208,11 +208,7 @@ export const jaminApiService = {
       });
     } catch { }
 
-    if (customers.length > 0) {
-      return customers;
-    }
-
-    return storageService.getCustomers('t-jamin-02') || [];
+    return customers;
   },
 
   async getLeadDetail(id: string | number): Promise<{ lead: Lead; siteVisits: SiteVisit[]; followups: Followup[] } | null> {

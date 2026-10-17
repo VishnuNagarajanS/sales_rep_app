@@ -74,7 +74,11 @@ public class SalesExecutiveConsultationsController : ControllerBase
 
         var result = await _consultationService.ScheduleConsultationAsync(dto, ct);
         if (!result.Success)
+        {
+            if (result.Message.StartsWith("Unauthorized"))
+                return Unauthorized(result);
             return BadRequest(result);
+        }
 
         return CreatedAtAction(nameof(GetConsultationById), new { id = result.Data!.Id }, result);
     }
@@ -92,6 +96,16 @@ public class SalesExecutiveConsultationsController : ControllerBase
         if (!result.Success)
             return NotFound(result);
 
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Get list of active IRMs (Investment Relationship Managers) in the company for live call connection and consultation.
+    /// </summary>
+    [HttpGet("irms")]
+    public async Task<ActionResult<ApiResponse<List<IrmUserDto>>>> GetIrms(CancellationToken ct = default)
+    {
+        var result = await _consultationService.GetCompanyIrmsAsync(ct);
         return Ok(result);
     }
 }

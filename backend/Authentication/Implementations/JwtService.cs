@@ -20,19 +20,26 @@ public class JwtService : IJwtService
 
     public string GenerateToken(User user)
     {
+        return GenerateTokenWithDetails(user).Token;
+    }
+
+    public (string Token, string Jti, DateTime ExpiresAt) GenerateTokenWithDetails(User user)
+    {
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = Encoding.UTF8.GetBytes(_jwtSettings.SecretKey);
+        var jti = Guid.NewGuid().ToString();
 
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new(JwtRegisteredClaimNames.Email, user.Email),
-            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new(JwtRegisteredClaimNames.Jti, jti),
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Name, user.Name),
             new(ClaimTypes.Email, user.Email),
             new(ClaimTypes.Role, user.Role.Code),
-            new("userId", user.Id.ToString())
+            new("userId", user.Id.ToString()),
+            new("must_change_password", user.MustChangePassword.ToString().ToLowerInvariant())
         };
 
         if (user.CompanyId.HasValue)
@@ -41,21 +48,59 @@ public class JwtService : IJwtService
             claims.Add(new Claim("companyId", user.CompanyId.Value.ToString()));
         }
 
+        if (user.Role?.Permissions != null)
+        {
+            foreach (var perm in user.Role.Permissions)
+            {
+                claims.Add(new Claim("permission", perm));
+            }
+        }
+
         if (!string.IsNullOrEmpty(user.Company?.Slug))
         {
             claims.Add(new Claim("company_slug", user.Company.Slug));
         }
 
+        if (user.Role != null)
+        {
+            if (user.Role.Permissions != null && user.Role.Permissions.Count > 0)
+            {
+                foreach (var permission in user.Role.Permissions)
+                {
+                    claims.Add(new Claim("permission", permission));
+                }
+
+                // If it's a custom role, grant matching role capability claims so existing controller Authorize attributes allow access
+                if (!user.Role.IsSystemRole)
+                {
+                    var perms = user.Role.Permissions;
+                    if (perms.Any(p => p.StartsWith("leads.") || p.StartsWith("calls.") || p.StartsWith("consultations.") || p.StartsWith("reports.") || p.StartsWith("customers.")))
+                    {
+                        claims.Add(new Claim(ClaimTypes.Role, "sales_executive"));
+                    }
+                    if (perms.Any(p => p.StartsWith("users.") || p.StartsWith("companies.") || p.StartsWith("audit.")))
+                    {
+                        claims.Add(new Claim(ClaimTypes.Role, "company_admin"));
+                    }
+                    if (perms.Any(p => p.StartsWith("investors.") || p.StartsWith("opportunities.") || p.StartsWith("kyc.") || p.StartsWith("deals.")))
+                    {
+                        claims.Add(new Claim(ClaimTypes.Role, "irm"));
+                    }
+                }
+            }
+        }
+
+        var expiresAt = DateTime.UtcNow.AddMinutes(_jwtSettings.ExpirationMinutes);
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddMinutes(_jwtSettings.ExpirationMinutes),
+            Expires = expiresAt,
             Issuer = _jwtSettings.Issuer,
             Audience = _jwtSettings.Audience,
             SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
         };
 
         var token = tokenHandler.CreateToken(tokenDescriptor);
-        return tokenHandler.WriteToken(token);
+        return (tokenHandler.WriteToken(token), jti, expiresAt);
     }
 }

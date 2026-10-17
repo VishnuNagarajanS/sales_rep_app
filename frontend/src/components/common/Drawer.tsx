@@ -96,9 +96,9 @@ export const Drawer: React.FC<DrawerProps> = ({
 
         {/* Content */}
         <div
+          className="drawer-content-scroll"
           style={{
             padding: '24px',
-            overflowY: 'auto',
             flex: 1,
             display: 'flex',
             flexDirection: 'column',

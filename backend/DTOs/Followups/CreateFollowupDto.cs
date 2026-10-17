@@ -10,9 +10,11 @@ public class CreateFollowupDto
     public int? InvestorId { get; set; }
     public string ContactName { get; set; } = string.Empty;
     public string ContactPhone { get; set; } = string.Empty;
+    public string? ContactEmail { get; set; }
     public DateTime ScheduledAt { get; set; }
     public int? AssignedAgentId { get; set; }
     public string Priority { get; set; } = "Medium"; // Low, Medium, High, Urgent
     public string Notes { get; set; } = string.Empty;
     public string? FollowupType { get; set; } = "call";
+    public string? AssignedToRole { get; set; }
 }

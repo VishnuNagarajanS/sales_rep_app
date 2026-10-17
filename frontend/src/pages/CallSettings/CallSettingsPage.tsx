@@ -53,39 +53,19 @@ const setPopupPosition = (pos: PopupPosition) => {
 };
 
 const getCallPreferences = (): CallPreferences => {
-  try {
-    const raw = localStorage.getItem('nexus_call_prefs');
-    return raw ? { ...DEFAULT_PREFS, ...JSON.parse(raw) } : DEFAULT_PREFS;
-  } catch {
-    return DEFAULT_PREFS;
-  }
+  return storageService.getCallPreferences();
 };
 
 const setCallPreferences = (patch: Partial<CallPreferences>) => {
-  try {
-    const current = getCallPreferences();
-    const updated = { ...current, ...patch };
-    localStorage.setItem('nexus_call_prefs', JSON.stringify(updated));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch { }
+  storageService.setCallPreferences(patch);
 };
 
 const getAdminCallSettings = (): AdminCallSettings => {
-  try {
-    const raw = localStorage.getItem('nexus_admin_call_settings');
-    return raw ? { ...DEFAULT_ADMIN_SETTINGS, ...JSON.parse(raw) } : DEFAULT_ADMIN_SETTINGS;
-  } catch {
-    return DEFAULT_ADMIN_SETTINGS;
-  }
+  return storageService.getAdminCallSettings();
 };
 
 const setAdminCallSettings = (patch: Partial<AdminCallSettings>) => {
-  try {
-    const current = getAdminCallSettings();
-    const updated = { ...current, ...patch };
-    localStorage.setItem('nexus_admin_call_settings', JSON.stringify(updated));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch { }
+  storageService.setAdminCallSettings(patch);
 };
 // ── Shared inline toggle component matching this file's visual language ──────
 const SettingToggle: React.FC<{
@@ -115,6 +95,7 @@ const SettingToggle: React.FC<{
     >
       <input
         id={id}
+        name={id}
         type="checkbox"
         checked={checked}
         onChange={e => onChange(e.target.checked)}
@@ -201,7 +182,6 @@ export const CallSettingsPage: React.FC = () => {
     const next = { ...adminSettings, [key]: value };
     setAdminSettings(next);
     setAdminCallSettings({ [key]: value });
-    storageService.setAdminCallSettings({ [key]: value });
   };
 
   const handleToggleDesktopNotif = async (enabled: boolean) => {
@@ -305,9 +285,18 @@ export const CallSettingsPage: React.FC = () => {
             {options.map(opt => {
               const isSelected = position === opt.value;
               return (
-                <div
+                <label
+                  htmlFor={`pos-${opt.value}`}
                   key={opt.value}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handleSelectPosition(opt.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleSelectPosition(opt.value);
+                    }
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -320,6 +309,7 @@ export const CallSettingsPage: React.FC = () => {
                     backgroundColor: isSelected ? 'var(--primary-50)' : 'var(--bg-card)',
                     cursor: 'pointer',
                     boxSizing: 'border-box',
+                    transition: 'all 0.15s ease-in-out',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -331,6 +321,7 @@ export const CallSettingsPage: React.FC = () => {
                         value={opt.value}
                         checked={isSelected}
                         onChange={() => handleSelectPosition(opt.value)}
+                        onClick={e => e.stopPropagation()}
                         style={{
                           width: 18,
                           height: 18,
@@ -387,7 +378,7 @@ export const CallSettingsPage: React.FC = () => {
                   >
                     {opt.icon}
                   </div>
-                </div>
+                </label>
               );
             })}
           </div>
@@ -645,14 +636,17 @@ export const CallSettingsPage: React.FC = () => {
               <Clock size={18} />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+              <label htmlFor="settings-default-followup-time" style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', display: 'block' }}>
                 Default Follow-up Time
-              </div>
+              </label>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3, marginBottom: 12 }}>
                 Pre-fills the time field in Quick Create follow-ups and the post-call Disposition Modal.
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <input
+                  id="settings-default-followup-time"
+                  name="defaultFollowupTime"
+                  aria-label="Default Follow-up Time"
                   type="time"
                   className="form-input"
                   style={{ width: 140 }}

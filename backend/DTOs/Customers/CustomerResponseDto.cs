@@ -17,4 +17,13 @@ public class CustomerResponseDto
     public DateTime? LastContactedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+
+    public int? HandoverId { get; set; }
+    public string? HandedOverFromName { get; set; }
+    public DateTime? HandoverPlannedEnd { get; set; }
+    public int? OriginalOwnerId { get; set; }
+
+    public bool IsReturnedFromHandover { get; set; }
+    public string? ReturnedFromCoveringUserName { get; set; }
+    public DateTime? ReturnedAt { get; set; }
 }

@@ -1,4 +1,5 @@
 using backend.DTOs.Common;
+using backend.Helpers;
 using backend.DTOs.Irm;
 using backend.Models.Entities;
 using backend.Models.Enums;
@@ -11,16 +12,26 @@ public class InvestorService : IInvestorService
 {
     private readonly IInvestorRepository _investorRepo;
     private readonly IUserRepository _userRepo;
+    private readonly IIrmOtherService? _otherService;
 
-    public InvestorService(IInvestorRepository investorRepo, IUserRepository userRepo)
+    public InvestorService(IInvestorRepository investorRepo, IUserRepository userRepo, IIrmOtherService? otherService = null)
     {
         _investorRepo = investorRepo;
         _userRepo = userRepo;
+        _otherService = otherService;
     }
 
     public async Task<ApiResponse<List<InvestorDto>>> GetAllAsync(int companyId, string? status, string? assetClass, int? irmId, CancellationToken ct = default)
     {
         var investors = await _investorRepo.GetAllAsync(companyId, status, assetClass, irmId, ct);
+        if (_otherService != null)
+        {
+            var matcher = await _otherService.GetOtherMatcherAsync(companyId, "investor_360", ct);
+            if (matcher.HasAnyOther)
+            {
+                investors = investors.Where(i => !matcher.IsInOther(i.Phone, i.Id, null, i.Name)).ToList();
+            }
+        }
         var dtos = investors.Select(MapToDto).ToList();
         return ApiResponse<List<InvestorDto>>.SuccessResponse(dtos);
     }
@@ -76,32 +87,6 @@ public class InvestorService : IInvestorService
         return ApiResponse<InvestorActivityListDto>.SuccessResponse(result);
     }
 
-    public async Task<ApiResponse<InvestorDto>> CreateAsync(int companyId, int irmId, CreateInvestorDto dto, CancellationToken ct = default)
-    {
-        var irmUser = await _userRepo.GetByIdAsync(irmId, ct);
-
-        var investor = new Investor
-        {
-            CompanyId = companyId,
-            Name = dto.Name,
-            Phone = dto.Phone,
-            Email = dto.Email,
-            Status = InvestorStatus.Lead,
-            InvestmentCapacity = dto.InvestmentCapacity,
-            PreferredAssetClass = dto.PreferredAssetClass,
-            RiskTolerance = dto.RiskTolerance,
-            InvestmentMandate = dto.InvestmentMandate,
-            ReferralSource = dto.ReferralSource,
-            AssignedIrmId = irmId,
-            AssignedIrmName = irmUser?.Name ?? string.Empty,
-            Notes = dto.Notes,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        var created = await _investorRepo.CreateAsync(investor, ct);
-        return ApiResponse<InvestorDto>.SuccessResponse(MapToDto(created), "Investor created successfully");
-    }
-
     public async Task<ApiResponse<InvestorDto>> UpdateAsync(int id, int companyId, UpdateInvestorDto dto, CancellationToken ct = default)
     {
         var investor = await _investorRepo.GetByIdAsync(id, companyId, ct);
@@ -111,8 +96,8 @@ public class InvestorService : IInvestorService
         if (!string.IsNullOrWhiteSpace(dto.Name)) investor.Name = dto.Name;
         if (!string.IsNullOrWhiteSpace(dto.Phone)) investor.Phone = dto.Phone;
         if (!string.IsNullOrWhiteSpace(dto.Email)) investor.Email = dto.Email;
-        if (!string.IsNullOrWhiteSpace(dto.InvestmentCapacity)) investor.InvestmentCapacity = dto.InvestmentCapacity;
-        if (!string.IsNullOrWhiteSpace(dto.PreferredAssetClass)) investor.PreferredAssetClass = dto.PreferredAssetClass;
+        if (dto.InvestmentCapacity != null) investor.InvestmentCapacity = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity) ?? string.Empty;
+        if (dto.PreferredAssetClass != null) investor.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass) ?? string.Empty;
         if (dto.RiskTolerance != null) investor.RiskTolerance = dto.RiskTolerance;
         if (dto.InvestmentMandate != null) investor.InvestmentMandate = dto.InvestmentMandate;
         if (dto.CommittedAum != null) investor.CommittedAum = dto.CommittedAum;
@@ -156,6 +141,10 @@ public class InvestorService : IInvestorService
         AssignedIrmName = i.AssignedIrmName,
         Notes = i.Notes,
         CreatedAt = i.CreatedAt,
-        UpdatedAt = i.UpdatedAt
+        UpdatedAt = i.UpdatedAt,
+        HandoverId = i.HandoverId,
+        HandedOverFromName = i.OriginalOwner?.Name,
+        HandoverPlannedEnd = i.Handover?.PlannedEndAt,
+        OriginalOwnerId = i.OriginalOwnerId
     };
 }

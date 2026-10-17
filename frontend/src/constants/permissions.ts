@@ -63,6 +63,9 @@ export const PERMISSIONS = {
   // Notifications
   NOTIFICATIONS_VIEW: 'notifications.view',
 
+  // KYC
+  KYC_VERIFY: 'kyc.verify',
+
   // Admin & Settings
   USERS_VIEW: 'users.view',
   USERS_MANAGE: 'users.manage',

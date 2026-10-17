@@ -102,6 +102,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           )}
           <select
             id={`filter-${filter.key}`}
+            name={`filter-${filter.key}`}
             className={`form-select filterbar-select ${filter.value !== 'All' && filter.value !== '' ? 'active' : ''}`}
             value={filter.value}
             onChange={e => filter.onChange(e.target.value)}
@@ -128,8 +129,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               )}
               <select
                 id="filter-date-preset"
-                className={`form-select filterbar-select ${dateRange.preset && dateRange.preset !== 'all' && dateRange.preset !== 'All' ? 'active' : ''
-                  }`}
+                name="filterDatePreset"
+                className={`form-select filterbar-select ${
+                  dateRange.preset && dateRange.preset !== 'all' && dateRange.preset !== 'All' ? 'active' : ''
+                }`}
                 value={dateRange.preset || 'all'}
                 onChange={e => dateRange.onPresetChange!(e.target.value)}
               >
@@ -142,30 +145,35 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             </div>
           )}
 
-          {(!dateRange.onPresetChange || dateRange.preset === 'custom') && (
-              <div className="filterbar-custom-dates">
-                <label htmlFor="filter-date-from" className="filterbar-item-label">
-                  From:
-                </label>
-                <input
-                  id="filter-date-from"
-                  type="date"
-                  className={`form-input filterbar-date-input ${dateRange.from !== '' ? 'active' : ''}`}
-                  value={dateRange.from}
-                  onChange={e => dateRange.onChange(e.target.value, dateRange.to)}
-                />
-                <label htmlFor="filter-date-to" className="filterbar-item-label">
-                  To:
-                </label>
-                <input
-                  id="filter-date-to"
-                  type="date"
-                  className={`form-input filterbar-date-input ${dateRange.to !== '' ? 'active' : ''}`}
-                  value={dateRange.to}
-                  onChange={e => dateRange.onChange(dateRange.from, e.target.value)}
-                />
-              </div>
-            )}
+          {(!dateRange.onPresetChange ||
+            dateRange.preset === 'custom' ||
+            dateRange.from !== '' ||
+            dateRange.to !== '') && (
+            <div className="filterbar-custom-dates">
+              <label htmlFor="filter-date-from" className="filterbar-item-label">
+                From:
+              </label>
+              <input
+                id="filter-date-from"
+                name="filterDateFrom"
+                type="date"
+                className={`form-input filterbar-date-input ${dateRange.from !== '' ? 'active' : ''}`}
+                value={dateRange.from}
+                onChange={e => dateRange.onChange(e.target.value, dateRange.to)}
+              />
+              <label htmlFor="filter-date-to" className="filterbar-item-label">
+                To:
+              </label>
+              <input
+                id="filter-date-to"
+                name="filterDateTo"
+                type="date"
+                className={`form-input filterbar-date-input ${dateRange.to !== '' ? 'active' : ''}`}
+                value={dateRange.to}
+                onChange={e => dateRange.onChange(dateRange.from, e.target.value)}
+              />
+            </div>
+          )}
         </div>
       )}
 

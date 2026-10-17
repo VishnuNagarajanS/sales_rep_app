@@ -1,4 +1,5 @@
 import { Tenant } from '../types';
+import { FEATURES } from './features';
 
 export const DEFAULT_TENANTS: Record<string, Tenant> = {
   ghl: {
@@ -6,15 +7,29 @@ export const DEFAULT_TENANTS: Record<string, Tenant> = {
     name: 'GHL India Ventures',
     slug: 'ghl',
     brandColor: '#0284c7',
+    logo: '/og-image -GHL Ventures.png',
     tagline: 'Institutional Wealth & Real Estate Investment Advisory',
     enabledFeatures: [
-      'leads', 'customers', 'deals', 'followups', 'calls', 'call-recording',
-      'call-transcription', 'investors', 'consultations', 'investment-opportunities',
-      'reports', 'users', 'roles', 'company-settings', 'audit-logs'
+      FEATURES.LEADS,
+      FEATURES.CUSTOMERS,
+      FEATURES.DEALS,
+      FEATURES.FOLLOWUPS,
+      FEATURES.CALLS,
+      FEATURES.CALL_RECORDING,
+      FEATURES.CALL_TRANSCRIPTION,
+      FEATURES.INVESTORS,
+      FEATURES.CONSULTATIONS,
+      FEATURES.INVESTMENT_OPPORTUNITIES,
+      FEATURES.REPORTS,
+      FEATURES.USERS,
+      FEATURES.ROLES,
+      FEATURES.COMPANY_SETTINGS,
+      FEATURES.AUDIT_LOGS,
+      FEATURES.CHAT,
     ],
     timezone: 'Asia/Kolkata (IST)',
     currency: '₹ INR',
-    businessHours: '10:00 AM - 06:30 PM IST',
+    businessHours: '09:30 AM - 07:00 PM IST',
     status: 'Active',
   },
   jamin: {
@@ -22,15 +37,29 @@ export const DEFAULT_TENANTS: Record<string, Tenant> = {
     name: 'Jamin Bazaar',
     slug: 'jamin',
     brandColor: '#059669',
+    logo: '/jamin-logo.png',
     tagline: 'Premium Plotted Enclaves & Farmland Communities',
     enabledFeatures: [
-      'leads', 'customers', 'deals', 'followups', 'calls', 'call-recording',
-      'call-transcription', 'properties', 'site-visits', 'bookings',
-      'reports', 'users', 'roles', 'company-settings', 'audit-logs'
+      FEATURES.LEADS,
+      FEATURES.CUSTOMERS,
+      FEATURES.DEALS,
+      FEATURES.FOLLOWUPS,
+      FEATURES.CALLS,
+      FEATURES.CALL_RECORDING,
+      FEATURES.CALL_TRANSCRIPTION,
+      FEATURES.PROPERTIES,
+      FEATURES.SITE_VISITS,
+      FEATURES.BOOKINGS,
+      FEATURES.REPORTS,
+      FEATURES.USERS,
+      FEATURES.ROLES,
+      FEATURES.COMPANY_SETTINGS,
+      FEATURES.AUDIT_LOGS,
+      FEATURES.CHAT,
     ],
     timezone: 'Asia/Kolkata (IST)',
     currency: '₹ INR',
-    businessHours: '10:00 AM - 06:30 PM IST',
+    businessHours: '09:00 AM - 06:30 PM IST',
     status: 'Active',
   },
 };

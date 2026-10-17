@@ -4,6 +4,7 @@ using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.Customers;
 using backend.DTOs.Followups;
+using backend.Helpers;
 using backend.Models.Entities;
 using backend.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -41,7 +42,11 @@ public class CustomerService : ICustomerService
                 companyId = requestedCompanyId ?? companyId;
         }
 
-        var query = _context.Customers.AsNoTracking().Include(c => c.AssignedAgent).AsQueryable();
+        var query = _context.Customers.AsNoTracking()
+            .Include(c => c.AssignedAgent)
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .AsQueryable();
 
         if (role == "super_admin")
         {
@@ -55,7 +60,7 @@ public class CustomerService : ICustomerService
             query = query.Where(c => c.CompanyId == companyId.Value);
         }
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
             // Sales Executives see their own assigned customers and available (unassigned) customers
             query = query.Where(c => c.AssignedAgentId == agentId.Value || c.AssignedAgentId == null);
@@ -70,7 +75,11 @@ public class CustomerService : ICustomerService
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Customers.Include(c => c.AssignedAgent).Where(c => c.Id == id);
+        var query = _context.Customers
+            .Include(c => c.AssignedAgent)
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .Where(c => c.Id == id);
 
         if (role == "super_admin")
         {
@@ -82,7 +91,7 @@ public class CustomerService : ICustomerService
             query = query.Where(c => c.CompanyId == companyId.Value);
         }
 
-        if (role == "sales_executive" && agentId.HasValue)
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
         {
             query = query.Where(c => c.AssignedAgentId == agentId.Value || c.AssignedAgentId == null);
         }
@@ -337,6 +346,45 @@ public class CustomerService : ICustomerService
         if (agentId.HasValue && !await _context.Users.AnyAsync(u => u.Id == agentId.Value && u.CompanyId == companyId, ct))
             return ApiResponse<CustomerResponseDto>.FailureResult("The selected executive does not belong to this company.");
 
+        // Tenant-scoped normalized duplicate check across customers AND leads
+        var normPhone = ContactNormalizer.NormalizePhone(dto.Phone);
+        var normEmail = ContactNormalizer.NormalizeEmail(dto.Email);
+
+        if (normPhone != null || normEmail != null)
+        {
+            var existingCust = await _context.Customers
+                .Include(c => c.AssignedAgent)
+                .FirstOrDefaultAsync(c =>
+                    c.CompanyId == companyId &&
+                    !c.IsDuplicate &&
+                    ((normPhone != null && c.NormalizedPhone == normPhone) ||
+                     (normEmail != null && c.NormalizedEmail == normEmail)), ct);
+
+            if (existingCust != null)
+            {
+                var assignedTo = existingCust.AssignedAgent?.Name ?? "another agent";
+                return ApiResponse<CustomerResponseDto>.FailureResult(
+                    $"A customer already exists with this contact information: {existingCust.Name} ({existingCust.Phone} / {existingCust.Email}), assigned to {assignedTo}.",
+                    new List<string> { "DUPLICATE_CUSTOMER", $"CONTACT_ID:{existingCust.Id}" });
+            }
+
+            var existingLead = await _context.Leads
+                .Include(l => l.AssignedAgent)
+                .FirstOrDefaultAsync(l =>
+                    l.CompanyId == companyId &&
+                    !l.IsDuplicate &&
+                    ((normPhone != null && l.NormalizedPhone == normPhone) ||
+                     (normEmail != null && l.NormalizedEmail == normEmail)), ct);
+
+            if (existingLead != null)
+            {
+                var assignedTo = existingLead.AssignedAgent?.Name ?? "another agent";
+                return ApiResponse<CustomerResponseDto>.FailureResult(
+                    $"A lead already exists with this contact information: {existingLead.Name} ({existingLead.Phone} / {existingLead.Email}), assigned to {assignedTo}.",
+                    new List<string> { "DUPLICATE_LEAD", $"CONTACT_ID:{existingLead.Id}" });
+            }
+        }
+
         var customer = new Customer
         {
             CompanyId = companyId,
@@ -344,6 +392,9 @@ public class CustomerService : ICustomerService
             Name = dto.Name.Trim(),
             Phone = dto.Phone.Trim(),
             Email = dto.Email?.Trim() ?? string.Empty,
+            NormalizedPhone = normPhone,
+            NormalizedEmail = normEmail,
+            IsDuplicate = false,
             Location = dto.Location?.Trim() ?? string.Empty,
             Status = string.IsNullOrWhiteSpace(dto.Status) ? "Active" : dto.Status.Trim(),
             TotalValue = dto.TotalValue ?? 0,
@@ -371,9 +422,52 @@ public class CustomerService : ICustomerService
              (dto.AssignedAgentId.HasValue && dto.AssignedAgentId != customer.AssignedAgentId)))
             return ApiResponse<CustomerResponseDto>.FailureResult("Sales executives cannot reassign customers.");
 
+        if (dto.Phone != null || dto.Email != null)
+        {
+            var candidatePhone = dto.Phone != null ? dto.Phone.Trim() : customer.Phone;
+            var candidateEmail = dto.Email != null ? dto.Email.Trim() : customer.Email;
+            var newNormPhone = ContactNormalizer.NormalizePhone(candidatePhone);
+            var newNormEmail = ContactNormalizer.NormalizeEmail(candidateEmail);
+
+            if (newNormPhone != null || newNormEmail != null)
+            {
+                var existingOtherCust = await _context.Customers
+                    .Include(c => c.AssignedAgent)
+                    .FirstOrDefaultAsync(c =>
+                        c.CompanyId == customer.CompanyId &&
+                        c.Id != customer.Id &&
+                        !c.IsDuplicate &&
+                        ((newNormPhone != null && c.NormalizedPhone == newNormPhone) ||
+                         (newNormEmail != null && c.NormalizedEmail == newNormEmail)), ct);
+
+                if (existingOtherCust != null)
+                {
+                    return ApiResponse<CustomerResponseDto>.FailureResult(
+                        $"Cannot update customer: Another customer already exists with this contact information: {existingOtherCust.Name} ({existingOtherCust.Phone} / {existingOtherCust.Email}).");
+                }
+
+                var existingLead = await _context.Leads
+                    .Include(l => l.AssignedAgent)
+                    .FirstOrDefaultAsync(l =>
+                        l.CompanyId == customer.CompanyId &&
+                        !l.IsDuplicate &&
+                        ((newNormPhone != null && l.NormalizedPhone == newNormPhone) ||
+                         (newNormEmail != null && l.NormalizedEmail == newNormEmail)), ct);
+
+                if (existingLead != null)
+                {
+                    return ApiResponse<CustomerResponseDto>.FailureResult(
+                        $"Cannot update customer: A lead already exists with this contact information: {existingLead.Name} ({existingLead.Phone} / {existingLead.Email}).");
+                }
+            }
+
+            if (dto.Phone != null) customer.Phone = dto.Phone.Trim();
+            if (dto.Email != null) customer.Email = dto.Email.Trim();
+            customer.NormalizedPhone = newNormPhone;
+            customer.NormalizedEmail = newNormEmail;
+        }
+
         if (dto.Name != null) customer.Name = dto.Name.Trim();
-        if (dto.Phone != null) customer.Phone = dto.Phone.Trim();
-        if (dto.Email != null) customer.Email = dto.Email.Trim();
         if (dto.Location != null) customer.Location = dto.Location.Trim();
         if (dto.Status != null) customer.Status = dto.Status.Trim();
         if (dto.TotalValue.HasValue) customer.TotalValue = dto.TotalValue.Value;
@@ -405,14 +499,29 @@ public class CustomerService : ICustomerService
         customer.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
-        _context.Entry(customer).Reference(c => c.AssignedAgent).IsLoaded = false;
-        await _context.Entry(customer).Reference(c => c.AssignedAgent).LoadAsync(ct);
+        if (customer.AssignedAgentId.HasValue)
+        {
+            customer.AssignedAgent = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == customer.AssignedAgentId.Value, ct);
+        }
+        else
+        {
+            customer.AssignedAgent = null;
+        }
 
         return ApiResponse<CustomerResponseDto>.SuccessResult(MapToDto(customer), "Customer updated successfully.");
     }
 
     private static CustomerResponseDto MapToDto(Customer c)
     {
+        var customFields = DeserializeCustomFields(c.CustomFieldsJson);
+        bool isReturned = customFields.TryGetValue("returnedFromHandover", out var retVal) && retVal == "true";
+        string? returnedCoveringName = customFields.TryGetValue("returnedFromCoveringUserName", out var rcn) ? rcn : null;
+        DateTime? returnedAt = null;
+        if (customFields.TryGetValue("returnedAt", out var retAtStr) && DateTime.TryParse(retAtStr, out var parsedRetAt))
+        {
+            returnedAt = parsedRetAt;
+        }
+
         return new CustomerResponseDto
         {
             Id = c.Id,
@@ -426,10 +535,17 @@ public class CustomerService : ICustomerService
             Status = c.Status,
             TotalValue = c.TotalValue,
             Notes = c.Notes,
-            CustomFields = DeserializeCustomFields(c.CustomFieldsJson),
+            CustomFields = customFields,
             LastContactedAt = c.LastContactedAt,
             CreatedAt = c.CreatedAt,
-            UpdatedAt = c.UpdatedAt
+            UpdatedAt = c.UpdatedAt,
+            HandoverId = c.HandoverId,
+            HandedOverFromName = c.OriginalOwner?.Name,
+            HandoverPlannedEnd = c.Handover?.PlannedEndAt,
+            OriginalOwnerId = c.OriginalOwnerId,
+            IsReturnedFromHandover = isReturned,
+            ReturnedFromCoveringUserName = returnedCoveringName,
+            ReturnedAt = returnedAt
         };
     }
 

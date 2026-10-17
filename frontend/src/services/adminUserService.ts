@@ -14,10 +14,15 @@ interface AdminUserDto {
   phone: string;
   roleId: number;
   roleName: string;
+  roleCode: string;
   status: number;
   lastLoginAt?: string;
   avatarUrl?: string;
   createdAt: string;
+  emailSent?: boolean;
+  emailError?: string;
+  temporaryPassword?: string;
+  isCovered?: boolean;
 }
 
 export interface CompanyRoleOption extends Role {
@@ -30,21 +35,30 @@ const checkIsJaminTenant = (idOrSlug?: any): boolean => {
   return s === 'jamin' || s === 't-jamin-02' || s === '2';
 };
 
-const mapDtoToUser = (dto: AdminUserDto, isJaminTenant: boolean = false): User => {
+const mapDtoToUser = (dto: AdminUserDto, companyIdOrIsJamin?: string | boolean): User => {
   let statusStr: 'Active' | 'Invited' | 'Disabled' = 'Active';
   if (dto.status === 1) statusStr = 'Invited';
   if (dto.status === 2) statusStr = 'Disabled';
 
+  const isJaminTenant = typeof companyIdOrIsJamin === 'boolean' 
+    ? companyIdOrIsJamin 
+    : checkIsJaminTenant(companyIdOrIsJamin);
+
   let roleCode: RoleCode = 'sales_executive';
   let roleName = dto.roleName || 'Sales Executive';
+  const rawCode = (dto.roleCode || '').toLowerCase();
+  const rawName = (dto.roleName || '').toLowerCase();
 
-  if (dto.roleName?.toLowerCase().includes('admin') || dto.roleId === 2) {
+  if (rawCode === 'super_admin' || rawName.includes('super admin') || dto.roleId === 1) {
+    roleCode = 'super_admin';
+    roleName = 'Super Admin';
+  } else if (rawCode === 'company_admin' || rawName.includes('admin') || dto.roleId === 2) {
     roleCode = 'company_admin';
     roleName = 'Company Admin';
-  } else if (!isJaminTenant && (dto.roleName?.toLowerCase().includes('manager') || dto.roleId === 3)) {
+  } else if (!isJaminTenant && (rawCode === 'sales_manager' || rawName.includes('manager') || dto.roleId === 3)) {
     roleCode = 'sales_manager';
     roleName = 'Sales Manager';
-  } else if (!isJaminTenant && (dto.roleName?.toLowerCase().includes('irm') || dto.roleId === 5)) {
+  } else if (!isJaminTenant && (rawCode === 'irm' || rawName.includes('irm') || rawName.includes('institutional') || dto.roleId === 5)) {
     roleCode = 'irm';
     roleName = 'Institutional Relationship Manager';
   } else {
@@ -52,13 +66,18 @@ const mapDtoToUser = (dto: AdminUserDto, isJaminTenant: boolean = false): User =
     roleName = 'Sales Executive';
   }
 
+  const cId = typeof companyIdOrIsJamin === 'string' ? companyIdOrIsJamin : (isJaminTenant ? '2' : '1');
+  const cSlug = (cId === '1' || cId === 't-ghl-01' ? 'ghl' : (cId === '2' || cId === 't-jamin-02' ? 'jamin' : cId)) as any;
+
   return {
     id: dto.id.toString(),
     name: dto.name,
     email: dto.email,
     phone: dto.phone || '',
+    companyId: cId,
+    companySlug: cSlug,
     role: {
-      id: (dto.roleId ?? 0).toString(),
+      id: (dto.roleId ?? (roleCode === 'company_admin' ? 2 : roleCode === 'irm' ? 5 : roleCode === 'super_admin' ? 1 : roleCode === 'sales_manager' ? 3 : 4)).toString(),
       code: roleCode,
       name: roleName,
       permissions: []
@@ -66,6 +85,10 @@ const mapDtoToUser = (dto: AdminUserDto, isJaminTenant: boolean = false): User =
     status: statusStr,
     lastLogin: dto.lastLoginAt,
     avatar: dto.avatarUrl,
+    emailSent: dto.emailSent,
+    emailError: dto.emailError,
+    temporaryPassword: dto.temporaryPassword,
+    isCovered: dto.isCovered,
   };
 };
 
@@ -82,9 +105,14 @@ export const adminUserService = {
     const res = await apiClient.get<ApiResponse<AdminUserDto[]>>(`/AdminUsers?companyId=${companyId}`);
     if (!res.success) throw new Error(res.message);
     const isJaminTenant = checkIsJaminTenant(companyId);
-    return (res.data || [])
+    const users = (res.data || [])
       .filter(dto => !isJaminTenant || (dto.roleId !== 5 && !dto.roleName?.toLowerCase().includes('irm')))
-      .map(dto => mapDtoToUser(dto, isJaminTenant));
+      .map(dto => mapDtoToUser(dto, companyId));
+    try {
+      localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+      localStorage.setItem('nexus_users', JSON.stringify(users));
+    } catch {}
+    return users;
   },
 
   getCompanyRoles: async (companyId: string): Promise<CompanyRoleOption[]> => {
@@ -103,39 +131,60 @@ export const adminUserService = {
   createUser: async (userData: any): Promise<User> => {
     const isJaminTenant = checkIsJaminTenant(userData.companySlug) || checkIsJaminTenant(userData.companyId);
     const roleId = Number(userData.role?.id) || resolveRoleId(userData.role?.code, isJaminTenant);
+    const companyIdNum = isJaminTenant ? 2 : 1;
+
     const payload = {
       name: userData.name,
       email: userData.email,
       phone: userData.phone || '',
       password: userData.password || 'Password@123',
       roleId,
+      companyId: companyIdNum,
       status: userData.status === 'Active' ? 0 : (userData.status === 'Disabled' ? 2 : 1)
     };
-    console.log('[AdminUserService] createUser → roleCode:', userData.role?.code, '→ roleId:', roleId, '| payload:', payload);
-    const res = await apiClient.post<ApiResponse<AdminUserDto>>('/AdminUsers', payload);
-    console.log('[AdminUserService] createUser ← response:', res);
+    const res = await apiClient.post<ApiResponse<AdminUserDto>>(`/AdminUsers?companyId=${companyIdNum}`, payload);
     if (!res.success) throw new Error(res.message);
+    window.dispatchEvent(new Event('nexus_admin_updated'));
     return mapDtoToUser(res.data, isJaminTenant);
   },
 
   updateUser: async (id: string, userData: any): Promise<User> => {
     const isJaminTenant = checkIsJaminTenant(userData.companySlug) || checkIsJaminTenant(userData.companyId);
     const roleId = Number(userData.role?.id) || resolveRoleId(userData.role?.code, isJaminTenant);
-    const payload = {
+    const payload: any = {
       name: userData.name,
       phone: userData.phone || '',
       roleId,
       status: userData.status === 'Active' ? 0 : (userData.status === 'Disabled' ? 2 : 1)
     };
-    console.log('[AdminUserService] updateUser id:', id, '→ roleCode:', userData.role?.code, '→ roleId:', roleId, '| payload:', payload);
+    if (userData.password) {
+      payload.password = userData.password;
+    }
     const res = await apiClient.put<ApiResponse<AdminUserDto>>(`/AdminUsers/${id}`, payload);
-    console.log('[AdminUserService] updateUser ← response:', res);
     if (!res.success) throw new Error(res.message);
+    window.dispatchEvent(new Event('nexus_admin_updated'));
     return mapDtoToUser(res.data, isJaminTenant);
+  },
+
+  transferRole: async (id: string, newUserId: number, newRoleCode: string): Promise<User> => {
+    let roleId = 4;
+    if (newRoleCode === 'company_admin') roleId = 2;
+    else if (newRoleCode === 'sales_manager') roleId = 3;
+    else if (newRoleCode === 'irm') roleId = 5;
+    else roleId = 4;
+
+    const res = await apiClient.post<ApiResponse<AdminUserDto>>(`/AdminUsers/${id}/transfer-role`, {
+      newUserId,
+      newRoleId: roleId
+    });
+    if (!res.success) throw new Error(res.message);
+    window.dispatchEvent(new Event('nexus_admin_updated'));
+    return mapDtoToUser(res.data);
   },
 
   deleteUser: async (id: string, companyId: string): Promise<void> => {
     const res = await apiClient.delete<ApiResponse<boolean>>(`/AdminUsers/${id}?companyId=${companyId}`);
     if (!res.success) throw new Error(res.message);
+    window.dispatchEvent(new Event('nexus_admin_updated'));
   }
 };

@@ -39,5 +39,22 @@ public class CurrentUserService : ICurrentUserService
 
     public string? Email => User?.FindFirst(ClaimTypes.Email)?.Value;
 
-    public string? Name => User?.FindFirst(ClaimTypes.Name)?.Value;
+    public string? Name => User?.FindFirst(ClaimTypes.Name)?.Value
+                           ?? User?.FindFirst("name")?.Value;
+
+    public backend.Models.Entities.User? ValidatedUser
+    {
+        get
+        {
+            var httpContext = _httpContextAccessor.HttpContext;
+            if (httpContext != null
+                && httpContext.Items.TryGetValue("ValidatedCurrentUser", out var obj)
+                && obj is backend.Models.Entities.User user)
+            {
+                return user;
+            }
+
+            return null;
+        }
+    }
 }

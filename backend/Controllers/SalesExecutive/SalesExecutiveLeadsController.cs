@@ -9,7 +9,7 @@ namespace backend.Controllers.SalesExecutive;
 
 [ApiController]
 [Route("api/sales-executive/leads")]
-[Authorize(Roles = "sales_executive,company_admin,super_admin")]
+[Authorize(Roles = "sales_executive,company_admin,super_admin,irm")]
 public class SalesExecutiveLeadsController : ControllerBase
 {
     private readonly ILeadService _leadService;
@@ -76,7 +76,11 @@ public class SalesExecutiveLeadsController : ControllerBase
 
         var result = await _leadService.CreateLeadAsync(dto, ct);
         if (!result.Success)
+        {
+            if (result.Message.StartsWith("Unauthorized"))
+                return Unauthorized(result);
             return BadRequest(result);
+        }
 
         return CreatedAtAction(nameof(GetLeadById), new { id = result.Data!.Id }, result);
     }
@@ -168,6 +172,7 @@ public class SalesExecutiveLeadsController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
+    [Authorize(Roles = "company_admin,super_admin")]
     public async Task<ActionResult<ApiResponse<object>>> DeleteLead([FromRoute] int id, CancellationToken ct)
     {
         var result = await _leadService.DeleteLeadAsync(id, ct);

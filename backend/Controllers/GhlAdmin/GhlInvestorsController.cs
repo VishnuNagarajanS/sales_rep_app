@@ -1,38 +1,45 @@
 using backend.Authentication.Interfaces;
+using backend.Helpers;
 using backend.Data;
 using backend.DTOs.Common;
 using backend.DTOs.GhlInvestors;
+using backend.Extensions;
 using backend.Models.Entities;
+using backend.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using backend.Services.Interfaces;
+using backend.Services.Implementations;
 
 namespace backend.Controllers.GhlAdmin;
 
 /// <summary>
-/// GHL India Ventures — HNW Investor Profiles API.
-/// Serves the Investors page and the KYC module.
-/// Scoped to CompanyId 1 (GHL). Sales Executives see only their assigned investors.
-/// Company Admins and IRM officers see all investors in the company.
+/// Converted Investors 360 API.
+/// Operates directly on the primary Investors table (single source of truth).
+/// Scoped to CompanyId. Sales Executives and IRM officers see only their assigned investors.
+/// Company Admins and Super Admins see all investors in the company.
 /// </summary>
 [ApiController]
 [Route("api/ghl/investors")]
-[Authorize(Roles = "sales_executive,company_admin,sales_manager,super_admin,irm")]
+[Authorize(Roles = "sales_executive,company_admin,super_admin,irm")]
 public class GhlInvestorsController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IIrmOtherService _otherService;
 
-    public GhlInvestorsController(ApplicationDbContext db, ICurrentUserService currentUser)
+    public GhlInvestorsController(ApplicationDbContext db, ICurrentUserService currentUser, IIrmOtherService? otherService = null)
     {
         _db = db;
         _currentUser = currentUser;
+        _otherService = otherService ?? new IrmOtherService(db);
     }
 
-    private IQueryable<GhlInvestor> ScopedQuery()
+    private IQueryable<Investor> ScopedQuery()
     {
-        var query = _db.GhlInvestors.AsNoTracking()
-            .Include(i => i.AssignedAgent)
+        var query = _db.Investors.AsNoTracking()
+            .Include(i => i.AssignedIrm)
             .AsQueryable();
 
         var companyId = _currentUser.CompanyId;
@@ -42,9 +49,14 @@ public class GhlInvestorsController : ControllerBase
         if (companyId.HasValue)
             query = query.Where(i => i.CompanyId == companyId.Value);
 
-        // Sales Executives only see investors they own
-        if (role == "sales_executive" && agentId.HasValue)
-            query = query.Where(i => i.AssignedAgentId == agentId.Value);
+        // Sales Executives and IRMs only see investors they own
+        if ((role == "sales_executive" || role == "irm") && agentId.HasValue)
+            query = query.Where(i => i.AssignedIrmId == agentId.Value);
+
+        // Converted Investors 360: only include converted customers, not raw leads
+        query = query.Where(i => i.Status != InvestorStatus.Lead || _db.GhlDeals.Any(d =>
+            (d.CustomerId == i.Id || (!string.IsNullOrEmpty(i.Name) && d.CustomerName == i.Name)) &&
+            (d.Stage == "converted" || d.Stage == "won")));
 
         return query;
     }
@@ -62,7 +74,13 @@ public class GhlInvestorsController : ControllerBase
         var query = ScopedQuery();
 
         if (!string.IsNullOrWhiteSpace(status) && !status.Equals("All", StringComparison.OrdinalIgnoreCase))
-            query = query.Where(i => i.Status == status);
+        {
+            var normalizedStatus = status.Replace(" ", "");
+            if (Enum.TryParse<InvestorStatus>(normalizedStatus, true, out var parsedStatus))
+            {
+                query = query.Where(i => i.Status == parsedStatus);
+            }
+        }
 
         if (!string.IsNullOrWhiteSpace(assetClass) && !assetClass.Equals("All", StringComparison.OrdinalIgnoreCase))
             query = query.Where(i => i.PreferredAssetClass == assetClass);
@@ -76,17 +94,30 @@ public class GhlInvestorsController : ControllerBase
                 i.Email.ToLower().Contains(s));
         }
 
-        var total = await query.CountAsync(ct);
-        page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, 200);
+        var companyId = _currentUser.CompanyId ?? 1;
+        var otherMatcher = await _otherService.GetOtherMatcherAsync(companyId, "investor_360", ct);
 
         var entities = await query
             .OrderByDescending(i => i.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
             .ToListAsync(ct);
 
-        var items = entities.Select(MapToDto).ToList();
+        if (otherMatcher.HasAnyOther)
+        {
+            entities = entities
+                .Where(i => !otherMatcher.IsInOther(i.Phone, i.Id, null, i.Name))
+                .ToList();
+        }
+
+        var total = entities.Count;
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var paged = entities
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        var items = paged.Select(MapToDto).ToList();
 
         return Ok(ApiResponse<PagedResult<GhlInvestorResponseDto>>.SuccessResult(
             PagedResult<GhlInvestorResponseDto>.Create(items, total, page, pageSize),
@@ -110,30 +141,106 @@ public class GhlInvestorsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlInvestorResponseDto>>> CreateInvestor(
         [FromBody] CreateGhlInvestorDto dto, CancellationToken ct)
     {
-        var agentId = _currentUser.UserId ?? 1;
-        var companyId = _currentUser.CompanyId ?? 1;
-
-        var investor = new GhlInvestor
+        if (User.IsGhlAdmin())
         {
-            CompanyId = companyId,
-            AssignedAgentId = agentId,
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlInvestorResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM investor data."));
+        }
+
+        var agentId = _currentUser.UserId;
+        if (!agentId.HasValue || agentId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlInvestorResponseDto>.FailureResult("Unauthorized: User ID is missing."));
+
+        var companyId = _currentUser.CompanyId;
+        if (!companyId.HasValue || companyId.Value <= 0)
+            return Unauthorized(ApiResponse<GhlInvestorResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
+
+        var status = InvestorStatus.Lead;
+        if (!string.IsNullOrWhiteSpace(dto.Status))
+        {
+            Enum.TryParse<InvestorStatus>(dto.Status.Replace(" ", ""), true, out status);
+        }
+
+        // Check if the current agent is covering someone under an active handover
+        var activeHandover = await _db.WorkHandovers
+            .FirstOrDefaultAsync(h => h.CompanyId == companyId.Value && h.CoveringUserId == agentId.Value && h.Status == "active", ct);
+        int? inheritedHandoverId = activeHandover?.Id;
+        int? inheritedOriginalOwnerId = activeHandover?.OriginalUserId;
+
+        // Check if investor with same phone or email already exists in company
+        Investor? existingInvestor = null;
+        if (!string.IsNullOrWhiteSpace(dto.Phone))
+        {
+            var phoneDigits = new string(dto.Phone.Where(char.IsDigit).ToArray());
+            if (phoneDigits.Length >= 10) phoneDigits = phoneDigits[^10..];
+            existingInvestor = await _db.Investors
+                .Include(i => i.AssignedIrm)
+                .FirstOrDefaultAsync(i => i.CompanyId == companyId.Value && i.Phone.EndsWith(phoneDigits), ct);
+        }
+        if (existingInvestor == null && !string.IsNullOrWhiteSpace(dto.Email))
+        {
+            existingInvestor = await _db.Investors
+                .Include(i => i.AssignedIrm)
+                .FirstOrDefaultAsync(i => i.CompanyId == companyId.Value && i.Email.ToLower() == dto.Email.Trim().ToLower(), ct);
+        }
+
+        if (existingInvestor != null)
+        {
+            if (dto.Name != null) existingInvestor.Name = dto.Name.Trim();
+            if (dto.Phone != null) existingInvestor.Phone = dto.Phone.Trim();
+            if (dto.Email != null) existingInvestor.Email = dto.Email.Trim();
+            existingInvestor.Status = status;
+            if (dto.InvestmentCapacity != null) existingInvestor.InvestmentCapacity = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity) ?? string.Empty;
+            if (dto.PreferredAssetClass != null) existingInvestor.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass) ?? string.Empty;
+            if (dto.ReferralSource != null) existingInvestor.ReferralSource = dto.ReferralSource.Trim();
+            if (dto.CommittedAUM != null) existingInvestor.CommittedAum = dto.CommittedAUM.Trim();
+            if (dto.InvestmentMandate != null) existingInvestor.InvestmentMandate = dto.InvestmentMandate.Trim();
+            if (dto.RiskTolerance != null) existingInvestor.RiskTolerance = dto.RiskTolerance.Trim();
+            if (dto.Notes != null) existingInvestor.Notes = dto.Notes.Trim();
+            existingInvestor.UpdatedAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync(ct);
+            return Ok(ApiResponse<GhlInvestorResponseDto>.SuccessResult(MapToDto(existingInvestor), "Investor updated."));
+        }
+
+        var investor = new Investor
+        {
+            CompanyId = companyId.Value,
+            AssignedIrmId = agentId.Value,
+            AssignedIrmName = User.Identity?.Name ?? string.Empty,
             Name = dto.Name.Trim(),
             Phone = dto.Phone.Trim(),
             Email = dto.Email?.Trim() ?? string.Empty,
-            Status = string.IsNullOrWhiteSpace(dto.Status) ? "Lead" : dto.Status.Trim(),
-            InvestmentCapacity = dto.InvestmentCapacity.Trim(),
-            PreferredAssetClass = dto.PreferredAssetClass.Trim(),
+            Status = status,
+            InvestmentCapacity = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity) ?? string.Empty,
+            PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass) ?? string.Empty,
             ReferralSource = dto.ReferralSource?.Trim(),
-            CommittedAUM = dto.CommittedAUM?.Trim(),
+            CommittedAum = dto.CommittedAUM?.Trim(),
             InvestmentMandate = dto.InvestmentMandate?.Trim(),
             RiskTolerance = dto.RiskTolerance?.Trim(),
             Notes = dto.Notes.Trim(),
             CreatedAt = DateTime.UtcNow,
+            HandoverId = inheritedHandoverId,
+            OriginalOwnerId = inheritedOriginalOwnerId
         };
 
-        _db.GhlInvestors.Add(investor);
+        _db.Investors.Add(investor);
         await _db.SaveChangesAsync(ct);
-        await _db.Entry(investor).Reference(i => i.AssignedAgent).LoadAsync(ct);
+
+        if (inheritedHandoverId.HasValue)
+        {
+            _db.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = inheritedHandoverId.Value,
+                EntityType = "Investor",
+                EntityId = investor.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+
+        await _db.Entry(investor).Reference(i => i.AssignedIrm).LoadAsync(ct);
 
         return CreatedAtAction(nameof(GetInvestor), new { id = investor.Id },
             ApiResponse<GhlInvestorResponseDto>.SuccessResult(MapToDto(investor), "Investor created."));
@@ -144,9 +251,34 @@ public class GhlInvestorsController : ControllerBase
     public async Task<ActionResult<ApiResponse<GhlInvestorResponseDto>>> UpdateInvestor(
         int id, [FromBody] UpdateGhlInvestorDto dto, CancellationToken ct)
     {
-        var investor = await _db.GhlInvestors
-            .Include(i => i.AssignedAgent)
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<GhlInvestorResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM investor data."));
+        }
+
+        var investor = await _db.Investors
+            .Include(i => i.AssignedIrm)
             .FirstOrDefaultAsync(i => i.Id == id && i.CompanyId == _currentUser.CompanyId, ct);
+
+        if (investor == null)
+        {
+            // Fallback: match by phone or email if the provided ID was a Lead ID or Deal CustomerId
+            if (!string.IsNullOrWhiteSpace(dto.Phone))
+            {
+                var phoneDigits = new string(dto.Phone.Where(char.IsDigit).ToArray());
+                if (phoneDigits.Length >= 10) phoneDigits = phoneDigits[^10..];
+                investor = await _db.Investors
+                    .Include(i => i.AssignedIrm)
+                    .FirstOrDefaultAsync(i => i.CompanyId == _currentUser.CompanyId && i.Phone.EndsWith(phoneDigits), ct);
+            }
+            if (investor == null && !string.IsNullOrWhiteSpace(dto.Email))
+            {
+                investor = await _db.Investors
+                    .Include(i => i.AssignedIrm)
+                    .FirstOrDefaultAsync(i => i.CompanyId == _currentUser.CompanyId && i.Email.ToLower() == dto.Email.Trim().ToLower(), ct);
+            }
+        }
 
         if (investor == null)
             return NotFound(ApiResponse<GhlInvestorResponseDto>.FailureResult("Investor not found."));
@@ -154,11 +286,12 @@ public class GhlInvestorsController : ControllerBase
         if (dto.Name != null) investor.Name = dto.Name.Trim();
         if (dto.Phone != null) investor.Phone = dto.Phone.Trim();
         if (dto.Email != null) investor.Email = dto.Email.Trim();
-        if (dto.Status != null) investor.Status = dto.Status.Trim();
-        if (dto.InvestmentCapacity != null) investor.InvestmentCapacity = dto.InvestmentCapacity.Trim();
-        if (dto.PreferredAssetClass != null) investor.PreferredAssetClass = dto.PreferredAssetClass.Trim();
+        if (dto.Status != null && Enum.TryParse<InvestorStatus>(dto.Status.Replace(" ", ""), true, out var parsedStatus))
+            investor.Status = parsedStatus;
+        if (dto.InvestmentCapacity != null) investor.InvestmentCapacity = OptionalFieldNormalizer.Normalize(dto.InvestmentCapacity) ?? string.Empty;
+        if (dto.PreferredAssetClass != null) investor.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass) ?? string.Empty;
         if (dto.ReferralSource != null) investor.ReferralSource = dto.ReferralSource.Trim();
-        if (dto.CommittedAUM != null) investor.CommittedAUM = dto.CommittedAUM.Trim();
+        if (dto.CommittedAUM != null) investor.CommittedAum = dto.CommittedAUM.Trim();
         if (dto.InvestmentMandate != null) investor.InvestmentMandate = dto.InvestmentMandate.Trim();
         if (dto.RiskTolerance != null) investor.RiskTolerance = dto.RiskTolerance.Trim();
         if (dto.Notes != null) investor.Notes = dto.Notes.Trim();
@@ -171,35 +304,43 @@ public class GhlInvestorsController : ControllerBase
 
     // ── DELETE /api/ghl/investors/{id} ────────────────────────────────────────
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "company_admin,super_admin,irm")]
+    [Authorize(Roles = "company_admin,super_admin")]
     public async Task<ActionResult<ApiResponse<bool>>> DeleteInvestor(int id, CancellationToken ct)
     {
-        var investor = await _db.GhlInvestors
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<bool>.FailureResult("Access denied: GHL Admin has read-only access to IRM investor data."));
+        }
+
+        var investor = await _db.Investors
             .FirstOrDefaultAsync(i => i.Id == id && i.CompanyId == _currentUser.CompanyId, ct);
 
         if (investor == null)
             return NotFound(ApiResponse<bool>.FailureResult("Investor not found."));
 
-        _db.GhlInvestors.Remove(investor);
+        _db.Investors.Remove(investor);
         await _db.SaveChangesAsync(ct);
 
         return Ok(ApiResponse<bool>.SuccessResult(true, "Investor deleted."));
     }
 
-    private static GhlInvestorResponseDto MapToDto(GhlInvestor i) => new()
+    private static GhlInvestorResponseDto MapToDto(Investor i) => new()
     {
         Id = i.Id,
         CompanyId = i.CompanyId,
-        AssignedAgentId = i.AssignedAgentId,
-        AssignedAgentName = i.AssignedAgent?.Name,
+        AssignedAgentId = i.AssignedIrmId ?? 0,
+        AssignedAgentName = i.AssignedIrm?.Name ?? i.AssignedIrmName,
         Name = i.Name,
         Phone = i.Phone,
         Email = i.Email,
-        Status = i.Status,
+        Status = i.Status == InvestorStatus.ActiveInvestor ? "Active Investor" :
+                 i.Status == InvestorStatus.HnwInvestor ? "HNW Investor" :
+                 i.Status.ToString(),
         InvestmentCapacity = i.InvestmentCapacity,
         PreferredAssetClass = i.PreferredAssetClass,
         ReferralSource = i.ReferralSource,
-        CommittedAUM = i.CommittedAUM,
+        CommittedAUM = i.CommittedAum,
         InvestmentMandate = i.InvestmentMandate,
         RiskTolerance = i.RiskTolerance,
         Notes = i.Notes,
@@ -207,3 +348,4 @@ public class GhlInvestorsController : ControllerBase
         UpdatedAt = i.UpdatedAt,
     };
 }
+

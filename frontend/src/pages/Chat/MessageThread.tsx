@@ -336,7 +336,11 @@ export const MessageThread: React.FC<Props> = ({
 
                     {editingId === msg.id ? (
                       <div>
+                        <label htmlFor={`chat-edit-msg-${msg.id}`} style={{ display: 'none' }}>Edit message</label>
                         <textarea
+                          id={`chat-edit-msg-${msg.id}`}
+                          name="editMessageContent"
+                          aria-label="Edit message"
                           className="chat-edit-textarea"
                           value={editContent}
                           onChange={e => setEditContent(e.target.value)}
@@ -576,7 +580,11 @@ export const MessageThread: React.FC<Props> = ({
           >
             <Paperclip size={16} />
           </button>
+          <label htmlFor="chat-compose-message-input" style={{ display: 'none' }}>Type a message</label>
           <textarea
+            id="chat-compose-message-input"
+            name="chatMessage"
+            aria-label="Type a message"
             ref={textareaRef}
             className="chat-textarea"
             placeholder={`Message ${conversation.type === 'group' ? (conversation.name || 'group') : (otherMember?.name || 'chat')}…`}

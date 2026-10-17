@@ -1,6 +1,5 @@
 import { ChatConversation, ChatMessage, ChatMember, ChatAttachment } from '../types';
 
-// ── Storage keys ──────────────────────────────────────────────────────────────
 const getPrefix = () => 'nexus_';
 const getConvsKey = () => `${getPrefix()}chat_conversations`;
 const getMsgKey = (id: string) => `${getPrefix()}chat_messages_${id}`;
@@ -257,7 +256,8 @@ export function buildDirectory(
     }));
 }
 
-type DemoChatLoader = (companyId: string, tenantSlug?: string) => any;
+
+type DemoChatLoader = () => void;
 let demoChatLoader: DemoChatLoader | null = null;
 
 export function registerDemoChatLoader(loader: DemoChatLoader): void {

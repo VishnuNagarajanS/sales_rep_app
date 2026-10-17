@@ -177,8 +177,12 @@ export const ConversationList: React.FC<Props> = ({
       </div>
 
       <div className="chat-search-wrap">
+        <label htmlFor="chat-conv-search-input" style={{ display: 'none' }}>Search teammates or groups</label>
         <Search size={15} className="chat-search-icon" />
         <input
+          id="chat-conv-search-input"
+          name="chatSearch"
+          aria-label="Search teammates or groups"
           className="chat-search"
           placeholder="Search teammates or groups…"
           value={search}
@@ -348,10 +352,12 @@ export const ConversationList: React.FC<Props> = ({
           }
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+            <label htmlFor="chat-rename-group-input" style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
               Group Name
             </label>
             <input
+              id="chat-rename-group-input"
+              name="groupName"
               type="text"
               className="form-input"
               value={renameText}

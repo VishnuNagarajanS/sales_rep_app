@@ -1,5 +1,9 @@
-export type AppEnvironment = 'dev';
+export type AppEnvironment = 'dev' | 'prod';
 
+/**
+ * Returns the current application environment.
+ * Always targets real backend API and database operations.
+ */
 export function getAppEnv(): AppEnvironment {
   return 'dev';
 }
@@ -12,7 +16,7 @@ export function isMockMode(): boolean {
 }
 
 /**
- * Returns true when running in dev/API/database mode.
+ * Returns true when running in real API / database mode.
  */
 export function isDevMode(): boolean {
   return true;

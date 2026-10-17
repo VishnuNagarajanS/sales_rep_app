@@ -23,19 +23,11 @@ public class InvestorDto
     public string Notes { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
-}
 
-public class CreateInvestorDto
-{
-    public string Name { get; set; } = string.Empty;
-    public string Phone { get; set; } = string.Empty;
-    public string Email { get; set; } = string.Empty;
-    public string InvestmentCapacity { get; set; } = string.Empty;
-    public string PreferredAssetClass { get; set; } = string.Empty;
-    public string? RiskTolerance { get; set; }
-    public string? InvestmentMandate { get; set; }
-    public string? ReferralSource { get; set; }
-    public string Notes { get; set; } = string.Empty;
+    public int? HandoverId { get; set; }
+    public string? HandedOverFromName { get; set; }
+    public DateTime? HandoverPlannedEnd { get; set; }
+    public int? OriginalOwnerId { get; set; }
 }
 
 public class UpdateInvestorDto
