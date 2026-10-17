@@ -429,7 +429,10 @@ public class CustomerService : ICustomerService
             var newNormPhone = ContactNormalizer.NormalizePhone(candidatePhone);
             var newNormEmail = ContactNormalizer.NormalizeEmail(candidateEmail);
 
-            if (newNormPhone != null || newNormEmail != null)
+            var phoneChanged = newNormPhone != customer.NormalizedPhone;
+            var emailChanged = newNormEmail != customer.NormalizedEmail;
+
+            if ((phoneChanged || emailChanged) && (newNormPhone != null || newNormEmail != null))
             {
                 var existingOtherCust = await _context.Customers
                     .Include(c => c.AssignedAgent)
@@ -444,20 +447,6 @@ public class CustomerService : ICustomerService
                 {
                     return ApiResponse<CustomerResponseDto>.FailureResult(
                         $"Cannot update customer: Another customer already exists with this contact information: {existingOtherCust.Name} ({existingOtherCust.Phone} / {existingOtherCust.Email}).");
-                }
-
-                var existingLead = await _context.Leads
-                    .Include(l => l.AssignedAgent)
-                    .FirstOrDefaultAsync(l =>
-                        l.CompanyId == customer.CompanyId &&
-                        !l.IsDuplicate &&
-                        ((newNormPhone != null && l.NormalizedPhone == newNormPhone) ||
-                         (newNormEmail != null && l.NormalizedEmail == newNormEmail)), ct);
-
-                if (existingLead != null)
-                {
-                    return ApiResponse<CustomerResponseDto>.FailureResult(
-                        $"Cannot update customer: A lead already exists with this contact information: {existingLead.Name} ({existingLead.Phone} / {existingLead.Email}).");
                 }
             }
 

@@ -96,7 +96,11 @@ public class SalesExecutiveCustomersController : ControllerBase
     {
         var result = await _customerService.UpdateCustomerAsync(id, dto, ct);
         if (!result.Success)
-            return NotFound(result);
+        {
+            if (result.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+                return NotFound(result);
+            return BadRequest(result);
+        }
 
         return Ok(result);
     }

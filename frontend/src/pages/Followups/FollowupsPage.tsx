@@ -192,7 +192,7 @@ export const FollowupsPage: React.FC = () => {
       return;
     }
     if ((createContactType === 'lead' && !createSelectedLeadId) ||
-        (createContactType === 'customer' && !createSelectedCustomerId)) {
+      (createContactType === 'customer' && !createSelectedCustomerId)) {
       alert(`Select an existing ${createContactType} so this follow-up can be linked to its database record.`);
       return;
     }
@@ -337,7 +337,7 @@ export const FollowupsPage: React.FC = () => {
     (roleCode as string) === 'company_admin' ||
     (roleCode as string) === 'admin' ||
     roleCode === 'super_admin';
-const isGhlSalesExec =
+  const isGhlSalesExec =
     (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl') &&
     isExec;
   const isIrm = roleCode === 'irm';
@@ -363,7 +363,7 @@ const isGhlSalesExec =
     setSelectedPerson('All');
   };
 
-const personOptions = useMemo(() => {
+  const personOptions = useMemo(() => {
     if (users && users.length > 0) {
       if (selectedRole === 'sales_executive') {
         const sales = users.filter(u => {
@@ -564,16 +564,16 @@ const personOptions = useMemo(() => {
 
     const savedAssetClass = isConfirmed
       ? (l?.customFields?.irmPreferencesConfirmed && l?.customFields?.preferredAssetClass) ||
-        (c?.customFields?.irmPreferencesConfirmed && c?.customFields?.preferredAssetClass) ||
-        savedLocal?.preferredAssetClass ||
-        ''
+      (c?.customFields?.irmPreferencesConfirmed && c?.customFields?.preferredAssetClass) ||
+      savedLocal?.preferredAssetClass ||
+      ''
       : '';
 
     const savedHorizon = isConfirmed
       ? (l?.customFields?.irmPreferencesConfirmed && (l?.customFields?.horizon || l?.customFields?.investmentHorizon)) ||
-        (c?.customFields?.irmPreferencesConfirmed && (c?.customFields?.horizon || c?.customFields?.investmentHorizon)) ||
-        savedLocal?.horizon ||
-        ''
+      (c?.customFields?.irmPreferencesConfirmed && (c?.customFields?.horizon || c?.customFields?.investmentHorizon)) ||
+      savedLocal?.horizon ||
+      ''
       : '';
 
     setPrefAssetClass(savedAssetClass);
@@ -847,7 +847,7 @@ const personOptions = useMemo(() => {
       (drawerFollowup as any)?.investmentCapacity ||
       '';   // No hardcoded default — only use what the contact actually provided
 
-try {
+    try {
       await transitionFollowupToKyc({
         contactName: drawerFollowup.contactName,
         contactPhone: drawerFollowup.contactPhone,
@@ -1237,387 +1237,347 @@ try {
   // Scoped dataset according to role and admin filters
   const processedFollowups = useMemo(() => {
     let scopedFollowups: Followup[];
-  if (isAdmin) {
-    scopedFollowups = followups.filter(f => {
-      // Admins see all company follow-ups by default and may filter by role.
-      const role = getFollowupRole(f);
-      if (selectedRole !== 'all') {
-        const expectedRole = selectedRole === 'irm' ? 'IRM' : 'Sales Executive';
-        if (role !== expectedRole) return false;
-      }
-
-      // 2. Person match
-      if (selectedPerson !== 'All') {
-        const matchesName =
-          (f.assignedAgentName || '').toLowerCase() === selectedPerson.toLowerCase();
-        const matchesId = f.assignedAgentId === selectedPerson;
-        if (!matchesName && !matchesId) return false;
-      }
-
-      // 3. Date range match
-      if (!isFollowupInDateFilter(f)) return false;
-
-      return true;
-    });
-  } else if (isExec) {
-scopedFollowups = followups.filter(f => {
-      if (f.status !== 'Pending') return false;
-      const isDirectlyAssigned =
-        (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
-        (f.assignedAgentName && user?.name && f.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
-      if (isDirectlyAssigned) return true;
-
-      const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-      const matchingLead = allLeads.find(l => {
-        const idMatch = f.contactId && String(f.contactId) === String(l.id);
-        const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
-        return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
-      });
-
-      if (matchingLead) {
-        return (
-          (matchingLead.assignedAgentId && String(matchingLead.assignedAgentId) === String(user?.id)) ||
-          (matchingLead.assignedAgentName && user?.name && matchingLead.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase())
-        );
-      }
-      return false;
-    });
-  } else if (isIrm) {
-    // IRM: Show pending follow-ups assigned to THIS authenticated IRM OR associated with a lead assigned to THIS IRM
-    // Build sets of contacts that have moved beyond follow-up (KYC, Opportunities, Converted, etc.)
-    const advancedContactIds = new Set<string>();
-    const advancedContactPhones = new Set<string>();
-    const advancedContactNames = new Set<string>();
-
-    if (irmSummaryData && Array.isArray(irmSummaryData.leads)) {
-      irmSummaryData.leads.forEach(il => {
-        const stage = (il.currentStage || '').toLowerCase();
-        const st = (il.status || '').toLowerCase();
-        if (
-          stage === 'kyc' ||
-          stage === 'opportunities' ||
-          stage === 'converted' ||
-          stage === 'archived' ||
-          st === 'qualified' ||
-          st === 'converted' ||
-          st === 'not interested' ||
-          st === 'junk'
-        ) {
-          if (il.id) advancedContactIds.add(String(il.id));
-          const p10 = (il.phone || '').replace(/\D/g, '').slice(-10);
-          if (p10) advancedContactPhones.add(p10);
-          if (il.name) advancedContactNames.add(il.name.trim().toLowerCase());
+    if (isAdmin) {
+      scopedFollowups = followups.filter(f => {
+        // Admins see all company follow-ups by default and may filter by role.
+        const role = getFollowupRole(f);
+        if (selectedRole !== 'all') {
+          const expectedRole = selectedRole === 'irm' ? 'IRM' : 'Sales Executive';
+          if (role !== expectedRole) return false;
         }
-      });
-    }
 
-    scopedFollowups = followups.filter(f => {
-      if (f.status !== 'Pending') return false;
-      if (f.companyId && tenant?.id && !isTenantMatch(f.companyId, tenant.id)) return false;
-
-      const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-      const fName = (f.contactName || '').trim().toLowerCase();
-      const fId = f.contactId ? String(f.contactId) : '';
-
-      // Stage isolation: if this contact has moved to KYC, Opportunities, Converted, etc., NEVER show in Follow-up
-      if (fId && advancedContactIds.has(fId)) return false;
-      if (fPhone && advancedContactPhones.has(fPhone)) return false;
-      if (fName && advancedContactNames.has(fName)) return false;
-
-      const matchingLead = allLeads.find(l => {
-        const idMatch = f.contactId && String(f.contactId) === String(l.id);
-        const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
-        return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
-      });
-
-      if (matchingLead) {
-        const mlStatus = (matchingLead.status || '').toLowerCase();
-        if (mlStatus === 'qualified' || mlStatus === 'converted' || mlStatus === 'not interested' || mlStatus === 'junk') {
-          return false;
+        // 2. Person match
+        if (selectedPerson !== 'All') {
+          const matchesName =
+            (f.assignedAgentName || '').toLowerCase() === selectedPerson.toLowerCase();
+          const matchesId = f.assignedAgentId === selectedPerson;
+          if (!matchesName && !matchesId) return false;
         }
-      }
 
-      const isDirectlyAssigned =
-        (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
-        (f.assignedAgentName && user?.name && f.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
-      if (isDirectlyAssigned) return true;
+        // 3. Date range match
+        if (!isFollowupInDateFilter(f)) return false;
 
-      if (matchingLead) {
-        return (
-          (matchingLead.assignedAgentId && String(matchingLead.assignedAgentId) === String(user?.id)) ||
-          (matchingLead.assignedAgentName && user?.name && matchingLead.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase())
-        );
-      }
+        return true;
+      });
+    } else if (isExec) {
+      scopedFollowups = followups.filter(f => {
+        const isDirectlyAssigned =
+          (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+          (f.assignedAgentName && user?.name && f.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
+        if (isDirectlyAssigned) return true;
 
-      return false;
-    });
+        const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+        const matchingLead = allLeads.find(l => {
+          const idMatch = f.contactId && String(f.contactId) === String(l.id);
+          const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+          return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
+        });
 
-    // Also synthesize follow-up tasks for any leads assigned to this IRM that are in Follow-up stage but lack a standalone followup record
-    const existingFollowupContactIds = new Set(
-      scopedFollowups.map(f => String(f.contactId)).filter(Boolean)
-    );
-    const existingFollowupPhones = new Set(
-      scopedFollowups.map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10)).filter(Boolean)
-    );
-
-    const missingFollowupLeads = allLeads.filter(l => {
-      const isAssignedToMe =
-        (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
-        (l.assignedAgentName && user?.name && l.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
-      if (!isAssignedToMe) return false;
-      if (l.companyId && tenant?.id && !isTenantMatch(l.companyId, tenant.id)) return false;
-
-      const lStatus = (l.status || '').toLowerCase();
-      // An 'Interested' lead is in initial review in "My Leads" — it must NOT show in Follow-up
-      if (lStatus === 'interested') return false;
-
-      // Contacts in KYC, Opportunities, Converted, etc. must NEVER be synthesized into Follow-up
-      const cleanPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
-      const lName = (l.name || '').trim().toLowerCase();
-      const lId = String(l.id);
-      if (advancedContactIds.has(lId) || (cleanPhone && advancedContactPhones.has(cleanPhone)) || (lName && advancedContactNames.has(lName))) {
+        if (matchingLead) {
+          return (
+            (matchingLead.assignedAgentId && String(matchingLead.assignedAgentId) === String(user?.id)) ||
+            (matchingLead.assignedAgentName && user?.name && matchingLead.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase())
+          );
+        }
         return false;
-      }
-      if (lStatus === 'qualified' || lStatus === 'converted' || lStatus === 'not interested' || lStatus === 'junk') {
-        return false;
-      }
-
-      const isInFollowupStage =
-        l.status === 'Follow-up Required' ||
-        l.status === 'Callback';
-      if (!isInFollowupStage) return false;
-
-      if (existingFollowupContactIds.has(String(l.id))) return false;
-      if (cleanPhone && existingFollowupPhones.has(cleanPhone)) return false;
-
-      return true;
-    });
-
-    for (const ml of missingFollowupLeads) {
-      const salesAgentName =
-        (ml.assignedByName && ml.assignedByName !== 'Created by IRM' ? ml.assignedByName : null) ||
-        ml.customFields?.qualifiedByAgentName ||
-        ml.customFields?.agentName ||
-        '';
-
-      scopedFollowups.push({
-        id: `lead-flw-${ml.id}`,
-        companyId: tenant?.id || 't-ghl-01',
-        contactId: String(ml.id),
-        contactType: 'lead',
-        contactName: ml.name,
-        contactPhone: ml.phone,
-        contactEmail: ml.email || '',
-        scheduledAt: ml.nextFollowupDate || new Date(Date.now() + 86400000).toISOString(),
-        priority: (ml.priority === 'Urgent' ? 'High' : (ml.priority || 'High')) as 'Low' | 'Medium' | 'High',
-        status: 'Pending',
-        notes: ml.notes || 'Scheduled follow-up callback',
-        assignedAgentId: String(user?.id || ''),
-        assignedAgentName: salesAgentName || user?.name || ml.assignedAgentName || '',
-        assignedRole: salesAgentName ? 'Sales Executive' : 'IRM',
       });
-    }
-  } else {
-    scopedFollowups = followups;
-  }
+    } else if (isIrm) {
+      // IRM: Show pending follow-ups assigned to THIS authenticated IRM OR associated with a lead assigned to THIS IRM
+      // Build sets of contacts that have moved beyond follow-up (KYC, Opportunities, Converted, etc.)
+      const advancedContactIds = new Set<string>();
+      const advancedContactPhones = new Set<string>();
+      const advancedContactNames = new Set<string>();
 
-  // Deduplicate follow-up tasks by contact so each contact has at most ONE active follow-up task card.
-  // If multiple records exist for the same contact (e.g. from repeated calls or fallback synthesis),
-  // pick the most actionable/recent one and merge any distinct notes so no contact is duplicated.
-  let result: Followup[] = [];
-  try {
-    const contactMap = new Map<string, Followup>();
+      if (irmSummaryData && Array.isArray(irmSummaryData.leads)) {
+        irmSummaryData.leads.forEach(il => {
+          const stage = (il.currentStage || '').toLowerCase();
+          const st = (il.status || '').toLowerCase();
+          if (
+            stage === 'kyc' ||
+            stage === 'opportunities' ||
+            stage === 'converted' ||
+            stage === 'archived' ||
+            st === 'qualified' ||
+            st === 'converted' ||
+            st === 'not interested' ||
+            st === 'junk'
+          ) {
+            if (il.id) advancedContactIds.add(String(il.id));
+            const p10 = (il.phone || '').replace(/\D/g, '').slice(-10);
+            if (p10) advancedContactPhones.add(p10);
+            if (il.name) advancedContactNames.add(il.name.trim().toLowerCase());
+          }
+        });
+      }
 
-    for (const f of scopedFollowups) {
-      const cleanContactId = (f.contactId || '').replace(/^lead-flw-/, '').trim();
-      const phoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      scopedFollowups = followups.filter(f => {
+        if (f.status !== 'Pending') return false;
+        if (f.companyId && tenant?.id && !isTenantMatch(f.companyId, tenant.id)) return false;
 
-      const contactKey = (cleanContactId && cleanContactId !== 'contact-new')
-        ? `id:${cleanContactId}`
-        : phoneDigits
-          ? `phone:${phoneDigits}`
-          : (f.contactName ? `name:${f.contactName.trim().toLowerCase()}` : `item:${f.id}`);
+        const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+        const fName = (f.contactName || '').trim().toLowerCase();
+        const fId = f.contactId ? String(f.contactId) : '';
 
-      if (contactMap.has(contactKey)) {
-        const existing = contactMap.get(contactKey)!;
+        // Stage isolation: if this contact has moved to KYC, Opportunities, Converted, etc., NEVER show in Follow-up
+        if (fId && advancedContactIds.has(fId)) return false;
+        if (fPhone && advancedContactPhones.has(fPhone)) return false;
+        if (fName && advancedContactNames.has(fName)) return false;
 
-        // If one is Pending and the other is not, always keep the Pending one
-        if (existing.status !== 'Pending' && f.status === 'Pending') {
-          contactMap.set(contactKey, { ...f });
-          continue;
-        }
-        if (existing.status === 'Pending' && f.status !== 'Pending') {
-          continue;
-        }
+        const matchingLead = allLeads.find(l => {
+          const idMatch = f.contactId && String(f.contactId) === String(l.id);
+          const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+          return idMatch || Boolean(fPhone && lPhone && fPhone === lPhone);
+        });
 
-        // Both same status: prefer real database record over synthesized lead task ('lead-flw-')
-        const existingIsSynthetic = String(existing.id).startsWith('lead-flw-');
-        const currentIsSynthetic = String(f.id).startsWith('lead-flw-');
-
-        let winner = existing;
-        let secondary = f;
-
-        if (existingIsSynthetic && !currentIsSynthetic) {
-          winner = f;
-          secondary = existing;
-        } else if (!existingIsSynthetic && !currentIsSynthetic) {
-          // Both are real records: keep the one with the latest scheduled date or newest ID
-          const existingTime = Date.parse(existing.scheduledAt) || 0;
-          const currentTime = Date.parse(f.scheduledAt) || 0;
-          if (currentTime >= existingTime) {
-            winner = f;
-            secondary = existing;
+        if (matchingLead) {
+          const mlStatus = (matchingLead.status || '').toLowerCase();
+          if (mlStatus === 'qualified' || mlStatus === 'converted' || mlStatus === 'not interested' || mlStatus === 'junk') {
+            return false;
           }
         }
 
-        // Merge notes if secondary has distinct information not in winner
-        const wNotes = (winner.notes || '').trim();
-        const sNotes = (secondary.notes || '').trim();
-        if (sNotes && !wNotes.includes(sNotes)) {
-          winner = { ...winner, notes: wNotes ? `${wNotes} | ${sNotes}` : sNotes };
+        const isDirectlyAssigned =
+          (f.assignedAgentId && String(f.assignedAgentId) === String(user?.id)) ||
+          (f.assignedAgentName && user?.name && f.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
+        if (isDirectlyAssigned) return true;
+
+        if (matchingLead) {
+          return (
+            (matchingLead.assignedAgentId && String(matchingLead.assignedAgentId) === String(user?.id)) ||
+            (matchingLead.assignedAgentName && user?.name && matchingLead.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase())
+          );
         }
 
-        contactMap.set(contactKey, winner);
-      } else {
-        contactMap.set(contactKey, { ...f });
+        return false;
+      });
+
+      // Also synthesize follow-up tasks for any leads assigned to this IRM that are in Follow-up stage but lack a standalone followup record
+      const existingFollowupContactIds = new Set(
+        scopedFollowups.map(f => String(f.contactId)).filter(Boolean)
+      );
+      const existingFollowupPhones = new Set(
+        scopedFollowups.map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10)).filter(Boolean)
+      );
+
+      const missingFollowupLeads = allLeads.filter(l => {
+        const isAssignedToMe =
+          (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
+          (l.assignedAgentName && user?.name && l.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
+        if (!isAssignedToMe) return false;
+        if (l.companyId && tenant?.id && !isTenantMatch(l.companyId, tenant.id)) return false;
+
+        const lStatus = (l.status || '').toLowerCase();
+        // An 'Interested' lead is in initial review in "My Leads" — it must NOT show in Follow-up
+        if (lStatus === 'interested') return false;
+
+        // Contacts in KYC, Opportunities, Converted, etc. must NEVER be synthesized into Follow-up
+        const cleanPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+        const lName = (l.name || '').trim().toLowerCase();
+        const lId = String(l.id);
+        if (advancedContactIds.has(lId) || (cleanPhone && advancedContactPhones.has(cleanPhone)) || (lName && advancedContactNames.has(lName))) {
+          return false;
+        }
+        if (lStatus === 'qualified' || lStatus === 'converted' || lStatus === 'not interested' || lStatus === 'junk') {
+          return false;
+        }
+
+        const isInFollowupStage =
+          l.status === 'Follow-up Required' ||
+          l.status === 'Callback';
+        if (!isInFollowupStage) return false;
+
+        if (existingFollowupContactIds.has(String(l.id))) return false;
+        if (cleanPhone && existingFollowupPhones.has(cleanPhone)) return false;
+
+        return true;
+      });
+
+      for (const ml of missingFollowupLeads) {
+        const salesAgentName =
+          (ml.assignedByName && ml.assignedByName !== 'Created by IRM' ? ml.assignedByName : null) ||
+          ml.customFields?.qualifiedByAgentName ||
+          ml.customFields?.agentName ||
+          '';
+
+        scopedFollowups.push({
+          id: `lead-flw-${ml.id}`,
+          companyId: tenant?.id || 't-ghl-01',
+          contactId: String(ml.id),
+          contactType: 'lead',
+          contactName: ml.name,
+          contactPhone: ml.phone,
+          contactEmail: ml.email || '',
+          scheduledAt: ml.nextFollowupDate || new Date(Date.now() + 86400000).toISOString(),
+          priority: (ml.priority === 'Urgent' ? 'High' : (ml.priority || 'High')) as 'Low' | 'Medium' | 'High',
+          status: 'Pending',
+          notes: ml.notes || 'Scheduled follow-up callback',
+          assignedAgentId: String(user?.id || ''),
+          assignedAgentName: salesAgentName || user?.name || ml.assignedAgentName || '',
+          assignedRole: salesAgentName ? 'Sales Executive' : 'IRM',
+        });
+      }
+    } else {
+      scopedFollowups = followups;
+    }
+
+    // Deduplicate follow-up tasks by contact so each contact has at most ONE active follow-up task card.
+    // If multiple records exist for the same contact (e.g. from repeated calls or fallback synthesis),
+    // pick the most actionable/recent one and merge any distinct notes so no contact is duplicated.
+    let result: Followup[] = [];
+    try {
+      const contactMap = new Map<string, Followup>();
+
+      for (const f of scopedFollowups) {
+        const cleanContactId = (f.contactId || '').replace(/^lead-flw-/, '').replace(/^flw-lead-/, '').trim();
+        const phoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+
+        const contactKey = `${f.status}:${(cleanContactId && cleanContactId !== 'contact-new')
+          ? `id:${cleanContactId}`
+          : phoneDigits
+            ? `phone:${phoneDigits}`
+            : (f.contactName ? `name:${f.contactName.trim().toLowerCase()}` : `item:${f.id}`)}`;
+
+        if (contactMap.has(contactKey)) {
+          const existing = contactMap.get(contactKey)!;
+
+          // Prefer real database record over synthesized lead task ('lead-flw-' or 'flw-lead-')
+          const existingIsSynthetic = String(existing.id).startsWith('lead-flw-') || String(existing.id).startsWith('flw-lead-');
+          const currentIsSynthetic = String(f.id).startsWith('lead-flw-') || String(f.id).startsWith('flw-lead-');
+
+          let winner = existing;
+          let secondary = f;
+
+          if (existingIsSynthetic && !currentIsSynthetic) {
+            winner = f;
+            secondary = existing;
+          } else if (!existingIsSynthetic && !currentIsSynthetic) {
+            // Both are real records: keep the one with the latest scheduled date or newest ID
+            const existingTime = Date.parse(existing.scheduledAt) || 0;
+            const currentTime = Date.parse(f.scheduledAt) || 0;
+            if (currentTime >= existingTime) {
+              winner = f;
+              secondary = existing;
+            }
+          }
+
+          // Merge notes if secondary has distinct information not in winner
+          const wNotes = (winner.notes || '').trim();
+          const sNotes = (secondary.notes || '').trim();
+          if (sNotes && !wNotes.includes(sNotes)) {
+            winner = { ...winner, notes: wNotes ? `${wNotes} | ${sNotes}` : sNotes };
+          }
+
+          contactMap.set(contactKey, winner);
+        } else {
+          contactMap.set(contactKey, { ...f });
+        }
+      }
+
+      result = Array.from(contactMap.values());
+    } catch (err) {
+      console.error('Error deduping followups list by contact:', err);
+      result = scopedFollowups;
+    }
+
+    // ── GHL cross-reference safety filter ─────────────────────────────────────
+    if (isGhlSalesExec || isGhlAdmin) {
+      try {
+        const niJunkLeadIds = new Set<string>(
+          allLeads
+            .filter((l: Lead) => l.status === 'Not Interested' || l.status === 'Junk' || l.status === 'Other')
+            .map((l: Lead) => l.id)
+        );
+        const niJunkPhones = new Set<string>(
+          allLeads
+            .filter((l: Lead) => l.status === 'Not Interested' || l.status === 'Junk' || l.status === 'Other')
+            .map((l: Lead) => (l.phone || '').replace(/\D/g, '').slice(-10))
+            .filter(Boolean)
+        );
+
+        result = result.filter(f => {
+          if (f.status !== 'Pending') return true;
+          if (f.contactId && f.contactId !== 'contact-new' && niJunkLeadIds.has(f.contactId))
+            return false;
+          const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+          if (fPhone && niJunkPhones.has(fPhone)) return false;
+          return true;
+        });
+      } catch (err) {
+        console.error('Error in GHL NI/Junk cross-reference filter:', err);
       }
     }
 
-    result = Array.from(contactMap.values());
-  } catch (err) {
-    console.error('Error deduping followups list by contact:', err);
-    result = scopedFollowups;
-  }
-
-  // ── GHL cross-reference safety filter ─────────────────────────────────────
-  if (isGhlSalesExec || isGhlAdmin) {
+    // ── Other status leads leave the Follow-ups page (transferred to Other module) ───
     try {
-      const niJunkLeadIds = new Set<string>(
+      const otherLeadIds = new Set<string>(
         allLeads
-          .filter((l: Lead) => l.status === 'Not Interested' || l.status === 'Junk' || l.status === 'Other')
-          .map((l: Lead) => l.id)
+          .filter((l: Lead) => l.status === 'Other')
+          .map((l: Lead) => String(l.id))
       );
-      const niJunkPhones = new Set<string>(
+      const otherPhones = new Set<string>(
         allLeads
-          .filter((l: Lead) => l.status === 'Not Interested' || l.status === 'Junk' || l.status === 'Other')
+          .filter((l: Lead) => l.status === 'Other')
           .map((l: Lead) => (l.phone || '').replace(/\D/g, '').slice(-10))
           .filter(Boolean)
       );
 
       result = result.filter(f => {
-        if (f.status !== 'Pending') return true;
-        if (f.contactId && f.contactId !== 'contact-new' && niJunkLeadIds.has(f.contactId))
+        if (f.contactId && f.contactId !== 'contact-new' && otherLeadIds.has(String(f.contactId)))
           return false;
         const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        if (fPhone && niJunkPhones.has(fPhone)) return false;
+        if (fPhone && otherPhones.has(fPhone)) return false;
         return true;
       });
     } catch (err) {
-      console.error('Error in GHL NI/Junk cross-reference filter:', err);
+      console.error('Error in Other-lead followup filter:', err);
     }
-  }
 
-  // ── Other status leads leave the Follow-ups page (transferred to Other module) ───
-  try {
-    const otherLeadIds = new Set<string>(
-      allLeads
-        .filter((l: Lead) => l.status === 'Other')
-        .map((l: Lead) => String(l.id))
-    );
-    const otherPhones = new Set<string>(
-      allLeads
-        .filter((l: Lead) => l.status === 'Other')
-        .map((l: Lead) => (l.phone || '').replace(/\D/g, '').slice(-10))
-        .filter(Boolean)
-    );
+    // ── Interested leads leave the sales Follow-ups page ───────────────────────
+    // Once a lead is 'Interested' it is tracked in Customer 360, so any still-pending SALES follow-up
+    // for it is hidden. IRM follow-ups are kept: IRMs work Interested leads.
+    if (!isIrm) {
+      try {
+        const interestedLeads = allLeads.filter((l: Lead) => l.status === 'Interested');
+        const interestedLeadIds = new Set<string>(interestedLeads.map((l: Lead) => String(l.id)));
+        const interestedPhones = new Set<string>(
+          interestedLeads
+            .map((l: Lead) => (l.phone || '').replace(/\D/g, '').slice(-10))
+            .filter(Boolean)
+        );
 
-    result = result.filter(f => {
-      if (f.contactId && f.contactId !== 'contact-new' && otherLeadIds.has(String(f.contactId)))
-        return false;
-      const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-      if (fPhone && otherPhones.has(fPhone)) return false;
-      return true;
-    });
-  } catch (err) {
-    console.error('Error in Other-lead followup filter:', err);
-  }
-
-  // ── Interested leads leave the sales Follow-ups page ───────────────────────
-  // Once a lead is 'Interested' it is tracked in Customer 360, so any still-pending SALES follow-up
-  // for it is hidden. IRM follow-ups are kept: IRMs work Interested leads.
-  if (!isIrm) {
-    try {
-      const interestedLeads = allLeads.filter((l: Lead) => l.status === 'Interested');
-      const interestedLeadIds = new Set<string>(interestedLeads.map((l: Lead) => String(l.id)));
-      const interestedPhones = new Set<string>(
-        interestedLeads
-          .map((l: Lead) => (l.phone || '').replace(/\D/g, '').slice(-10))
-          .filter(Boolean)
-      );
-
-      result = result.filter(f => {
-        if (f.status !== 'Pending') return true;
-        if (f.contactType && f.contactType !== 'lead') return true;
-        if (getFollowupRole(f) === 'IRM') return true;
-        if (f.contactId && f.contactId !== 'contact-new' && interestedLeadIds.has(String(f.contactId)))
-          return false;
-        const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-        if (fPhone && interestedPhones.has(fPhone)) return false;
-        return true;
-      });
-    } catch (err) {
-      console.error('Error in Interested-lead followup filter:', err);
+        result = result.filter(f => {
+          if (f.status !== 'Pending') return true;
+          if (f.contactType && f.contactType !== 'lead') return true;
+          if (getFollowupRole(f) === 'IRM') return true;
+          if (f.contactId && f.contactId !== 'contact-new' && interestedLeadIds.has(String(f.contactId)))
+            return false;
+          const fPhone = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+          if (fPhone && interestedPhones.has(fPhone)) return false;
+          return true;
+        });
+      } catch (err) {
+        console.error('Error in Interested-lead followup filter:', err);
+      }
     }
-  }
 
-  return result;
-}, [
-  isAdmin,
-  isExec,
-  isIrm,
-  isGhlSalesExec,
-  isGhlAdmin,
-  followups,
-  allLeads,
-  selectedRole,
-  selectedPerson,
-  isFollowupInDateFilter,
-  tenant?.id,
-  user?.id,
-  user?.name,
-  irmSummaryData,
-  getFollowupRole,
-]);
-
-const completedFollowups = useMemo(
-  () => processedFollowups.filter(f => f.status === 'Completed'),
-  [processedFollowups]
-);
-
-const dueTodayFollowups = useMemo(
-  () => processedFollowups.filter(f => f.status === 'Pending' && isFollowupToday(f)),
-  [processedFollowups]
-);
-
-const overdueFollowups = useMemo(
-  () => processedFollowups.filter(f => f.status === 'Pending' && isFollowupOverdue(f) && !isFollowupToday(f)),
-  [processedFollowups]
-);
-
-const getCallCountForFollowup = (f: Followup): number => {
-  return callsList.filter((c: CallRecord) => {
-    if (f.leadId && c.leadId && String(c.leadId) === String(f.leadId)) return true;
-    if (f.customerId && c.customerId && String(c.customerId) === String(f.customerId)) return true;
-    if (f.contactId && f.contactId !== 'contact-new' && (String(c.leadId) === String(f.contactId) || (c as any).contactId === String(f.contactId))) return true;
-
-    const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
-    const cPhoneDigits = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
-    if (fPhoneDigits && cPhoneDigits && fPhoneDigits === cPhoneDigits && !f.leadId && !f.customerId && fPhoneDigits !== '1234567890') {
-      return true;
-    }
-    return false;
-  }).length;
-};
+    return result;
+  }, [
+    isAdmin,
+    isExec,
+    isIrm,
+    isGhlSalesExec,
+    isGhlAdmin,
+    followups,
+    allLeads,
+    selectedRole,
+    selectedPerson,
+    isFollowupInDateFilter,
+    tenant?.id,
+    user?.id,
+    user?.name,
+    irmSummaryData,
+    getFollowupRole,
+  ]);
 
   const handoverOptions = useMemo(() => {
     const coveringNames = Array.from(new Set(processedFollowups.map(f => f.handedOverFromName).filter((n): n is string => Boolean(n))));
@@ -1635,40 +1595,81 @@ const getCallCountForFollowup = (f: Followup): number => {
     ];
   }, [processedFollowups]);
 
-  const activePendingFollowups = processedFollowups.filter(f => {
-    if (f.status !== 'Pending') return false;
-    if (handoverOptions.length > 0) {
-      if (handoverFilter === 'Mine' && (f.handoverId || isFollowupReturned(f))) return false;
-      if (handoverFilter === 'Returned') {
-        if (!isFollowupReturned(f)) return false;
-      } else if (handoverFilter.startsWith('Returned_')) {
-        const name = handoverFilter.replace('Returned_', '');
-        if (!isFollowupReturned(f) || getFollowupReturnedCoveringName(f) !== name) return false;
-      } else if (handoverFilter.startsWith('Handover_')) {
-        const name = handoverFilter.replace('Handover_', '');
-        if (f.handedOverFromName !== name) return false;
+  const handoverScopedFollowups = useMemo(() => {
+    return processedFollowups.filter(f => {
+      if (handoverOptions.length > 0) {
+        if (handoverFilter === 'Mine' && (f.handoverId || isFollowupReturned(f))) return false;
+        if (handoverFilter === 'Returned') {
+          if (!isFollowupReturned(f)) return false;
+        } else if (handoverFilter.startsWith('Returned_')) {
+          const name = handoverFilter.replace('Returned_', '');
+          if (!isFollowupReturned(f) || getFollowupReturnedCoveringName(f) !== name) return false;
+        } else if (handoverFilter.startsWith('Handover_')) {
+          const name = handoverFilter.replace('Handover_', '');
+          if (f.handedOverFromName !== name) return false;
+        }
       }
-    }
-    return true;
-  });
+      return true;
+    });
+  }, [processedFollowups, handoverOptions, handoverFilter]);
+
+  const completedFollowups = useMemo(
+    () => handoverScopedFollowups.filter(f => f.status === 'Completed'),
+    [handoverScopedFollowups]
+  );
+
+  const dueTodayFollowups = useMemo(
+    () => handoverScopedFollowups.filter(f => f.status === 'Pending' && isFollowupToday(f)),
+    [handoverScopedFollowups]
+  );
+
+  const overdueFollowups = useMemo(
+    () => handoverScopedFollowups.filter(f => f.status === 'Pending' && isFollowupOverdue(f) && !isFollowupToday(f)),
+    [handoverScopedFollowups]
+  );
+
+  const activePendingFollowups = useMemo(() => {
+    return handoverScopedFollowups.filter(f => f.status === 'Pending');
+  }, [handoverScopedFollowups]);
+
+  const getCallCountForFollowup = (f: Followup): number => {
+    return callsList.filter((c: CallRecord) => {
+      if (f.leadId && c.leadId && String(c.leadId) === String(f.leadId)) return true;
+      if (f.customerId && c.customerId && String(c.customerId) === String(f.customerId)) return true;
+      if (f.contactId && f.contactId !== 'contact-new' && (String(c.leadId) === String(f.contactId) || (c as any).contactId === String(f.contactId))) return true;
+
+      const fPhoneDigits = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+      const cPhoneDigits = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
+      if (fPhoneDigits && cPhoneDigits && fPhoneDigits === cPhoneDigits && !f.leadId && !f.customerId && fPhoneDigits !== '1234567890') {
+        return true;
+      }
+      return false;
+    }).length;
+  };
 
   // Base list for current role/date-filtering
   const dateScopedFollowups = useMemo(() => {
-    if (!isIrm) return activePendingFollowups;
+    if (!isIrm) return handoverScopedFollowups;
     return activePendingFollowups.filter(isFollowupInIrmDateRange);
-  }, [isIrm, activePendingFollowups, isFollowupInIrmDateRange]);
+  }, [isIrm, handoverScopedFollowups, activePendingFollowups, isFollowupInIrmDateRange]);
 
-  const filteredFollowups = dateScopedFollowups.filter(f => {
-    if (!isIrm) {
-      if (activeTab === 'due') {
-        return isFollowupToday(f);
+  const filteredFollowups = useMemo(() => {
+    return dateScopedFollowups.filter(f => {
+      if (!isIrm) {
+        if (activeTab === 'due') {
+          return f.status === 'Pending' && isFollowupToday(f);
+        }
+        if (activeTab === 'overdue') {
+          return f.status === 'Pending' && isFollowupOverdue(f) && !isFollowupToday(f);
+        }
+        if (activeTab === 'completed') {
+          return f.status === 'Completed';
+        }
+        return true;
       }
-      if (activeTab === 'overdue') {
-        return isFollowupOverdue(f) && !isFollowupToday(f);
-      }
-    }
-    return true;
-  });
+      return true;
+    });
+  }, [dateScopedFollowups, isIrm, activeTab]);
 
   const drawerFollowupRole = drawerFollowup ? getFollowupRole(drawerFollowup) : '';
 
@@ -1716,7 +1717,7 @@ const getCallCountForFollowup = (f: Followup): number => {
       {isAdmin && (
         <div className="admin-followup-filterbar">
           <div className="admin-followup-filter-group">
-{/* 1. Role Filter (Hidden for Jamin because all Jamin agents are Sales Executives) */}
+            {/* 1. Role Filter (Hidden for Jamin because all Jamin agents are Sales Executives) */}
             {!isJamin && (
               <div className="followup-filter-item">
                 <span className="followup-filter-label">
@@ -1739,7 +1740,7 @@ const getCallCountForFollowup = (f: Followup): number => {
             <div className="followup-filter-item">
               <label htmlFor="admin-followup-person" className="followup-filter-label">
                 <User size={14} color="var(--text-muted)" />
-{isJamin ? 'Sales Executive:' : 'Person:'}
+                {isJamin ? 'Sales Executive:' : 'Person:'}
               </label>
               <select
                 id="admin-followup-person"
@@ -1778,7 +1779,7 @@ const getCallCountForFollowup = (f: Followup): number => {
                 value={dateRangePreset}
                 onChange={e => setDateRangePreset(e.target.value as DateRangePreset)}
               >
-<option value="all">All Time</option>
+                <option value="all">All Time</option>
                 <option value="today">Today</option>
                 <option value="this_week">This Week</option>
                 <option value="this_month">This Month</option>
@@ -1817,7 +1818,7 @@ const getCallCountForFollowup = (f: Followup): number => {
           {/* Right Section: Role Mode Tag & Total Count */}
           <div className="admin-followup-meta-group">
             <span
-className={`followup-role-tag ${!isJamin && selectedRole === 'irm' ? 'tag-irm' : 'tag-sales-exec'
+              className={`followup-role-tag ${!isJamin && selectedRole === 'irm' ? 'tag-irm' : 'tag-sales-exec'
                 }`}
             >
               {!isJamin && selectedRole === 'irm' ? (
@@ -1832,13 +1833,13 @@ className={`followup-role-tag ${!isJamin && selectedRole === 'irm' ? 'tag-irm' :
             </span>
 
             <span className="followup-total-badge">
-              Total Tasks: <strong>{activePendingFollowups.length}</strong>
+              Total Tasks: <strong>{handoverScopedFollowups.length}</strong>
             </span>
           </div>
         </div>
       )}
 
-{/* ── IRM Date Range Filter Bar (Only for IRM) - Red and Black Theme ── */}
+      {/* ── IRM Date Range Filter Bar (Only for IRM) - Red and Black Theme ── */}
       {isIrm && (
         <div className="irm-followup-filterbar">
           <div className="irm-followup-filter-left">
@@ -1971,7 +1972,7 @@ className={`followup-role-tag ${!isJamin && selectedRole === 'irm' ? 'tag-irm' :
         <div className="followups-tabs-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {[
-              { id: 'all', label: `All Tasks (${processedFollowups.length})` },
+              { id: 'all', label: `All (${handoverScopedFollowups.length})` },
               {
                 id: 'due',
                 label: `Due Today (${dueTodayFollowups.length})`,
@@ -2047,7 +2048,7 @@ className={`followup-role-tag ${!isJamin && selectedRole === 'irm' ? 'tag-irm' :
           </div>
         ) : (
           filteredFollowups.map(f => {
-const schedStr = (f.scheduledAt || '').trim();
+            const schedStr = (f.scheduledAt || '').trim();
             const dateStr = (f.scheduledDate || '').trim();
             const now = new Date();
 
@@ -2142,7 +2143,7 @@ const schedStr = (f.scheduledAt || '').trim();
                         {f.contactName}
                       </span>
 
-{f.status === 'Completed' ? (
+                      {f.status === 'Completed' ? (
                         <span className="badge-completed-pill">
                           <CheckCircle size={11} /> Completed
                         </span>
@@ -2153,7 +2154,7 @@ const schedStr = (f.scheduledAt || '').trim();
                       ) : (
                         <StatusChip status={f.priority} size="sm" />
                       )}
-{f.handedOverFromName && (
+                      {f.handedOverFromName && (
                         <span
                           style={{
                             fontSize: 10,
@@ -2216,7 +2217,7 @@ const schedStr = (f.scheduledAt || '').trim();
                     <p className="followup-notes">{f.notes}</p>
 
                     <div className="followup-meta-row">
-{f.status === 'Completed' ? (
+                      {f.status === 'Completed' ? (
                         <span style={{ color: '#16a34a', fontWeight: 600 }}>
                           ✓ Completed: {f.completedAt ? new Date(f.completedAt).toLocaleString() : 'Done'}
                         </span>
@@ -2237,7 +2238,7 @@ const schedStr = (f.scheduledAt || '').trim();
                 </div>
 
                 <div className="followup-actions-right">
-{f.status === 'Completed' ? (
+                  {f.status === 'Completed' ? (
                     <>
                       <button
                         className="btn btn-secondary btn-sm"
@@ -2468,7 +2469,7 @@ const schedStr = (f.scheduledAt || '').trim();
         title="Schedule Prospective Follow-up"
         subtitle="Set task date, time, channel & assigned executive"
       >
-<form onSubmit={handleSaveCreateFollowup} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <form onSubmit={handleSaveCreateFollowup} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {/* Contact Source Type Toggle */}
           <div className="form-group">
             <label className="form-label" style={{ fontWeight: 600, marginBottom: 8, display: 'block' }}>Contact Source</label>
@@ -2775,7 +2776,7 @@ const schedStr = (f.scheduledAt || '').trim();
           title={drawerFollowup?.contactName || 'Contact Profile'}
           subtitle={
             isAdmin
-? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned to: ${drawerFollowup?.assignedAgentName || 'Unassigned'
+              ? `Phone: ${drawerFollowup?.contactPhone || '—'} • Assigned to: ${drawerFollowup?.assignedAgentName || 'Unassigned'
               } (${drawerFollowupRole})`
               : drawerFollowup?.contactPhone
                 ? `Phone: ${drawerFollowup.contactPhone} • ${tenant?.name || 'GHL India'}`
@@ -2784,7 +2785,7 @@ const schedStr = (f.scheduledAt || '').trim();
           width={720}
           footer={
             drawerFollowup && (
-<div style={{ display: 'flex', alignItems: 'center', justifyContent: (isJamin || isExec) ? 'flex-end' : 'space-between', width: '100%', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: (isJamin || isExec) ? 'flex-end' : 'space-between', width: '100%', gap: 10 }}>
                 {/* Ready for KYC button (Only for GHL IRM / Wealth Admins; NEVER for Jamin Real Estate) */}
                 {!isJamin && !isExec && (
                   <button
@@ -2808,7 +2809,7 @@ const schedStr = (f.scheduledAt || '').trim();
                 )}
 
                 {/* Right side buttons */}
-<div style={{ display: 'flex', gap: 10, marginLeft: isExec ? 'auto' : undefined }}>
+                <div style={{ display: 'flex', gap: 10, marginLeft: isExec ? 'auto' : undefined }}>
                   {!(isGhlAdmin && drawerFollowupRole === 'IRM') && (
                     <button
                       className="btn btn-secondary"
@@ -2841,7 +2842,7 @@ const schedStr = (f.scheduledAt || '').trim();
           }
         >
           {drawerFollowup && (() => {
-const leads = (allLeads && allLeads.length > 0) ? allLeads : (storageService.getLeads(tenant?.id) || []);
+            const leads = (allLeads && allLeads.length > 0) ? allLeads : (storageService.getLeads(tenant?.id) || []);
             const customers = storageService.getCustomers(tenant?.id) || [];
             const fDigits = (drawerFollowup.contactPhone || '').replace(/\D/g, '').slice(-10);
 
@@ -2897,10 +2898,10 @@ const leads = (allLeads && allLeads.length > 0) ? allLeads : (storageService.get
 
             const userMessage = rawInquiry
               ? rawInquiry
-                  .split('\n')
-                  .filter((l: string) => !l.includes('Follow-up completed:') && !l.startsWith('[Reassigned to'))
-                  .join('\n')
-                  .trim() || null
+                .split('\n')
+                .filter((l: string) => !l.includes('Follow-up completed:') && !l.startsWith('[Reassigned to'))
+                .join('\n')
+                .trim() || null
               : null;
 
             // Follow-up's own notes (scheduled purpose / agent remarks)
@@ -2910,10 +2911,10 @@ const leads = (allLeads && allLeads.length > 0) ? allLeads : (storageService.get
             const rawLeadNotes = matchingLead?.notes || matchingCustomer?.notes || null;
             const leadNotes = rawLeadNotes
               ? rawLeadNotes
-                  .split('\n')
-                  .filter((l: string) => !l.includes('Follow-up completed:') && !l.startsWith('[Reassigned to'))
-                  .join('\n')
-                  .trim() || null
+                .split('\n')
+                .filter((l: string) => !l.includes('Follow-up completed:') && !l.startsWith('[Reassigned to'))
+                .join('\n')
+                .trim() || null
               : null;
 
             const isExcludedCustomField = (key: string, label?: string) => {
@@ -3072,7 +3073,7 @@ const leads = (allLeads && allLeads.length > 0) ? allLeads : (storageService.get
                   </div>
                 </div>
 
-                  {/* ── Jamin: Property & Budget Requirements | GHL: Investment Details & Custom Attributes ── */}
+                {/* ── Jamin: Property & Budget Requirements | GHL: Investment Details & Custom Attributes ── */}
                 {isJamin ? (
                   <div className="card lead-custom-card">
                     <h4 className="lead-custom-title" style={{ margin: '0 0 12px 0' }}>Requirements &amp; Project Preferences</h4>
@@ -3100,305 +3101,305 @@ const leads = (allLeads && allLeads.length > 0) ? allLeads : (storageService.get
                 ) : (
                   <>
                     {/* ── Investment Capacity ── */}
-                <div className="card lead-custom-card">
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <h4 className="lead-custom-title" style={{ margin: 0 }}>Investment Details</h4>
-                    {isIrm && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm btn-icon"
-                        title={isEditingCapacity ? 'Cancel edit' : 'Edit Investment Capacity'}
-                        style={{ width: 28, height: 28 }}
-                        onClick={() => setIsEditingCapacity(prev => !prev)}
-                      >
-                        <Pencil size={13} />
-                      </button>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div>
-                      <label htmlFor="followup-drawer-capacity" className="lead-detail-label">Investment Capacity:</label>
-                      {isEditingCapacity ? (
-                        <div style={{ marginTop: 6 }}>
-                          <select
-                            id="followup-drawer-capacity"
-                            name="capacityValue"
-                            className="form-select"
-                            value={capacityValue}
-                            onChange={e => setCapacityValue(e.target.value)}
-                            style={{ width: '100%', fontSize: 13, height: 36 }}
-                          >
-                            <option value="">— Select —</option>
-                            {capacityValue && !INVESTMENT_CAPACITY_OPTIONS.includes(capacityValue) && (
-                              <option value={capacityValue}>{capacityValue}</option>
-                            )}
-                            {INVESTMENT_CAPACITY_OPTIONS.map(opt => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => setIsEditingCapacity(false)}
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-sm"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                              onClick={() => handleSaveCapacity(matchingLead, matchingCustomer)}
-                            >
-                              <CheckCircle size={14} /> Save
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          className="lead-detail-value"
-                          style={{
-                            marginTop: 4,
-                            fontSize: (capacityValue || investmentCapacity) && (capacityValue || investmentCapacity) !== '—' ? 16 : 13,
-                            fontWeight: 700,
-                            color: '#10b981',
-                            letterSpacing: '0.01em',
-                          }}
-                        >
-                          {(capacityValue || investmentCapacity) && (capacityValue || investmentCapacity) !== '—' ? (
-                            capacityValue || investmentCapacity
-                          ) : (
-                            <span className="not-specified-badge">Not Specified</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* ── Investment Amount (Separate from Capacity & Asset Class) ── */}
-                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <label htmlFor="followup-drawer-investment-amount" className="lead-detail-label">Investment Amount:</label>
+                    <div className="card lead-custom-card">
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <h4 className="lead-custom-title" style={{ margin: 0 }}>Investment Details</h4>
                         {isIrm && (
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm btn-icon"
-                            title={isEditingAmount ? 'Cancel edit' : 'Edit Investment Amount'}
+                            title={isEditingCapacity ? 'Cancel edit' : 'Edit Investment Capacity'}
                             style={{ width: 28, height: 28 }}
-                            onClick={() => setIsEditingAmount(prev => !prev)}
+                            onClick={() => setIsEditingCapacity(prev => !prev)}
                           >
                             <Pencil size={13} />
                           </button>
                         )}
                       </div>
-                      {isEditingAmount ? (
-                        <div style={{ marginTop: 6 }}>
-                          <input
-                            id="followup-drawer-investment-amount"
-                            name="investmentAmount"
-                            type="number"
-                            className="form-input"
-                            placeholder="e.g. 5000000"
-                            value={investmentAmountValue}
-                            onChange={e => setInvestmentAmountValue(e.target.value)}
-                            style={{ width: '100%', fontSize: 13, height: 36 }}
-                          />
-                          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => setIsEditingAmount(false)}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div>
+                          <label htmlFor="followup-drawer-capacity" className="lead-detail-label">Investment Capacity:</label>
+                          {isEditingCapacity ? (
+                            <div style={{ marginTop: 6 }}>
+                              <select
+                                id="followup-drawer-capacity"
+                                name="capacityValue"
+                                className="form-select"
+                                value={capacityValue}
+                                onChange={e => setCapacityValue(e.target.value)}
+                                style={{ width: '100%', fontSize: 13, height: 36 }}
+                              >
+                                <option value="">— Select —</option>
+                                {capacityValue && !INVESTMENT_CAPACITY_OPTIONS.includes(capacityValue) && (
+                                  <option value={capacityValue}>{capacityValue}</option>
+                                )}
+                                {INVESTMENT_CAPACITY_OPTIONS.map(opt => (
+                                  <option key={opt} value={opt}>
+                                    {opt}
+                                  </option>
+                                ))}
+                              </select>
+                              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => setIsEditingCapacity(false)}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-sm"
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                  onClick={() => handleSaveCapacity(matchingLead, matchingCustomer)}
+                                >
+                                  <CheckCircle size={14} /> Save
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              className="lead-detail-value"
+                              style={{
+                                marginTop: 4,
+                                fontSize: (capacityValue || investmentCapacity) && (capacityValue || investmentCapacity) !== '—' ? 16 : 13,
+                                fontWeight: 700,
+                                color: '#10b981',
+                                letterSpacing: '0.01em',
+                              }}
                             >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-sm"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                              onClick={() => handleSaveInvestmentAmount(matchingLead, matchingCustomer)}
-                            >
-                              <CheckCircle size={14} /> Save
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          className="lead-detail-value"
-                          style={{
-                            marginTop: 4,
-                            fontSize: 16,
-                            fontWeight: 700,
-                            color: investmentAmountValue && parseFloat(investmentAmountValue) > 0 ? '#059669' : 'var(--text-muted)',
-                            letterSpacing: '0.01em',
-                          }}
-                        >
-                          {investmentAmountValue && parseFloat(investmentAmountValue) > 0
-                            ? `₹${parseFloat(investmentAmountValue).toLocaleString('en-IN')}`
-                            : '—'}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* ── GHL India Ventures Custom Attributes (with Set by IRM Checkbox) ── */}
-                {!isExec && (
-                  <div className="card lead-custom-card">
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <h4 className="lead-custom-title" style={{ margin: 0 }}>
-                        {tenant?.name || 'GHL India Ventures'} Custom Attributes
-                      </h4>
-                      <label htmlFor="followup-drawer-set-by-irm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: isGhlAdmin ? 'default' : 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
-                        <input
-                          id="followup-drawer-set-by-irm"
-                          name="setByIrm"
-                          type="checkbox"
-                          checked={Boolean(isPrefConfirmed)}
-                          disabled={isGhlAdmin}
-                          onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
-                          style={{ width: 16, height: 16, cursor: isGhlAdmin ? 'not-allowed' : 'pointer', accentColor: 'var(--primary-600)' }}
-                        />
-                        <span>Set by IRM {isGhlAdmin && '(Read-only)'}</span>
-                      </label>
-                    </div>
-
-                    {!isGhlAdmin && isEditingPref ? (
-                      <div>
-                        <div className="lead-detail-grid" style={{ gap: 14 }}>
-                          <div>
-                            <label htmlFor="followup-drawer-pref-asset-class" className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
-                              Preferred Asset Class:
-                            </label>
-                            <select
-                              id="followup-drawer-pref-asset-class"
-                              name="preferredAssetClass"
-                              className="form-select"
-                              value={prefAssetClass}
-                              onChange={e => setPrefAssetClass(e.target.value)}
-                              style={{ width: '100%', fontSize: 13, height: 36 }}
-                            >
-                              <option value="">— Select Asset Class —</option>
-                              <option value="CO-AIF">CO-AIF</option>
-                              <option value="AIF">AIF</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label htmlFor="followup-drawer-pref-horizon" className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
-                              Investment Horizon:
-                            </label>
-                            <select
-                              id="followup-drawer-pref-horizon"
-                              name="investmentHorizon"
-                              className="form-select"
-                              value={prefHorizon}
-                              onChange={e => setPrefHorizon(e.target.value)}
-                              style={{ width: '100%', fontSize: 13, height: 36 }}
-                            >
-                              <option value="">— Select Horizon —</option>
-                              <option value="1-2 Years">1-2 Years</option>
-                              <option value="3-5 Years">3-5 Years</option>
-                              <option value="5-7 Years">5-7 Years</option>
-                              <option value="7-10 Years">7-10 Years</option>
-                              <option value="10+ Years">10+ Years</option>
-                            </select>
-                          </div>
+                              {(capacityValue || investmentCapacity) && (capacityValue || investmentCapacity) !== '—' ? (
+                                capacityValue || investmentCapacity
+                              ) : (
+                                <span className="not-specified-badge">Not Specified</span>
+                              )}
+                            </div>
+                          )}
                         </div>
 
-                        <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => {
-                              setIsEditingPref(false);
-                              if (!isPrefConfirmed) {
-                                setPrefAssetClass('');
-                                setPrefHorizon('');
-                              }
-                            }}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                            onClick={() => handleSavePreferences(matchingLead, matchingCustomer)}
-                          >
-                            <CheckCircle size={14} /> Confirm Preferences
-                          </button>
+                        {/* ── Investment Amount (Separate from Capacity & Asset Class) ── */}
+                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <label htmlFor="followup-drawer-investment-amount" className="lead-detail-label">Investment Amount:</label>
+                            {isIrm && (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm btn-icon"
+                                title={isEditingAmount ? 'Cancel edit' : 'Edit Investment Amount'}
+                                style={{ width: 28, height: 28 }}
+                                onClick={() => setIsEditingAmount(prev => !prev)}
+                              >
+                                <Pencil size={13} />
+                              </button>
+                            )}
+                          </div>
+                          {isEditingAmount ? (
+                            <div style={{ marginTop: 6 }}>
+                              <input
+                                id="followup-drawer-investment-amount"
+                                name="investmentAmount"
+                                type="number"
+                                className="form-input"
+                                placeholder="e.g. 5000000"
+                                value={investmentAmountValue}
+                                onChange={e => setInvestmentAmountValue(e.target.value)}
+                                style={{ width: '100%', fontSize: 13, height: 36 }}
+                              />
+                              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => setIsEditingAmount(false)}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-sm"
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                  onClick={() => handleSaveInvestmentAmount(matchingLead, matchingCustomer)}
+                                >
+                                  <CheckCircle size={14} /> Save
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              className="lead-detail-value"
+                              style={{
+                                marginTop: 4,
+                                fontSize: 16,
+                                fontWeight: 700,
+                                color: investmentAmountValue && parseFloat(investmentAmountValue) > 0 ? '#059669' : 'var(--text-muted)',
+                                letterSpacing: '0.01em',
+                              }}
+                            >
+                              {investmentAmountValue && parseFloat(investmentAmountValue) > 0
+                                ? `₹${parseFloat(investmentAmountValue).toLocaleString('en-IN')}`
+                                : '—'}
+                            </div>
+                          )}
                         </div>
                       </div>
-                    ) : (
-                      <div>
-                        <div className="lead-detail-grid">
-                          <div>
-                            <span className="lead-custom-label">Preferred Asset Class:</span>
-                            <div
-                              className="lead-custom-value"
-                              style={{
-                                color: isPrefConfirmed && prefAssetClass ? 'var(--text-primary)' : 'var(--text-muted)',
-                              }}
-                            >
-                              {isPrefConfirmed && prefAssetClass && prefAssetClass !== '—' ? (
-                                prefAssetClass
-                              ) : (
-                                <span className="not-specified-badge">Not Specified</span>
-                              )}
-                            </div>
-                          </div>
-                          <div>
-                            <span className="lead-custom-label">Investment Horizon:</span>
-                            <div
-                              className="lead-custom-value"
-                              style={{
-                                color: isPrefConfirmed && prefHorizon ? 'var(--text-primary)' : 'var(--text-muted)',
-                              }}
-                            >
-                              {isPrefConfirmed && prefHorizon && prefHorizon !== '—' ? (
-                                prefHorizon
-                              ) : (
-                                <span className="not-specified-badge">Not Specified</span>
-                              )}
-                            </div>
-                          </div>
+                    </div>
+
+                    {/* ── GHL India Ventures Custom Attributes (with Set by IRM Checkbox) ── */}
+                    {!isExec && (
+                      <div className="card lead-custom-card">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                          <h4 className="lead-custom-title" style={{ margin: 0 }}>
+                            {tenant?.name || 'GHL India Ventures'} Custom Attributes
+                          </h4>
+                          <label htmlFor="followup-drawer-set-by-irm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: isGhlAdmin ? 'default' : 'pointer', fontWeight: 600, color: 'var(--text-primary)' }}>
+                            <input
+                              id="followup-drawer-set-by-irm"
+                              name="setByIrm"
+                              type="checkbox"
+                              checked={Boolean(isPrefConfirmed)}
+                              disabled={isGhlAdmin}
+                              onChange={e => handleTogglePrefCheckbox(e.target.checked, matchingLead, matchingCustomer)}
+                              style={{ width: 16, height: 16, cursor: isGhlAdmin ? 'not-allowed' : 'pointer', accentColor: 'var(--primary-600)' }}
+                            />
+                            <span>Set by IRM {isGhlAdmin && '(Read-only)'}</span>
+                          </label>
                         </div>
 
-                        {isPrefConfirmed ? (
-                          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
-                              <CheckCircle size={13} /> Confirmed by IRM — Visible in other modules
+                        {!isGhlAdmin && isEditingPref ? (
+                          <div>
+                            <div className="lead-detail-grid" style={{ gap: 14 }}>
+                              <div>
+                                <label htmlFor="followup-drawer-pref-asset-class" className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                                  Preferred Asset Class:
+                                </label>
+                                <select
+                                  id="followup-drawer-pref-asset-class"
+                                  name="preferredAssetClass"
+                                  className="form-select"
+                                  value={prefAssetClass}
+                                  onChange={e => setPrefAssetClass(e.target.value)}
+                                  style={{ width: '100%', fontSize: 13, height: 36 }}
+                                >
+                                  <option value="">— Select Asset Class —</option>
+                                  <option value="CO-AIF">CO-AIF</option>
+                                  <option value="AIF">AIF</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label htmlFor="followup-drawer-pref-horizon" className="lead-custom-label" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                                  Investment Horizon:
+                                </label>
+                                <select
+                                  id="followup-drawer-pref-horizon"
+                                  name="investmentHorizon"
+                                  className="form-select"
+                                  value={prefHorizon}
+                                  onChange={e => setPrefHorizon(e.target.value)}
+                                  style={{ width: '100%', fontSize: 13, height: 36 }}
+                                >
+                                  <option value="">— Select Horizon —</option>
+                                  <option value="1-2 Years">1-2 Years</option>
+                                  <option value="3-5 Years">3-5 Years</option>
+                                  <option value="5-7 Years">5-7 Years</option>
+                                  <option value="7-10 Years">7-10 Years</option>
+                                  <option value="10+ Years">10+ Years</option>
+                                </select>
+                              </div>
                             </div>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              style={{ fontSize: 11, padding: '3px 8px', height: 'auto' }}
-                              onClick={() => setIsEditingPref(true)}
-                            >
-                              Edit
-                            </button>
+
+                            <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => {
+                                  setIsEditingPref(false);
+                                  if (!isPrefConfirmed) {
+                                    setPrefAssetClass('');
+                                    setPrefHorizon('');
+                                  }
+                                }}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                                onClick={() => handleSavePreferences(matchingLead, matchingCustomer)}
+                              >
+                                <CheckCircle size={14} /> Confirm Preferences
+                              </button>
+                            </div>
                           </div>
                         ) : (
-                          <div style={{ marginTop: 10, padding: '10px 12px', background: 'var(--bg-surface)', borderRadius: 6, fontSize: 11.5, color: 'var(--text-muted)' }}>
-                            Preferred Asset Class and Investment Horizon have not been set by IRM yet. Check <strong>"Set by IRM"</strong> above to configure and confirm them.
+                          <div>
+                            <div className="lead-detail-grid">
+                              <div>
+                                <span className="lead-custom-label">Preferred Asset Class:</span>
+                                <div
+                                  className="lead-custom-value"
+                                  style={{
+                                    color: isPrefConfirmed && prefAssetClass ? 'var(--text-primary)' : 'var(--text-muted)',
+                                  }}
+                                >
+                                  {isPrefConfirmed && prefAssetClass && prefAssetClass !== '—' ? (
+                                    prefAssetClass
+                                  ) : (
+                                    <span className="not-specified-badge">Not Specified</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <span className="lead-custom-label">Investment Horizon:</span>
+                                <div
+                                  className="lead-custom-value"
+                                  style={{
+                                    color: isPrefConfirmed && prefHorizon ? 'var(--text-primary)' : 'var(--text-muted)',
+                                  }}
+                                >
+                                  {isPrefConfirmed && prefHorizon && prefHorizon !== '—' ? (
+                                    prefHorizon
+                                  ) : (
+                                    <span className="not-specified-badge">Not Specified</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {isPrefConfirmed ? (
+                              <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                  <CheckCircle size={13} /> Confirmed by IRM — Visible in other modules
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ fontSize: 11, padding: '3px 8px', height: 'auto' }}
+                                  onClick={() => setIsEditingPref(true)}
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ marginTop: 10, padding: '10px 12px', background: 'var(--bg-surface)', borderRadius: 6, fontSize: 11.5, color: 'var(--text-muted)' }}>
+                                Preferred Asset Class and Investment Horizon have not been set by IRM yet. Check <strong>"Set by IRM"</strong> above to configure and confirm them.
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Any other custom attributes from intake */}
+                        {customFieldRows.length > 0 && (
+                          <div className="lead-detail-grid" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-base)' }}>
+                            {customFieldRows.map(item => (
+                              <div key={item!.id}>
+                                <span className="lead-custom-label">{item!.label}:</span>
+                                <div className="lead-custom-value">{item!.value}</div>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>
                     )}
-
-                    {/* Any other custom attributes from intake */}
-                    {customFieldRows.length > 0 && (
-                      <div className="lead-detail-grid" style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-base)' }}>
-                        {customFieldRows.map(item => (
-                          <div key={item!.id}>
-                            <span className="lead-custom-label">{item!.label}:</span>
-                            <div className="lead-custom-value">{item!.value}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
                   </>
                 )}
 
