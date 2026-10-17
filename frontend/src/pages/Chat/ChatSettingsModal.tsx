@@ -3,7 +3,6 @@ import { Modal } from '../../components/common/Modal';
 import {
   Bell,
   Shield,
-  PhoneCall,
   Sliders,
   Users,
   Pin,
@@ -12,18 +11,6 @@ import {
   Edit2,
   Check,
   ExternalLink,
-  User,
-  FileText,
-  Folder,
-  Headphones,
-  Lock,
-  Eye,
-  Camera,
-  Mic,
-  VolumeX,
-  Play,
-  Plus,
-  X,
   MessageSquare,
 } from 'lucide-react';
 import { ChatConversation, ChatMember, ChatSettings } from '../../types';
@@ -41,91 +28,32 @@ interface Props {
 
 type SettingsTab =
   | 'general'
-  | 'accounts'
-  | 'privacy'
   | 'notifications'
-  | 'captions'
-  | 'files'
-  | 'devices'
-  | 'permissions'
-  | 'accessibility'
-  | 'calls'
+  | 'privacy'
   | 'conversation'
   | 'admin';
 
 const DEFAULT_SETTINGS: ChatSettings = {
   general: {
     theme: 'default',
-    autoStartApp: true,
-    openInBackground: false,
-    onCloseKeepRunning: true,
-    gpuHardwareAcceleration: true,
-    registerAsDefaultChatApp: true,
     language: 'English (United States)',
-    keyboardLanguage: 'English (United States)',
     turnOffAnimations: false,
     outOfOfficeReply: false,
     outOfOfficeMessage: 'Thank you for reaching out. I am currently out of office.',
-  },
-  accounts: {
-    activeTenant: 'ghl',
   },
   privacy: {
     readReceipts: true,
     typingIndicator: true,
     whoCanDm: 'everyone',
-    priorityAccess: ['Ananya Iyer', 'Karthik Rao'],
-    blockedContacts: [],
-    participateInSurveys: true,
   },
   notifications: {
     desktopPush: true,
     sound: true,
     mentionOnly: false,
-    notificationStyle: 'teams',
     showPreview: true,
-    missedActivityEmails: 'hourly',
-    chatsAndChannels: 'banner_feed',
-    meetingsAndCalls: 'banner',
-  },
-  captions: {
-    autoIdentifyMe: true,
-    spokenLanguage: 'English (United States)',
-    autoStartTranscription: false,
-  },
-  files: {
-    fileOpenPreference: 'teams',
-    downloadLocation: 'C:\\Users\\NexusSales\\Downloads',
-    alwaysAskWhereToSave: false,
-  },
-  calls: {
-    defaultMic: 'default',
-    defaultCamera: 'default',
-    defaultSpeaker: 'default',
-    noiseSuppression: 'auto',
-    secondaryRinger: 'none',
-    cameraOffOnJoin: false,
-    autoAnswer: false,
-    callAnsweringRules: 'ring_me',
-    forwardTo: 'voicemail',
-    ringDurationBeforeRedirect: 20,
-    ringtone: 'Bop',
-  },
-  appPermissions: {
-    media: true,
-    location: true,
-    notifications: true,
-    externalLinks: true,
-    midiDevices: false,
-  },
-  accessibility: {
-    signLanguageView: false,
-    alwaysShowMeetingControls: true,
-    highContrast: false,
   },
   adminGovernance: {
     retentionDays: 0,
-    fileRetentionDays: 0,
     whoCanCreateGroups: 'everyone',
   },
 };
@@ -139,31 +67,21 @@ export const ChatSettingsModal: React.FC<Props> = ({
   onConversationUpdated,
   onNavigate,
 }) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(activeConversation ? 'conversation' : 'general');
   const [settings, setSettings] = useState<ChatSettings>(() => {
     const saved = cs.getChatSettings(companyId, me.id);
     return {
       ...DEFAULT_SETTINGS,
       ...saved,
       general: { ...DEFAULT_SETTINGS.general!, ...(saved?.general || {}) },
-      accounts: { ...DEFAULT_SETTINGS.accounts!, ...(saved?.accounts || {}) },
       privacy: { ...DEFAULT_SETTINGS.privacy, ...(saved?.privacy || {}) },
       notifications: { ...DEFAULT_SETTINGS.notifications, ...(saved?.notifications || {}) },
-      captions: { ...DEFAULT_SETTINGS.captions!, ...(saved?.captions || {}) },
-      files: { ...DEFAULT_SETTINGS.files!, ...(saved?.files || {}) },
-      calls: { ...DEFAULT_SETTINGS.calls, ...(saved?.calls || {}) },
-      appPermissions: { ...DEFAULT_SETTINGS.appPermissions!, ...(saved?.appPermissions || {}) },
-      accessibility: { ...DEFAULT_SETTINGS.accessibility!, ...(saved?.accessibility || {}) },
       adminGovernance: { ...DEFAULT_SETTINGS.adminGovernance!, ...(saved?.adminGovernance || {}) },
     };
   });
 
   const [renameValue, setRenameValue] = useState(activeConversation?.name || '');
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [isTestingAudio, setIsTestingAudio] = useState(false);
-  const [isCameraPreviewOn, setIsCameraPreviewOn] = useState(true);
-  const [newPriorityContact, setNewPriorityContact] = useState('');
-  const [newBlockedContact, setNewBlockedContact] = useState('');
 
   useEffect(() => {
     setRenameValue(activeConversation?.name || '');
@@ -190,58 +108,6 @@ export const ChatSettingsModal: React.FC<Props> = ({
       cs.saveChatSettings(companyId, me.id, updated);
       return updated;
     });
-  };
-
-  // Sound test using Web Audio API oscillator
-  const handleTestAudio = () => {
-    setIsTestingAudio(true);
-    try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
-      osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.15); // A5
-      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.6);
-    } catch (err) {
-      console.warn('Audio test error:', err);
-    }
-    setTimeout(() => setIsTestingAudio(false), 1400);
-  };
-
-  const handleAddPriorityContact = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPriorityContact.trim()) return;
-    const current = settings.privacy.priorityAccess || [];
-    if (!current.includes(newPriorityContact.trim())) {
-      handleSelectChange('privacy', 'priorityAccess', [...current, newPriorityContact.trim()]);
-    }
-    setNewPriorityContact('');
-  };
-
-  const handleRemovePriorityContact = (name: string) => {
-    const current = settings.privacy.priorityAccess || [];
-    handleSelectChange('privacy', 'priorityAccess', current.filter(c => c !== name));
-  };
-
-  const handleAddBlockedContact = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newBlockedContact.trim()) return;
-    const current = settings.privacy.blockedContacts || [];
-    if (!current.includes(newBlockedContact.trim())) {
-      handleSelectChange('privacy', 'blockedContacts', [...current, newBlockedContact.trim()]);
-    }
-    setNewBlockedContact('');
-  };
-
-  const handleRemoveBlockedContact = (name: string) => {
-    const current = settings.privacy.blockedContacts || [];
-    handleSelectChange('privacy', 'blockedContacts', current.filter(c => c !== name));
   };
 
   // Per-conversation actions
@@ -288,39 +154,23 @@ export const ChatSettingsModal: React.FC<Props> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Settings"
-      subtitle="Configure preferences, audio & video devices, privacy, notifications, and application behavior."
-      maxWidth={850}
+      title="Chat Settings"
+      subtitle="Configure notifications, privacy, appearance, and conversation preferences."
+      maxWidth={720}
     >
       <div className="chat-settings-layout">
-        {/* Microsoft Teams Style Navigation Sidebar */}
+        {/* Navigation Sidebar */}
         <div className="chat-settings-nav">
-          <button
-            type="button"
-            className={`chat-settings-nav-item ${activeTab === 'general' ? 'active' : ''}`}
-            onClick={() => setActiveTab('general')}
-          >
-            <Sliders size={16} />
-            <span>General</span>
-          </button>
-
-          <button
-            type="button"
-            className={`chat-settings-nav-item ${activeTab === 'accounts' ? 'active' : ''}`}
-            onClick={() => setActiveTab('accounts')}
-          >
-            <User size={16} />
-            <span>Accounts & orgs</span>
-          </button>
-
-          <button
-            type="button"
-            className={`chat-settings-nav-item ${activeTab === 'privacy' ? 'active' : ''}`}
-            onClick={() => setActiveTab('privacy')}
-          >
-            <Shield size={16} />
-            <span>Privacy</span>
-          </button>
+          {activeConversation && (
+            <button
+              type="button"
+              className={`chat-settings-nav-item ${activeTab === 'conversation' ? 'active' : ''}`}
+              onClick={() => setActiveTab('conversation')}
+            >
+              <MessageSquare size={16} />
+              <span>Current Chat</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -333,65 +183,20 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
           <button
             type="button"
-            className={`chat-settings-nav-item ${activeTab === 'captions' ? 'active' : ''}`}
-            onClick={() => setActiveTab('captions')}
+            className={`chat-settings-nav-item ${activeTab === 'privacy' ? 'active' : ''}`}
+            onClick={() => setActiveTab('privacy')}
           >
-            <FileText size={16} />
-            <span>Captions & transcripts</span>
+            <Shield size={16} />
+            <span>Privacy & Presence</span>
           </button>
 
           <button
             type="button"
-            className={`chat-settings-nav-item ${activeTab === 'files' ? 'active' : ''}`}
-            onClick={() => setActiveTab('files')}
+            className={`chat-settings-nav-item ${activeTab === 'general' ? 'active' : ''}`}
+            onClick={() => setActiveTab('general')}
           >
-            <Folder size={16} />
-            <span>Files and links</span>
-          </button>
-
-          <button
-            type="button"
-            className={`chat-settings-nav-item ${activeTab === 'devices' ? 'active' : ''}`}
-            onClick={() => setActiveTab('devices')}
-          >
-            <Headphones size={16} />
-            <span>Devices</span>
-          </button>
-
-          <button
-            type="button"
-            className={`chat-settings-nav-item ${activeTab === 'permissions' ? 'active' : ''}`}
-            onClick={() => setActiveTab('permissions')}
-          >
-            <Lock size={16} />
-            <span>App permissions</span>
-          </button>
-
-          <button
-            type="button"
-            className={`chat-settings-nav-item ${activeTab === 'accessibility' ? 'active' : ''}`}
-            onClick={() => setActiveTab('accessibility')}
-          >
-            <Eye size={16} />
-            <span>Accessibility</span>
-          </button>
-
-          <button
-            type="button"
-            className={`chat-settings-nav-item ${activeTab === 'calls' ? 'active' : ''}`}
-            onClick={() => setActiveTab('calls')}
-          >
-            <PhoneCall size={16} />
-            <span>Calls</span>
-          </button>
-
-          <button
-            type="button"
-            className={`chat-settings-nav-item ${activeTab === 'conversation' ? 'active' : ''}`}
-            onClick={() => setActiveTab('conversation')}
-          >
-            <MessageSquare size={16} />
-            <span>Active Conversation</span>
+            <Sliders size={16} />
+            <span>Appearance & Display</span>
           </button>
 
           {isAdmin && (
@@ -408,7 +213,211 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
         {/* Tab Panels */}
         <div className="chat-settings-panel">
-          {/* 1. GENERAL */}
+          {/* 1. CURRENT CONVERSATION */}
+          {activeTab === 'conversation' && (
+            <div className="settings-section">
+              <h4 className="settings-section-title">Current Conversation Settings</h4>
+              {!activeConversation ? (
+                <p className="settings-section-sub">Select an active conversation to configure specific settings.</p>
+              ) : (
+                <>
+                  <div className="settings-info-card" style={{ marginBottom: 16 }}>
+                    <div>
+                      <strong style={{ fontSize: 14 }}>{activeConversation.name}</strong>
+                      <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                        Type: {activeConversation.type === 'group' ? 'Group Channel' : 'Direct Message'} • {activeConversation.memberIds?.length || 2} participants
+                      </p>
+                    </div>
+                  </div>
+
+                  {activeConversation.type === 'group' && isManagerOrAdmin && (
+                    <form onSubmit={handleRenameGroup} className="settings-form-row" style={{ marginBottom: 16 }}>
+                      <label htmlFor="settings-conversation-rename" className="settings-label">Rename Group Chat</label>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          id="settings-conversation-rename"
+                          name="renameGroupChat"
+                          type="text"
+                          className="form-input"
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          placeholder="Group name"
+                        />
+                        <button type="submit" className="btn btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          {saveSuccess ? <Check size={14} style={{ color: 'var(--success)' }} /> : <Edit2 size={14} />} Save
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  <div className="settings-actions-grid" style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    <button
+                      type="button"
+                      className={`btn btn-secondary btn-sm ${activeConversation.isPinned ? 'active' : ''}`}
+                      onClick={handleTogglePin}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <Pin size={14} />
+                      <span>{activeConversation.isPinned ? 'Unpin Conversation' : 'Pin to Top'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`btn btn-secondary btn-sm ${activeConversation.isMuted ? 'active' : ''}`}
+                      onClick={handleToggleMute}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <Volume2 size={14} />
+                      <span>{activeConversation.isMuted ? 'Unmute Notifications' : 'Mute Conversation'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: 6 }}
+                      onClick={handleClearHistory}
+                    >
+                      <Trash2 size={14} />
+                      <span>Clear Chat History</span>
+                    </button>
+
+                    {activeConversation.type === 'group' && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ color: 'var(--danger-500)', display: 'flex', alignItems: 'center', gap: 6 }}
+                        onClick={handleLeaveGroup}
+                      >
+                        <Trash2 size={14} />
+                        <span>Leave Group</span>
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* 2. NOTIFICATIONS */}
+          {activeTab === 'notifications' && (
+            <div className="settings-section">
+              <h4 className="settings-section-title">Notification Alerts & Sound</h4>
+
+              <div className="settings-toggle-row">
+                <div>
+                  <label htmlFor="settings-notifications-sound" className="settings-toggle-label">Play Sound for Messages</label>
+                  <div className="settings-toggle-desc">Play an audible chime whenever new messages arrive.</div>
+                </div>
+                <input
+                  id="settings-notifications-sound"
+                  name="sound"
+                  type="checkbox"
+                  className="settings-toggle-input"
+                  checked={settings.notifications.sound}
+                  onChange={() => handleToggle('notifications', 'sound')}
+                />
+              </div>
+
+              <div className="settings-toggle-row">
+                <div>
+                  <label htmlFor="settings-notifications-desktopPush" className="settings-toggle-label">Desktop Push Notifications</label>
+                  <div className="settings-toggle-desc">Show browser popup notifications when you are in another tab or application.</div>
+                </div>
+                <input
+                  id="settings-notifications-desktopPush"
+                  name="desktopPush"
+                  type="checkbox"
+                  className="settings-toggle-input"
+                  checked={settings.notifications.desktopPush}
+                  onChange={() => handleToggle('notifications', 'desktopPush')}
+                />
+              </div>
+
+              <div className="settings-toggle-row">
+                <div>
+                  <label htmlFor="settings-notifications-showPreview" className="settings-toggle-label">Show Message Preview</label>
+                  <div className="settings-toggle-desc">Include message text snippets in popup notification alerts.</div>
+                </div>
+                <input
+                  id="settings-notifications-showPreview"
+                  name="showPreview"
+                  type="checkbox"
+                  className="settings-toggle-input"
+                  checked={settings.notifications.showPreview ?? true}
+                  onChange={() => handleToggle('notifications', 'showPreview')}
+                />
+              </div>
+
+              <div className="settings-toggle-row">
+                <div>
+                  <label htmlFor="settings-notifications-mentionOnly" className="settings-toggle-label">@Mentions Only Mode</label>
+                  <div className="settings-toggle-desc">Only alert me when someone explicitly tags @me or direct messages me.</div>
+                </div>
+                <input
+                  id="settings-notifications-mentionOnly"
+                  name="mentionOnly"
+                  type="checkbox"
+                  className="settings-toggle-input"
+                  checked={settings.notifications.mentionOnly}
+                  onChange={() => handleToggle('notifications', 'mentionOnly')}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* 3. PRIVACY & PRESENCE */}
+          {activeTab === 'privacy' && (
+            <div className="settings-section">
+              <h4 className="settings-section-title">Privacy & Presence</h4>
+
+              <div className="settings-toggle-row">
+                <div>
+                  <label htmlFor="settings-privacy-readReceipts" className="settings-toggle-label">Read Receipts</label>
+                  <div className="settings-toggle-desc">Let colleagues know when you have seen their messages.</div>
+                </div>
+                <input
+                  id="settings-privacy-readReceipts"
+                  name="readReceipts"
+                  type="checkbox"
+                  className="settings-toggle-input"
+                  checked={settings.privacy.readReceipts}
+                  onChange={() => handleToggle('privacy', 'readReceipts')}
+                />
+              </div>
+
+              <div className="settings-toggle-row">
+                <div>
+                  <label htmlFor="settings-privacy-typingIndicator" className="settings-toggle-label">Typing Indicator</label>
+                  <div className="settings-toggle-desc">Display animated "typing…" indicators while you compose messages.</div>
+                </div>
+                <input
+                  id="settings-privacy-typingIndicator"
+                  name="typingIndicator"
+                  type="checkbox"
+                  className="settings-toggle-input"
+                  checked={settings.privacy.typingIndicator}
+                  onChange={() => handleToggle('privacy', 'typingIndicator')}
+                />
+              </div>
+
+              <div className="settings-select-group" style={{ marginTop: 16 }}>
+                <label htmlFor="settings-privacy-whoCanDm" className="settings-label">Who Can Direct Message (DM) Me</label>
+                <select
+                  id="settings-privacy-whoCanDm"
+                  name="whoCanDm"
+                  className="form-input"
+                  value={settings.privacy.whoCanDm}
+                  onChange={e => handleSelectChange('privacy', 'whoCanDm', e.target.value)}
+                >
+                  <option value="everyone">Everyone in my organization</option>
+                  <option value="team">My sales department only</option>
+                  <option value="managers_admins">Managers & Administrators only</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* 4. GENERAL & APPEARANCE */}
           {activeTab === 'general' && (
             <div className="settings-section">
               <h4 className="settings-section-title">Theme</h4>
@@ -456,82 +465,6 @@ export const ChatSettingsModal: React.FC<Props> = ({
                 </div>
               </div>
 
-              <h4 className="settings-section-title" style={{ marginTop: 20 }}>Application</h4>
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-general-autoStartApp" className="settings-toggle-label">Auto-start application</label>
-                  <div className="settings-toggle-desc">Launch chat automatically upon logging into Windows.</div>
-                </div>
-                <input
-                  id="settings-general-autoStartApp"
-                  name="autoStartApp"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.general?.autoStartApp ?? true}
-                  onChange={() => handleToggle('general', 'autoStartApp')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-general-openInBackground" className="settings-toggle-label">Open application in background</label>
-                  <div className="settings-toggle-desc">Start minimized to the system tray without taking focus.</div>
-                </div>
-                <input
-                  id="settings-general-openInBackground"
-                  name="openInBackground"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.general?.openInBackground ?? false}
-                  onChange={() => handleToggle('general', 'openInBackground')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-general-onCloseKeepRunning" className="settings-toggle-label">On close, keep the application running</label>
-                  <div className="settings-toggle-desc">Closing the window will minimize to the notification tray.</div>
-                </div>
-                <input
-                  id="settings-general-onCloseKeepRunning"
-                  name="onCloseKeepRunning"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.general?.onCloseKeepRunning ?? true}
-                  onChange={() => handleToggle('general', 'onCloseKeepRunning')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-general-gpuHardwareAcceleration" className="settings-toggle-label">Turn on GPU hardware acceleration</label>
-                  <div className="settings-toggle-desc">Improves rendering speed and reduces CPU consumption.</div>
-                </div>
-                <input
-                  id="settings-general-gpuHardwareAcceleration"
-                  name="gpuHardwareAcceleration"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.general?.gpuHardwareAcceleration ?? true}
-                  onChange={() => handleToggle('general', 'gpuHardwareAcceleration')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-general-registerAsDefaultChatApp" className="settings-toggle-label">Register as chat app for Microsoft 365</label>
-                  <div className="settings-toggle-desc">Integrates presence and status with Office desktop tools.</div>
-                </div>
-                <input
-                  id="settings-general-registerAsDefaultChatApp"
-                  name="registerAsDefaultChatApp"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.general?.registerAsDefaultChatApp ?? true}
-                  onChange={() => handleToggle('general', 'registerAsDefaultChatApp')}
-                />
-              </div>
-
               <h4 className="settings-section-title" style={{ marginTop: 24 }}>Language & Display</h4>
               <div className="settings-select-group">
                 <label htmlFor="settings-general-language" className="settings-label">App Language</label>
@@ -544,17 +477,16 @@ export const ChatSettingsModal: React.FC<Props> = ({
                 >
                   <option value="English (United States)">English (United States)</option>
                   <option value="English (India)">English (India)</option>
-                  <option value="English (United Kingdom)">English (United Kingdom)</option>
                   <option value="Hindi (हिंदी)">Hindi (हिंदी)</option>
+                  <option value="Tamil (தமிழ்)">Tamil (தமிழ்)</option>
                   <option value="Spanish (Español)">Spanish (Español)</option>
                   <option value="French (Français)">French (Français)</option>
-                  <option value="German (Deutsch)">German (Deutsch)</option>
                 </select>
               </div>
 
               <div className="settings-toggle-row" style={{ marginTop: 12 }}>
                 <div>
-                  <label htmlFor="settings-general-turnOffAnimations" className="settings-toggle-label">Turn off animations</label>
+                  <label htmlFor="settings-general-turnOffAnimations" className="settings-toggle-label">Reduce Motion / Turn off animations</label>
                   <div className="settings-toggle-desc">Disables transitions to maximize interface responsiveness.</div>
                 </div>
                 <input
@@ -567,11 +499,11 @@ export const ChatSettingsModal: React.FC<Props> = ({
                 />
               </div>
 
-              <h4 className="settings-section-title" style={{ marginTop: 24 }}>Out of Office</h4>
+              <h4 className="settings-section-title" style={{ marginTop: 24 }}>Out of Office / Away Status</h4>
               <div className="settings-toggle-row">
                 <div>
-                  <label htmlFor="settings-general-outOfOfficeReply" className="settings-toggle-label">Automatic replies</label>
-                  <div className="settings-toggle-desc">Send automated responses to teammates when you are away.</div>
+                  <label htmlFor="settings-general-outOfOfficeReply" className="settings-toggle-label">Automatic Away Replies</label>
+                  <div className="settings-toggle-desc">Send automated responses to colleagues when you are away on leave or site visits.</div>
                 </div>
                 <input
                   id="settings-general-outOfOfficeReply"
@@ -585,7 +517,7 @@ export const ChatSettingsModal: React.FC<Props> = ({
 
               {settings.general?.outOfOfficeReply && (
                 <div style={{ marginTop: 10 }}>
-                  <label htmlFor="settings-general-outOfOfficeMessage" className="settings-label">Out of Office Message</label>
+                  <label htmlFor="settings-general-outOfOfficeMessage" className="settings-label">Away Message</label>
                   <textarea
                     id="settings-general-outOfOfficeMessage"
                     name="outOfOfficeMessage"
@@ -599,974 +531,7 @@ export const ChatSettingsModal: React.FC<Props> = ({
             </div>
           )}
 
-          {/* 2. ACCOUNTS & ORGS */}
-          {activeTab === 'accounts' && (
-            <div className="settings-section">
-              <h4 className="settings-section-title">Accounts & Organizations</h4>
-              <p className="settings-section-sub">
-                Manage your authenticated identity and active organization tenancy.
-              </p>
-
-              <div className="settings-info-card" style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <div
-                    style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: '50%',
-                      background: 'var(--gradient-primary)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#fff',
-                      fontWeight: 700,
-                      fontSize: 16,
-                    }}
-                  >
-                    {me.name ? me.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'ME'}
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--text-primary)' }}>{me.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{me.email || 'sales.agent@nexus.io'}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--primary-500)', fontWeight: 600, marginTop: 2 }}>
-                      Role: {me.roleCode.replace('_', ' ').toUpperCase()}
-                    </div>
-                  </div>
-                </div>
-                <span
-                  style={{
-                    fontSize: 11,
-                    padding: '3px 8px',
-                    borderRadius: 12,
-                    background: 'rgba(16, 185, 129, 0.15)',
-                    color: '#10b981',
-                    fontWeight: 600,
-                  }}
-                >
-                  Active Session
-                </span>
-              </div>
-
-              <div className="settings-select-group">
-                <label htmlFor="settings-accounts-activeTenant" className="settings-label">Active Workspace Tenancy</label>
-                <select
-                  id="settings-accounts-activeTenant"
-                  name="activeTenant"
-                  className="form-input"
-                  value={settings.accounts?.activeTenant || companyId}
-                  onChange={e => handleSelectChange('accounts', 'activeTenant', e.target.value)}
-                >
-                  <option value="t-ghl-01">GHL India Ventures (AIF & High-Yield Private Placement)</option>
-                  <option value="t-jamin-02">Jamin Bazaar (Direct Land Plot Booking & Estates)</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* 3. PRIVACY */}
-          {activeTab === 'privacy' && (
-            <div className="settings-section">
-              <h4 className="settings-section-title">Privacy</h4>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-privacy-readReceipts" className="settings-toggle-label">Read Receipts</label>
-                  <div className="settings-toggle-desc">Let people know when you've seen their messages and see when they've seen yours.</div>
-                </div>
-                <input
-                  id="settings-privacy-readReceipts"
-                  name="readReceipts"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.privacy.readReceipts}
-                  onChange={() => handleToggle('privacy', 'readReceipts')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-privacy-typingIndicator" className="settings-toggle-label">Typing Indicator</label>
-                  <div className="settings-toggle-desc">Display animated "typing…" indicators while you compose messages.</div>
-                </div>
-                <input
-                  id="settings-privacy-typingIndicator"
-                  name="typingIndicator"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.privacy.typingIndicator}
-                  onChange={() => handleToggle('privacy', 'typingIndicator')}
-                />
-              </div>
-
-              <div className="settings-select-group">
-                <label htmlFor="settings-privacy-whoCanDm" className="settings-label">Who Can Direct Message (DM) Me</label>
-                <select
-                  id="settings-privacy-whoCanDm"
-                  name="whoCanDm"
-                  className="form-input"
-                  value={settings.privacy.whoCanDm}
-                  onChange={e => handleSelectChange('privacy', 'whoCanDm', e.target.value)}
-                >
-                  <option value="everyone">Everyone in my organization</option>
-                  <option value="team">My sales department only</option>
-                  <option value="managers_admins">Managers & Administrators only</option>
-                </select>
-              </div>
-
-              <h4 className="settings-section-title" style={{ marginTop: 24 }}>Do Not Disturb — Priority Access</h4>
-              <p className="settings-section-sub">
-                Allow calls and urgent messages from these contacts even when your status is set to Do Not Disturb.
-              </p>
-              <form onSubmit={handleAddPriorityContact} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <input
-                  id="settings-privacy-newPriorityContact"
-                  name="newPriorityContact"
-                  type="text"
-                  aria-label="Enter colleague name for priority access"
-                  className="form-input"
-                  placeholder="Enter colleague name..."
-                  value={newPriorityContact}
-                  onChange={e => setNewPriorityContact(e.target.value)}
-                />
-                <button type="submit" className="btn btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Plus size={14} /> Add
-                </button>
-              </form>
-              <div className="teams-chips-list">
-                {(settings.privacy.priorityAccess || []).map(contact => (
-                  <span key={contact} className="teams-chip">
-                    <span>{contact}</span>
-                    <span className="teams-chip-remove" onClick={() => handleRemovePriorityContact(contact)}>
-                      <X size={12} />
-                    </span>
-                  </span>
-                ))}
-              </div>
-
-              <h4 className="settings-section-title" style={{ marginTop: 24 }}>Blocked Contacts</h4>
-              <p className="settings-section-sub">
-                Blocked contacts cannot direct message you or view your active presence.
-              </p>
-              <form onSubmit={handleAddBlockedContact} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <input
-                  id="settings-privacy-newBlockedContact"
-                  name="newBlockedContact"
-                  type="text"
-                  aria-label="Enter name or phone to block"
-                  className="form-input"
-                  placeholder="Enter name or phone to block..."
-                  value={newBlockedContact}
-                  onChange={e => setNewBlockedContact(e.target.value)}
-                />
-                <button type="submit" className="btn btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Plus size={14} /> Block
-                </button>
-              </form>
-              <div className="teams-chips-list">
-                {(settings.privacy.blockedContacts || []).length === 0 ? (
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>No blocked contacts.</span>
-                ) : (
-                  (settings.privacy.blockedContacts || []).map(contact => (
-                    <span key={contact} className="teams-chip">
-                      <span>{contact}</span>
-                      <span className="teams-chip-remove" onClick={() => handleRemoveBlockedContact(contact)}>
-                        <X size={12} />
-                      </span>
-                    </span>
-                  ))
-                )}
-              </div>
-
-              <div className="settings-toggle-row" style={{ marginTop: 18 }}>
-                <div>
-                  <label htmlFor="settings-privacy-participateInSurveys" className="settings-toggle-label">Surveys & Telemetry Feedback</label>
-                  <div className="settings-toggle-desc">Participate in Microsoft Teams platform satisfaction feedback.</div>
-                </div>
-                <input
-                  id="settings-privacy-participateInSurveys"
-                  name="participateInSurveys"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.privacy.participateInSurveys ?? true}
-                  onChange={() => handleToggle('privacy', 'participateInSurveys')}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* 4. NOTIFICATIONS */}
-          {activeTab === 'notifications' && (
-            <div className="settings-section">
-              <h4 className="settings-section-title">Appearance and Sound</h4>
-
-              <div className="settings-select-group">
-                <label htmlFor="settings-notifications-notificationStyle" className="settings-label">Notification Style</label>
-                <select
-                  id="settings-notifications-notificationStyle"
-                  name="notificationStyle"
-                  className="form-input"
-                  value={settings.notifications.notificationStyle || 'teams'}
-                  onChange={e => handleSelectChange('notifications', 'notificationStyle', e.target.value)}
-                >
-                  <option value="teams">Teams built-in banner</option>
-                  <option value="windows">Windows native notification center</option>
-                </select>
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-notifications-sound" className="settings-toggle-label">Play Sound for Incoming Calls & Alerts</label>
-                  <div className="settings-toggle-desc">Play audible chime whenever messages or meetings ring.</div>
-                </div>
-                <input
-                  id="settings-notifications-sound"
-                  name="sound"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.notifications.sound}
-                  onChange={() => handleToggle('notifications', 'sound')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-notifications-showPreview" className="settings-toggle-label">Show Message Preview</label>
-                  <div className="settings-toggle-desc">Include message snippets in popup desktop notifications.</div>
-                </div>
-                <input
-                  id="settings-notifications-showPreview"
-                  name="showPreview"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.notifications.showPreview ?? true}
-                  onChange={() => handleToggle('notifications', 'showPreview')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-notifications-desktopPush" className="settings-toggle-label">Desktop & Push Notifications</label>
-                  <div className="settings-toggle-desc">Deliver instant popup alerts across devices.</div>
-                </div>
-                <input
-                  id="settings-notifications-desktopPush"
-                  name="desktopPush"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.notifications.desktopPush}
-                  onChange={() => handleToggle('notifications', 'desktopPush')}
-                />
-              </div>
-
-              <h4 className="settings-section-title" style={{ marginTop: 24 }}>Chats and Channels</h4>
-              <div className="settings-select-group">
-                <label htmlFor="settings-notifications-chatsAndChannels" className="settings-label">Chat Messages & @Mentions</label>
-                <select
-                  id="settings-notifications-chatsAndChannels"
-                  name="chatsAndChannels"
-                  className="form-input"
-                  value={settings.notifications.chatsAndChannels || 'banner_feed'}
-                  onChange={e => handleSelectChange('notifications', 'chatsAndChannels', e.target.value)}
-                >
-                  <option value="banner_feed">Banner and feed</option>
-                  <option value="feed_only">Only show in feed</option>
-                  <option value="off">Off</option>
-                </select>
-              </div>
-
-              <div className="settings-toggle-row" style={{ marginTop: 12 }}>
-                <div>
-                  <label htmlFor="settings-notifications-mentionOnly" className="settings-toggle-label">@Mentions Only Mode</label>
-                  <div className="settings-toggle-desc">Only alert me when someone explicitly tags @me or calls me directly.</div>
-                </div>
-                <input
-                  id="settings-notifications-mentionOnly"
-                  name="mentionOnly"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.notifications.mentionOnly}
-                  onChange={() => handleToggle('notifications', 'mentionOnly')}
-                />
-              </div>
-
-              <h4 className="settings-section-title" style={{ marginTop: 24 }}>Meetings and Calls</h4>
-              <div className="settings-select-group">
-                <label htmlFor="settings-notifications-meetingsAndCalls" className="settings-label">Meeting Start Notification</label>
-                <select
-                  id="settings-notifications-meetingsAndCalls"
-                  name="meetingsAndCalls"
-                  className="form-input"
-                  value={settings.notifications.meetingsAndCalls || 'banner'}
-                  onChange={e => handleSelectChange('notifications', 'meetingsAndCalls', e.target.value)}
-                >
-                  <option value="banner">Banner alert</option>
-                  <option value="off">Muted / Off</option>
-                </select>
-              </div>
-
-              <div className="settings-select-group">
-                <label htmlFor="settings-notifications-missedActivityEmails" className="settings-label">Missed Activity Emails</label>
-                <select
-                  id="settings-notifications-missedActivityEmails"
-                  name="missedActivityEmails"
-                  className="form-input"
-                  value={settings.notifications.missedActivityEmails || 'hourly'}
-                  onChange={e => handleSelectChange('notifications', 'missedActivityEmails', e.target.value)}
-                >
-                  <option value="asap">As soon as possible</option>
-                  <option value="hourly">Once every hour</option>
-                  <option value="daily">Daily digest</option>
-                  <option value="off">Off</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* 5. CAPTIONS & TRANSCRIPTS */}
-          {activeTab === 'captions' && (
-            <div className="settings-section">
-              <h4 className="settings-section-title">Captions and Transcripts</h4>
-              <p className="settings-section-sub">
-                Control speech-to-text transcription and live subtitle options in meetings.
-              </p>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-captions-autoIdentifyMe" className="settings-toggle-label">Automatically identify me in meeting captions</label>
-                  <div className="settings-toggle-desc">Attach your speaker name tag to spoken transcript segments.</div>
-                </div>
-                <input
-                  id="settings-captions-autoIdentifyMe"
-                  name="autoIdentifyMe"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.captions?.autoIdentifyMe ?? true}
-                  onChange={() => handleToggle('captions', 'autoIdentifyMe')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-captions-autoStartTranscription" className="settings-toggle-label">Automatically start transcription for meetings</label>
-                  <div className="settings-toggle-desc">Begin recording real-time meeting notes as soon as you join.</div>
-                </div>
-                <input
-                  id="settings-captions-autoStartTranscription"
-                  name="autoStartTranscription"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.captions?.autoStartTranscription ?? false}
-                  onChange={() => handleToggle('captions', 'autoStartTranscription')}
-                />
-              </div>
-
-              <div className="settings-select-group">
-                <label htmlFor="settings-captions-spokenLanguage" className="settings-label">Spoken Language for Live Captions</label>
-                <select
-                  id="settings-captions-spokenLanguage"
-                  name="spokenLanguage"
-                  className="form-input"
-                  value={settings.captions?.spokenLanguage || 'English (United States)'}
-                  onChange={e => handleSelectChange('captions', 'spokenLanguage', e.target.value)}
-                >
-                  <option value="English (United States)">English (United States)</option>
-                  <option value="English (India)">English (India)</option>
-                  <option value="Hindi (हिंदी)">Hindi (हिंदी)</option>
-                  <option value="Spanish (Español)">Spanish (Español)</option>
-                  <option value="French (Français)">French (Français)</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* 6. FILES AND LINKS */}
-          {activeTab === 'files' && (
-            <div className="settings-section">
-              <h4 className="settings-section-title">Files and Links</h4>
-              <p className="settings-section-sub">
-                Choose how shared office documents and attachments are opened and stored.
-              </p>
-
-              <div className="settings-select-group">
-                <label htmlFor="settings-files-fileOpenPreference" className="settings-label">File Open Preference</label>
-                <select
-                  id="settings-files-fileOpenPreference"
-                  name="fileOpenPreference"
-                  className="form-input"
-                  value={settings.files?.fileOpenPreference || 'teams'}
-                  onChange={e => handleSelectChange('files', 'fileOpenPreference', e.target.value)}
-                >
-                  <option value="teams">Teams (Open inside the built-in document viewer)</option>
-                  <option value="desktop">Desktop app (Open in Microsoft Office)</option>
-                  <option value="browser">Browser (Open in Microsoft 365 for Web)</option>
-                </select>
-              </div>
-
-              <h4 className="settings-section-title" style={{ marginTop: 24 }}>Downloads</h4>
-              <div className="settings-select-group">
-                <label htmlFor="settings-files-downloadLocation" className="settings-label">Always Download Files To</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    id="settings-files-downloadLocation"
-                    name="downloadLocation"
-                    type="text"
-                    className="form-input"
-                    value={settings.files?.downloadLocation || 'C:\\Users\\NexusSales\\Downloads'}
-                    readOnly
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => alert('Default download location set to standard Downloads folder.')}
-                  >
-                    Change
-                  </button>
-                </div>
-              </div>
-
-              <div className="settings-toggle-row" style={{ marginTop: 12 }}>
-                <div>
-                  <label htmlFor="settings-files-alwaysAskWhereToSave" className="settings-toggle-label">Always ask where to save each file before downloading</label>
-                  <div className="settings-toggle-desc">Prompts for directory path every time a file attachment is downloaded.</div>
-                </div>
-                <input
-                  id="settings-files-alwaysAskWhereToSave"
-                  name="alwaysAskWhereToSave"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.files?.alwaysAskWhereToSave ?? false}
-                  onChange={() => handleToggle('files', 'alwaysAskWhereToSave')}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* 7. DEVICES */}
-          {activeTab === 'devices' && (
-            <div className="settings-section">
-              <h4 className="settings-section-title">Audio Devices</h4>
-
-              <div className="settings-select-group">
-                <label htmlFor="settings-calls-defaultSpeaker" className="settings-label">Speaker (Audio Output)</label>
-                <select
-                  id="settings-calls-defaultSpeaker"
-                  name="defaultSpeaker"
-                  className="form-input"
-                  value={settings.calls.defaultSpeaker || 'default'}
-                  onChange={e => handleSelectChange('calls', 'defaultSpeaker', e.target.value)}
-                >
-                  <option value="default">Speakers (Realtek(R) Audio)</option>
-                  <option value="headset">Headphones / Communications Headset</option>
-                  <option value="hdmi">Digital Output (HDMI Audio Device)</option>
-                </select>
-              </div>
-
-              <div className="teams-device-test-row">
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={handleTestAudio}
-                  disabled={isTestingAudio}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-                >
-                  <Volume2 size={14} />
-                  <span>{isTestingAudio ? 'Playing Test Chime...' : 'Make a test call'}</span>
-                </button>
-                {isTestingAudio && (
-                  <span style={{ fontSize: 12, color: 'var(--success)', fontWeight: 600 }}>
-                    Output active • Tone OK
-                  </span>
-                )}
-              </div>
-
-              <div className="settings-select-group" style={{ marginTop: 18 }}>
-                <label htmlFor="settings-calls-defaultMic" className="settings-label">Microphone (Audio Input)</label>
-                <select
-                  id="settings-calls-defaultMic"
-                  name="defaultMic"
-                  className="form-input"
-                  value={settings.calls.defaultMic}
-                  onChange={e => handleSelectChange('calls', 'defaultMic', e.target.value)}
-                >
-                  <option value="default">Microphone Array (Intel(R) Smart Sound Technology)</option>
-                  <option value="headset">Communications Headset Microphone</option>
-                  <option value="external">External USB Audio Interface</option>
-                </select>
-              </div>
-
-              <div className="teams-mic-meter-container">
-                <Mic size={14} style={{ color: 'var(--text-muted)' }} />
-                <div className="teams-mic-meter-bar">
-                  <div className="teams-mic-meter-fill" />
-                </div>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Mic Active</span>
-              </div>
-
-              <div className="settings-select-group">
-                <label htmlFor="settings-calls-noiseSuppression" className="settings-label">Noise Suppression</label>
-                <select
-                  id="settings-calls-noiseSuppression"
-                  name="noiseSuppression"
-                  className="form-input"
-                  value={settings.calls.noiseSuppression || 'auto'}
-                  onChange={e => handleSelectChange('calls', 'noiseSuppression', e.target.value)}
-                >
-                  <option value="auto">Auto (Default - suppresses background noise)</option>
-                  <option value="high">High (Suppresses all background sounds except voice)</option>
-                  <option value="low">Low (Suppresses faint persistent noise like fans)</option>
-                  <option value="off">Off (Raw uncompressed audio)</option>
-                </select>
-              </div>
-
-              <div className="settings-select-group">
-                <label htmlFor="settings-calls-secondaryRinger" className="settings-label">Secondary Ringer</label>
-                <select
-                  id="settings-calls-secondaryRinger"
-                  name="secondaryRinger"
-                  className="form-input"
-                  value={settings.calls.secondaryRinger || 'none'}
-                  onChange={e => handleSelectChange('calls', 'secondaryRinger', e.target.value)}
-                >
-                  <option value="none">None</option>
-                  <option value="speakers">Speakers (Realtek Audio)</option>
-                  <option value="headset">Headphones</option>
-                </select>
-              </div>
-
-              <h4 className="settings-section-title" style={{ marginTop: 24 }}>Camera (Video)</h4>
-              <div className="settings-select-group">
-                <label htmlFor="settings-calls-defaultCamera" className="settings-label">Camera</label>
-                <select
-                  id="settings-calls-defaultCamera"
-                  name="defaultCamera"
-                  className="form-input"
-                  value={settings.calls.defaultCamera}
-                  onChange={e => handleSelectChange('calls', 'defaultCamera', e.target.value)}
-                >
-                  <option value="default">Integrated Camera (04f2:b6d9)</option>
-                  <option value="hd">HD USB WebCam (1080p 60fps)</option>
-                </select>
-              </div>
-
-              <div className="teams-camera-preview-box">
-                {isCameraPreviewOn ? (
-                  <div className="teams-camera-active-simulation">
-                    <div className="teams-camera-badge">
-                      <span className="teams-camera-badge-dot" /> Live Preview
-                    </div>
-                    <Camera size={32} style={{ color: 'var(--primary-400)', opacity: 0.8 }} />
-                    <span style={{ fontSize: 12, fontWeight: 500 }}>Integrated Camera Online</span>
-                  </div>
-                ) : (
-                  <div style={{ color: '#64748b', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                    <Camera size={28} />
-                    <span style={{ fontSize: 12 }}>Camera preview is off</span>
-                  </div>
-                )}
-              </div>
-
-              <div style={{ marginTop: 8, display: 'flex', gap: 10 }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setIsCameraPreviewOn(!isCameraPreviewOn)}
-                >
-                  {isCameraPreviewOn ? 'Turn Off Preview' : 'Turn On Preview'}
-                </button>
-              </div>
-
-              <div className="settings-toggle-row" style={{ marginTop: 14 }}>
-                <div>
-                  <label htmlFor="settings-calls-cameraOffOnJoin" className="settings-toggle-label">Turn Camera Off When Joining Meetings</label>
-                  <div className="settings-toggle-desc">Join conference rooms with video muted by default.</div>
-                </div>
-                <input
-                  id="settings-calls-cameraOffOnJoin"
-                  name="cameraOffOnJoin"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.calls.cameraOffOnJoin}
-                  onChange={() => handleToggle('calls', 'cameraOffOnJoin')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-calls-autoAdjustCamera" className="settings-toggle-label">Automatically Adjust Camera Controls</label>
-                  <div className="settings-toggle-desc">Enables automatic lighting compensation and soft focus.</div>
-                </div>
-                <input
-                  id="settings-calls-autoAdjustCamera"
-                  name="autoAdjustCamera"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={true}
-                  onChange={() => { }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* 8. APP PERMISSIONS */}
-          {activeTab === 'permissions' && (
-            <div className="settings-section">
-              <h4 className="settings-section-title">App Permissions</h4>
-              <p className="settings-section-sub">
-                Manage device hardware and system access permissions granted to the Teams chat client.
-              </p>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-permissions-media" className="settings-toggle-label">Media (Camera, Microphone, Speakers)</label>
-                  <div className="settings-toggle-desc">Permits participation in audio calls and WebRTC video conferences.</div>
-                </div>
-                <input
-                  id="settings-permissions-media"
-                  name="permissionsMedia"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.appPermissions?.media ?? true}
-                  onChange={() => handleToggle('appPermissions', 'media')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-permissions-location" className="settings-toggle-label">Location Services</label>
-                  <div className="settings-toggle-desc">Allows showing local timezone and proximity-based meeting rooms.</div>
-                </div>
-                <input
-                  id="settings-permissions-location"
-                  name="permissionsLocation"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.appPermissions?.location ?? true}
-                  onChange={() => handleToggle('appPermissions', 'location')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-permissions-notifications" className="settings-toggle-label">Desktop Notifications</label>
-                  <div className="settings-toggle-desc">Allows displaying native desktop popup banners for incoming calls.</div>
-                </div>
-                <input
-                  id="settings-permissions-notifications"
-                  name="permissionsNotifications"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.appPermissions?.notifications ?? true}
-                  onChange={() => handleToggle('appPermissions', 'notifications')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-permissions-externalLinks" className="settings-toggle-label">External Links</label>
-                  <div className="settings-toggle-desc">Permits opening safe external URLs shared by colleagues in default browser.</div>
-                </div>
-                <input
-                  id="settings-permissions-externalLinks"
-                  name="permissionsExternalLinks"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.appPermissions?.externalLinks ?? true}
-                  onChange={() => handleToggle('appPermissions', 'externalLinks')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-permissions-midiDevices" className="settings-toggle-label">MIDI Devices</label>
-                  <div className="settings-toggle-desc">Allows interacting with hardware control boards and audio decks.</div>
-                </div>
-                <input
-                  id="settings-permissions-midiDevices"
-                  name="permissionsMidiDevices"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.appPermissions?.midiDevices ?? false}
-                  onChange={() => handleToggle('appPermissions', 'midiDevices')}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* 9. ACCESSIBILITY */}
-          {activeTab === 'accessibility' && (
-            <div className="settings-section">
-              <h4 className="settings-section-title">Accessibility</h4>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-accessibility-signLanguageView" className="settings-toggle-label">Sign Language View</label>
-                  <div className="settings-toggle-desc">Automatically prioritize and enlarge video feeds of designated signers.</div>
-                </div>
-                <input
-                  id="settings-accessibility-signLanguageView"
-                  name="signLanguageView"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.accessibility?.signLanguageView ?? false}
-                  onChange={() => handleToggle('accessibility', 'signLanguageView')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-accessibility-alwaysShowMeetingControls" className="settings-toggle-label">Always Show Meeting Controls</label>
-                  <div className="settings-toggle-desc">Keep toolbar visible at the top during calls rather than auto-hiding.</div>
-                </div>
-                <input
-                  id="settings-accessibility-alwaysShowMeetingControls"
-                  name="alwaysShowMeetingControls"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.accessibility?.alwaysShowMeetingControls ?? true}
-                  onChange={() => handleToggle('accessibility', 'alwaysShowMeetingControls')}
-                />
-              </div>
-
-              <div className="settings-toggle-row">
-                <div>
-                  <label htmlFor="settings-accessibility-highContrast" className="settings-toggle-label">High Contrast Mode</label>
-                  <div className="settings-toggle-desc">Maximizes color contrast across elements for improved visual clarity.</div>
-                </div>
-                <input
-                  id="settings-accessibility-highContrast"
-                  name="highContrast"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.accessibility?.highContrast ?? false}
-                  onChange={() => handleToggle('accessibility', 'highContrast')}
-                />
-              </div>
-
-              <h4 className="settings-section-title" style={{ marginTop: 24 }}>Keyboard Shortcuts</h4>
-              <table className="teams-shortcuts-table">
-                <thead>
-                  <tr>
-                    <th>Action</th>
-                    <th>Shortcut</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>Search & Commands</td>
-                    <td><kbd className="teams-kbd">Ctrl</kbd> + <kbd className="teams-kbd">E</kbd></td>
-                  </tr>
-                  <tr>
-                    <td>Toggle Mute (Microphone)</td>
-                    <td><kbd className="teams-kbd">Ctrl</kbd> + <kbd className="teams-kbd">Shift</kbd> + <kbd className="teams-kbd">M</kbd></td>
-                  </tr>
-                  <tr>
-                    <td>Toggle Video (Camera)</td>
-                    <td><kbd className="teams-kbd">Ctrl</kbd> + <kbd className="teams-kbd">Shift</kbd> + <kbd className="teams-kbd">O</kbd></td>
-                  </tr>
-                  <tr>
-                    <td>Decline Incoming Call</td>
-                    <td><kbd className="teams-kbd">Ctrl</kbd> + <kbd className="teams-kbd">Shift</kbd> + <kbd className="teams-kbd">D</kbd></td>
-                  </tr>
-                  <tr>
-                    <td>Open Chat Tab</td>
-                    <td><kbd className="teams-kbd">Alt</kbd> + <kbd className="teams-kbd">Shift</kbd> + <kbd className="teams-kbd">C</kbd></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* 10. CALLS */}
-          {activeTab === 'calls' && (
-            <div className="settings-section">
-              <h4 className="settings-section-title">Call Answering Rules</h4>
-
-              <div className="settings-select-group">
-                <div className="settings-label">Incoming Calls Policy</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
-                  <label htmlFor="settings-calls-policy-ringme" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-                    <input
-                      id="settings-calls-policy-ringme"
-                      type="radio"
-                      name="callAnsweringRules"
-                      checked={(settings.calls.callAnsweringRules || 'ring_me') === 'ring_me'}
-                      onChange={() => handleSelectChange('calls', 'callAnsweringRules', 'ring_me')}
-                    />
-                    <span>Calls ring me</span>
-                  </label>
-                  <label htmlFor="settings-calls-policy-forward" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-                    <input
-                      id="settings-calls-policy-forward"
-                      type="radio"
-                      name="callAnsweringRules"
-                      checked={settings.calls.callAnsweringRules === 'forward'}
-                      onChange={() => handleSelectChange('calls', 'callAnsweringRules', 'forward')}
-                    />
-                    <span>Forward my calls</span>
-                  </label>
-                </div>
-              </div>
-
-              {settings.calls.callAnsweringRules === 'forward' ? (
-                <div className="settings-select-group">
-                  <label htmlFor="settings-calls-forwardTo" className="settings-label">Forward To</label>
-                  <select
-                    id="settings-calls-forwardTo"
-                    name="forwardTo"
-                    className="form-input"
-                    value={settings.calls.forwardTo || 'voicemail'}
-                    onChange={e => handleSelectChange('calls', 'forwardTo', e.target.value)}
-                  >
-                    <option value="voicemail">Voicemail</option>
-                    <option value="delegates">Authorized Delegates</option>
-                  </select>
-                </div>
-              ) : (
-                <div className="settings-select-group">
-                  <label htmlFor="settings-calls-ifUnanswered" className="settings-label">If Unanswered</label>
-                  <select
-                    id="settings-calls-ifUnanswered"
-                    name="forwardTo"
-                    className="form-input"
-                    value={settings.calls.forwardTo || 'voicemail'}
-                    onChange={e => handleSelectChange('calls', 'forwardTo', e.target.value)}
-                  >
-                    <option value="voicemail">Redirect to voicemail</option>
-                    <option value="none">Do nothing (keep ringing)</option>
-                  </select>
-                </div>
-              )}
-
-              <div className="settings-select-group">
-                <label htmlFor="settings-calls-ringDuration" className="settings-label">Ring Duration Before Redirecting</label>
-                <select
-                  id="settings-calls-ringDuration"
-                  name="ringDurationBeforeRedirect"
-                  className="form-input"
-                  value={settings.calls.ringDurationBeforeRedirect || 20}
-                  onChange={e => handleSelectChange('calls', 'ringDurationBeforeRedirect', Number(e.target.value))}
-                >
-                  <option value={10}>10 seconds</option>
-                  <option value={20}>20 seconds (Default)</option>
-                  <option value={30}>30 seconds</option>
-                  <option value={45}>45 seconds</option>
-                  <option value={60}>60 seconds</option>
-                </select>
-              </div>
-
-              <div className="settings-toggle-row" style={{ marginTop: 14 }}>
-                <div>
-                  <label htmlFor="settings-calls-autoAnswer" className="settings-toggle-label">Auto-Answer Incoming Calls</label>
-                  <div className="settings-toggle-desc">Automatically accept direct calls from authorized teammates.</div>
-                </div>
-                <input
-                  id="settings-calls-autoAnswer"
-                  name="autoAnswer"
-                  type="checkbox"
-                  className="settings-toggle-input"
-                  checked={settings.calls.autoAnswer}
-                  onChange={() => handleToggle('calls', 'autoAnswer')}
-                />
-              </div>
-
-              <h4 className="settings-section-title" style={{ marginTop: 24 }}>Ringtones</h4>
-              <div className="settings-select-group">
-                <label htmlFor="settings-calls-ringtone" className="settings-label">Calls For You</label>
-                <select
-                  id="settings-calls-ringtone"
-                  name="ringtone"
-                  className="form-input"
-                  value={settings.calls.ringtone || 'Bop'}
-                  onChange={e => handleSelectChange('calls', 'ringtone', e.target.value)}
-                >
-                  <option value="Bop">Bop (Teams Default)</option>
-                  <option value="Remix">Remix</option>
-                  <option value="Rings">Classic Rings</option>
-                  <option value="Cascades">Cascades</option>
-                  <option value="Synth">Synthesizer</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* 11. ACTIVE CONVERSATION */}
-          {activeTab === 'conversation' && (
-            <div className="settings-section">
-              <h4 className="settings-section-title">
-                Conversation: {activeConversation ? (activeConversation.name || (activeConversation.type === 'dm' ? 'Direct Message' : 'Group Chat')) : 'None Selected'}
-              </h4>
-
-              {!activeConversation ? (
-                <p className="settings-section-sub">Select an active conversation from the sidebar to configure its settings.</p>
-              ) : (
-                <>
-                  {activeConversation.type === 'group' && isManagerOrAdmin && (
-                    <form onSubmit={handleRenameGroup} className="settings-form-row">
-                      <label htmlFor="settings-conversation-rename" className="settings-label">Rename Group Chat</label>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <input
-                          id="settings-conversation-rename"
-                          name="renameGroupChat"
-                          type="text"
-                          className="form-input"
-                          value={renameValue}
-                          onChange={e => setRenameValue(e.target.value)}
-                          placeholder="Group name"
-                        />
-                        <button type="submit" className="btn btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          {saveSuccess ? <Check size={14} style={{ color: 'var(--success)' }} /> : <Edit2 size={14} />} Save
-                        </button>
-                      </div>
-                    </form>
-                  )}
-
-                  <div className="settings-actions-grid">
-                    <button
-                      type="button"
-                      className={`btn btn-secondary btn-sm ${activeConversation.isPinned ? 'active' : ''}`}
-                      onClick={handleTogglePin}
-                    >
-                      <Pin size={14} />
-                      <span>{activeConversation.isPinned ? 'Unpin Conversation' : 'Pin to Top'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`btn btn-secondary btn-sm ${activeConversation.isMuted ? 'active' : ''}`}
-                      onClick={handleToggleMute}
-                    >
-                      <Volume2 size={14} />
-                      <span>{activeConversation.isMuted ? 'Unmute Notifications' : 'Mute Conversation'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      style={{ color: 'var(--warning)' }}
-                      onClick={handleClearHistory}
-                    >
-                      <Trash2 size={14} />
-                      <span>Clear Chat History</span>
-                    </button>
-
-                    {activeConversation.type === 'group' && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        style={{ color: 'var(--danger-500)' }}
-                        onClick={handleLeaveGroup}
-                      >
-                        <Trash2 size={14} />
-                        <span>Leave Group</span>
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* 12. ADMIN GOVERNANCE */}
+          {/* 5. ADMIN GOVERNANCE */}
           {activeTab === 'admin' && isAdmin && (
             <div className="settings-section">
               <h4 className="settings-section-title">Admin Governance & Organization Policies</h4>
@@ -1608,22 +573,7 @@ export const ChatSettingsModal: React.FC<Props> = ({
               </div>
 
               <div className="settings-select-group">
-                <label htmlFor="settings-admin-fileRetentionDays" className="settings-label">File Share Retention Policy</label>
-                <select
-                  id="settings-admin-fileRetentionDays"
-                  name="fileRetentionDays"
-                  className="form-input"
-                  value={settings.adminGovernance?.fileRetentionDays ?? 0}
-                  onChange={e => handleSelectChange('adminGovernance', 'fileRetentionDays', Number(e.target.value))}
-                >
-                  <option value={0}>Retain Uploads Forever</option>
-                  <option value={60}>Purge file data after 60 Days</option>
-                  <option value={180}>Purge file data after 180 Days</option>
-                </select>
-              </div>
-
-              <div className="settings-select-group">
-                <label htmlFor="settings-admin-whoCanCreateGroups" className="settings-label">Group Chat Creation Permissions</label>
+                <label htmlFor="settings-admin-whoCanCreateGroups" className="settings-label">Group Channel Creation Permissions</label>
                 <select
                   id="settings-admin-whoCanCreateGroups"
                   name="whoCanCreateGroups"

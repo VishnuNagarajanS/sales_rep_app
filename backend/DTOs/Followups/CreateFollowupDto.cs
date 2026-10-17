@@ -10,4 +10,6 @@ public class CreateFollowupDto
     public DateTime ScheduledAt { get; set; }
     public string Priority { get; set; } = "Medium"; // Low, Medium, High, Urgent
     public string Notes { get; set; } = string.Empty;
+    public int? AssignedAgentId { get; set; }
+    public string? AssignedToRole { get; set; }
 }

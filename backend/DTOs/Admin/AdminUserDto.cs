@@ -15,4 +15,11 @@ public class AdminUserDto
     public DateTime? LastLoginAt { get; set; }
     public string? AvatarUrl { get; set; }
     public DateTime CreatedAt { get; set; }
+    public bool EmailSent { get; set; } = true;
+    public string? EmailError { get; set; }
+    public string? TemporaryPassword { get; set; }
+    public bool IsCovered { get; set; }
+    public string? CoveredBy { get; set; }
+    public bool OnLeave { get; set; }
+    public DateOnly? LeaveUntil { get; set; }
 }

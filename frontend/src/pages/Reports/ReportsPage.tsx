@@ -6,10 +6,17 @@ import { FEATURES } from '../../constants/features';
 import { getLeads, getDeals, getCalls, getConsultations, getOpportunities, getFollowups, getCustomers } from '../../services/ghlApiService';
 import { EmptyState } from '../../components/common/EmptyState';
 import { Lead, Deal, CallRecord, SiteVisit, Booking, Consultation, InvestmentOpportunity, Followup, Customer } from '../../types';
+import { IrmReportsView } from './components/IrmReportsView';
 import './ReportsPage.css';
 
 export const ReportsPage: React.FC = () => {
   const { tenant, user, enabledFeatures } = useAuth();
+  const isIrm = user?.role?.code === 'irm';
+
+  if (isIrm) {
+    return <IrmReportsView />;
+  }
+
   const [period, setPeriod] = useState<'week' | 'month' | 'quarter'>('month');
   const [myPerfPeriod, setMyPerfPeriod] = useState<'week' | 'month' | 'year'>('month');
 

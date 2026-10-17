@@ -135,8 +135,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
           {(!dateRange.onPresetChange ||
             dateRange.preset === 'custom' ||
-            dateRange.from !== '' ||
-            dateRange.to !== '') && (
+            (!dateRange.preset && (dateRange.from !== '' || dateRange.to !== ''))) && (
             <div className="filterbar-custom-dates">
               <label htmlFor="filter-date-from" className="filterbar-item-label">
                 From:

@@ -10,16 +10,11 @@ export default defineConfig({
       interval: 300,
     },
     proxy: {
-      '/api/chat': {
-        target: 'http://localhost:4000',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/chat/, '/api'),
-      },
-      '/socket.io': {
-        target: 'http://localhost:4000',
-        ws: true,
-      },
       '/api': {
+        target: 'http://localhost:5106',
+        changeOrigin: true,
+      },
+      '/uploads': {
         target: 'http://localhost:5106',
         changeOrigin: true,
       },

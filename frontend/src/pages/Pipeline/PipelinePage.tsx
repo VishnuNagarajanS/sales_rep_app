@@ -5,13 +5,13 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  ChevronRight,
-  ChevronLeft,
+
   Phone,
   Mail,
   User,
   MapPin,
   TrendingUp,
+  Plus,
 } from 'lucide-react';
 import { Deal, DealActivity, Lead, Followup, Investor, InvestmentOpportunity, Consultation } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -111,8 +111,11 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
         );
         const raw = leads
           .filter(l => !l.companyId || isTenantMatch(l.companyId, tenant?.id))
-          // Same rule as IRM "My Leads": only 'Interested' leads assigned to THIS IRM
-          .filter(l => l.status === 'Interested')
+          // Same rule as IRM "My Leads": 'Interested', 'No Response', 'Callback', etc. assigned to THIS IRM
+          .filter(l => {
+            const s = (l.status || '').trim().toLowerCase();
+            return ['interested', 'no response', 'callback', 'new', 'contacted'].includes(s);
+          })
           .filter(l =>
             l.assignedAgentId
               ? String(l.assignedAgentId) === String(user?.id)
@@ -160,57 +163,81 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
       })()
     : [];
 
-  const leadToPipelineCard = (lead: Lead): Deal => ({
-    id: lead.id,
-    companyId: lead.companyId || tenant?.id || '',
-    title: lead.name,
-    customerId: lead.id,
-    customerName: lead.name,
-    phone: lead.phone,
-    email: lead.email,
-    assignedAgentId: lead.assignedAgentId,
-    assignedAgentName: lead.assignedAgentName,
-    stage: 'leads',
-    stageEnteredAt: lead.createdAt,
-    createdAt: lead.createdAt,
-    expectedCloseDate: '',
-    notes: lead.notes || '',
-    value: 0,
-    priority: lead.priority === 'Urgent' ? 'High' : (lead.priority as 'High' | 'Medium' | 'Low'),
-    location: lead.location,
-    investmentRange:
-      lead.customFields?.investmentCapacity ||
-      lead.customFields?.capacityRange ||
-      lead.customFields?.investmentRange ||
-      (lead as any).investmentRange ||
-      undefined,
-    investorType: lead.customFields?.investorType || undefined,
-    preferredAssetClass: lead.customFields?.preferredAssetClass || undefined,
-  });
+  const leadToPipelineCard = (lead: Lead): Deal => {
+    const isLeadCreatedByIrm =
+      lead.assignedByName === 'Created by IRM' ||
+      (isIrm && (
+        (lead.assignedById && user?.id && String(lead.assignedById) === String(user.id)) ||
+        lead.createdBy === user?.name
+      ));
+    const dealAgentName = isIrm
+      ? (isLeadCreatedByIrm ? (user?.name || 'Dhinakaran') : (lead.assignedByName || 'Naveen'))
+      : (lead.assignedAgentName || user?.name || 'Naveen');
 
-  const followupToPipelineCard = (followup: Followup): Deal => ({
-    id: followup.id,
-    companyId: followup.companyId || tenant?.id || '',
-    title: followup.contactName,
-    customerId: followup.contactId,
-    customerName: followup.contactName,
-    phone: followup.contactPhone,
-    email: (followup as any).email || undefined,
-    assignedAgentId: followup.assignedAgentId,
-    assignedAgentName: followup.assignedAgentName,
-    stage: 'followup',
-    stageEnteredAt: followup.scheduledAt,
-    createdAt: followup.scheduledAt || (followup as any).createdAt || '',
-    expectedCloseDate: '',
-    notes: followup.notes || '',
-    value: 0,
-    priority: (followup.priority as 'High' | 'Medium' | 'Low') || 'Medium',
-    investmentRange:
-      (followup as any).investmentCapacity ||
-      (followup as any).investmentRange ||
-      undefined,
-    preferredAssetClass: (followup as any).preferredAssetClass || (followup as any).customFields?.preferredAssetClass || undefined,
-  });
+    return {
+      id: lead.id,
+      companyId: lead.companyId || tenant?.id || '',
+      title: lead.name,
+      customerId: lead.id,
+      customerName: lead.name,
+      phone: lead.phone,
+      email: lead.email,
+      assignedAgentId: lead.assignedAgentId,
+      assignedAgentName: dealAgentName,
+      stage: 'leads',
+      stageEnteredAt: lead.createdAt,
+      createdAt: lead.createdAt,
+      expectedCloseDate: '',
+      notes: lead.notes || '',
+      value: 0,
+      priority: lead.priority === 'Urgent' ? 'High' : (lead.priority as 'High' | 'Medium' | 'Low'),
+      location: lead.location,
+      investmentRange:
+        lead.customFields?.investmentCapacity ||
+        lead.customFields?.capacityRange ||
+        lead.customFields?.investmentRange ||
+        (lead as any).investmentRange ||
+        undefined,
+      investorType: lead.customFields?.investorType || undefined,
+      preferredAssetClass: lead.customFields?.preferredAssetClass || undefined,
+    };
+  };
+
+  const followupToPipelineCard = (followup: Followup): Deal => {
+    const isFuCreatedByIrm =
+      followup.assignedByName === 'Created by IRM' ||
+      (isIrm && (
+        (followup.assignedById && user?.id && String(followup.assignedById) === String(user.id)) ||
+        followup.createdBy === user?.name
+      ));
+    const dealAgentName = isIrm
+      ? (isFuCreatedByIrm ? (user?.name || 'Dhinakaran') : (followup.assignedByName || 'Naveen'))
+      : (followup.assignedAgentName || user?.name || 'Naveen');
+
+    return {
+      id: followup.id,
+      companyId: followup.companyId || tenant?.id || '',
+      title: followup.contactName,
+      customerId: followup.contactId,
+      customerName: followup.contactName,
+      phone: followup.contactPhone,
+      email: (followup as any).email || undefined,
+      assignedAgentId: followup.assignedAgentId,
+      assignedAgentName: dealAgentName,
+      stage: 'followup',
+      stageEnteredAt: followup.scheduledAt,
+      createdAt: followup.scheduledAt || (followup as any).createdAt || '',
+      expectedCloseDate: '',
+      notes: followup.notes || '',
+      value: 0,
+      priority: (followup.priority as 'High' | 'Medium' | 'Low') || 'Medium',
+      investmentRange:
+        (followup as any).investmentCapacity ||
+        (followup as any).investmentRange ||
+        undefined,
+      preferredAssetClass: (followup as any).preferredAssetClass || (followup as any).customFields?.preferredAssetClass || undefined,
+    };
+  };
 
   // Agent filter options — derived from the already-scoped pool so execs never see this.
   const agentOptions = Array.from(
@@ -288,6 +315,14 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
     if (currentIndex === -1) return;
 
     const newIndex = direction === 'forward' ? currentIndex + 1 : currentIndex - 1;
+
+    // Moving into the final (won) stage must run the same conversion logic as "Mark Won"
+    // (investor record creation / linking), otherwise the deal ends up Won with no investor.
+    if (direction === 'forward' && newIndex === stages.length - 1 && stages[newIndex].id === wonStageId) {
+      void handleMarkWon(deal);
+      return;
+    }
+
     if (newIndex >= 0 && newIndex < stages.length) {
       const updatedDeal: Deal = {
         ...deal,
@@ -340,7 +375,10 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
           updated.customerId = String(existingInv.id);
         }
       } catch (err) {
+        // Do not mark the deal Won when the investor record could not be created/linked.
         console.warn('[PipelinePage] Error syncing investor on mark won:', err);
+        showToast('Could not create the investor record, so the deal was not marked as won. Please try again.');
+        return;
       }
     }
     try {
@@ -422,6 +460,12 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
               onClearAll={() => setAgentFilter('All')}
             />
           )}
+          <button
+            className="btn btn-primary pipeline-new-deal-btn"
+            onClick={() => onOpenQuickCreate('deal')}
+          >
+            <Plus size={15} /> New Deal
+          </button>
         </div>
       </div>
 
@@ -635,49 +679,28 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                               👤 {deal.assignedAgentName}
                             </span>
 
-                            {/* Stage Mover and Action Buttons */}
-                            <div className="pipeline-deal-actions">
-                              {!isWon && !isLost && sIdx > 0 && (
-                                <button
-                                  className="btn btn-ghost btn-icon btn-sm pipeline-stage-mover-btn"
-                                  title="Move to Previous Stage"
-                                  onClick={() => handleMoveStage(deal, 'backward')}
-                                >
-                                  <ChevronLeft size={13} />
-                                </button>
-                              )}
-                              {!isWon && !isLost && sIdx < stages.length - 1 && (
-                                <button
-                                  className="btn btn-primary btn-icon btn-sm pipeline-stage-mover-btn"
-                                  title="Advance to Next Stage"
-                                  onClick={() => handleMoveStage(deal, 'forward')}
-                                >
-                                  <ChevronRight size={13} />
-                                </button>
-                              )}
-                              {canUpdateDeals && (
-                                <>
-                                  {!isWon && (
-                                    <button
-                                      className="btn btn-ghost btn-icon btn-sm pipeline-mark-won-btn"
-                                      title="Mark Won"
-                                      onClick={() => handleMarkWon(deal)}
-                                    >
-                                      <CheckCircle size={14} />
-                                    </button>
-                                  )}
-                                  {!isLost && !isWon && (
-                                    <button
-                                      className="btn btn-ghost btn-icon btn-sm pipeline-mark-lost-btn"
-                                      title="Mark Lost"
-                                      onClick={() => setSelectedDealForLoss(deal)}
-                                    >
-                                      <XCircle size={14} />
-                                    </button>
-                                  )}
-                                </>
-                              )}
-                            </div>
+                            {canUpdateDeals && (
+                              <div className="pipeline-deal-actions">
+                                {!isWon && (
+                                  <button
+                                    className="btn btn-ghost btn-icon btn-sm pipeline-mark-won-btn"
+                                    title="Mark Won"
+                                    onClick={() => handleMarkWon(deal)}
+                                  >
+                                    <CheckCircle size={14} />
+                                  </button>
+                                )}
+                                {!isLost && !isWon && (
+                                  <button
+                                    className="btn btn-ghost btn-icon btn-sm pipeline-mark-lost-btn"
+                                    title="Mark Lost"
+                                    onClick={() => setSelectedDealForLoss(deal)}
+                                  >
+                                    <XCircle size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -810,25 +833,25 @@ export const PipelinePage: React.FC<PipelinePageProps> = ({ onOpenQuickCreate })
                   <span className="irm-detail-grid-label">
                     <TrendingUp size={12} /> Investment Capacity / Size
                   </span>
-                  <span className="irm-detail-grid-value" style={{ color: '#10b981', fontWeight: 800 }}>
-                    {irmDetailDeal.investmentRange || (irmDetailDeal.value > 0 ? formatCurrency(irmDetailDeal.value) : '—')}
-                  </span>
+                  {irmDetailDeal.investmentRange || (irmDetailDeal.value > 0 ? formatCurrency(irmDetailDeal.value) : null) ? (
+                    <span className="irm-detail-grid-value" style={{ color: '#10b981', fontWeight: 800 }}>
+                      {irmDetailDeal.investmentRange || formatCurrency(irmDetailDeal.value)}
+                    </span>
+                  ) : (
+                    <span className="not-specified-badge">Not Specified</span>
+                  )}
                 </div>
                 <div className="irm-detail-grid-item">
                   <span className="irm-detail-grid-label">
                     Preferred Asset Class
                   </span>
-                  <span className="irm-detail-grid-value">
-                    {irmDetailDeal.preferredAssetClass || '—'}
-                  </span>
-                </div>
-                <div className="irm-detail-grid-item">
-                  <span className="irm-detail-grid-label">
-                    Investor Structure / Mandate
-                  </span>
-                  <span className="irm-detail-grid-value">
-                    {irmDetailDeal.investorType || '—'}
-                  </span>
+                  {irmDetailDeal.preferredAssetClass && irmDetailDeal.preferredAssetClass !== '—' ? (
+                    <span className="irm-detail-grid-value">
+                      {irmDetailDeal.preferredAssetClass}
+                    </span>
+                  ) : (
+                    <span className="not-specified-badge">Not Specified</span>
+                  )}
                 </div>
                 {irmDetailDeal.customerId && (
                   <div className="irm-detail-grid-item">

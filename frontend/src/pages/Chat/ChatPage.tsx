@@ -9,6 +9,8 @@ import { MessageThread } from './MessageThread';
 import { NewConversationModal } from './NewConversationModal';
 import { MeetingRoom } from './MeetingRoom';
 import { ChatSettingsModal } from './ChatSettingsModal';
+import { adminUserService } from '../../services/adminUserService';
+import { chatApiService } from '../../services/chatApiService';
 import './ChatPage.css';
 
 const getStoredUsers = (tenantSlug?: string): any[] => {
@@ -41,7 +43,7 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
   const [isMobileThreadOpen, setIsMobileThreadOpen] = useState(false);
 
   // Derive companyId: prefer numeric/slug id from user, fall back to tenant id
-  const companyId = (user?.companyId as string | undefined) ?? tenant?.id ?? '';
+  const companyId = String(user?.companyId ?? tenant?.id ?? '1');
 
   // Map TopBar AgentPresence to chat presence
   const currentPresenceStatus: 'online' | 'busy' | 'offline' =
@@ -74,15 +76,31 @@ export const ChatPage: React.FC<{ onNavigate?: (route: string) => void }> = ({ o
 
     // Build directory from storageService users, filtered strictly to this company
     const allUsers = getStoredUsers(tenant?.slug);
-    setDirectory(cs.buildDirectory(allUsers as any, companyId, tenant?.slug));
+    if (allUsers.length === 0) {
+      adminUserService.getUsers(companyId).then(users => {
+        if (users && users.length > 0) {
+          setDirectory(cs.buildDirectory(users as any, companyId, tenant?.slug));
+        }
+      }).catch(() => {});
+    } else {
+      setDirectory(cs.buildDirectory(allUsers as any, companyId, tenant?.slug));
+    }
   }, [companyId, tenant?.slug]);
 
   useEffect(() => {
     loadData();
+
+    // Proactively fetch latest conversations from server on mount
+    chatApiService.getConversations().then(serverConvs => {
+      if (Array.isArray(serverConvs) && serverConvs.length > 0) {
+        setConversations(serverConvs.filter(c => cs.isMatchingCompany(c.companyId, companyId)));
+      }
+    }).catch(() => {});
+
     const handler = () => loadData();
     window.addEventListener('nexus_chat_updated', handler);
     return () => window.removeEventListener('nexus_chat_updated', handler);
-  }, [loadData]);
+  }, [loadData, companyId]);
 
   // Auto-select first conversation if none selected on desktop
   useEffect(() => {

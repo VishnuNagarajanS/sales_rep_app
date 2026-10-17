@@ -13,6 +13,19 @@ namespace backend.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql(@"
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Leads') THEN
+        ALTER TABLE ""Leads"" RENAME TO leads;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'CallRecords') THEN
+        ALTER TABLE ""CallRecords"" RENAME TO call_records;
+    END IF;
+END $$;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssignedAgentId"" integer NULL;
+");
+
             // migrationBuilder.DropIndex(
             //     name: "IX_leads_CompanyId",
             //     table: "leads");

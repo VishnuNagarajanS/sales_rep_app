@@ -167,12 +167,44 @@ class StorageService {
           }
         }
       }
+
+      // 8. Purge rogue/stale IRM preference keys from testing/previous sessions
+      const PREF_PURGE_KEY = 'nexus_irm_pref_purged_v2';
+      if (!localStorage.getItem(PREF_PURGE_KEY)) {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('nexus_irm_pref_')) {
+            localStorage.removeItem(k);
+          }
+        }
+        localStorage.setItem(PREF_PURGE_KEY, 'true');
+      }
+
+      // Continuously ensure any malformed/unconfirmed preference caches are removed
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('nexus_irm_pref_')) {
+          try {
+            const raw = localStorage.getItem(k);
+            if (!raw) {
+              localStorage.removeItem(k);
+              continue;
+            }
+            const parsed = JSON.parse(raw);
+            if (!parsed?.confirmed || !parsed?.preferredAssetClass) {
+              localStorage.removeItem(k);
+            }
+          } catch {
+            localStorage.removeItem(k);
+          }
+        }
+      }
     } catch (e) {
       console.error('Error in cleanupFakeRuntimeData:', e);
     }
   }
 
-  private get<T>(key: string, fallback: T): T {
+  get<T>(key: string, fallback: T): T {
     try {
       const data = localStorage.getItem(`nexus_${key}`);
       return data ? JSON.parse(data) : fallback;
@@ -181,12 +213,20 @@ class StorageService {
     }
   }
 
-  private set<T>(key: string, value: T): void {
+  set<T>(key: string, value: T): void {
     try {
       localStorage.setItem(`nexus_${key}`, JSON.stringify(value));
       window.dispatchEvent(new Event('nexus_storage_updated'));
     } catch (e) {
       console.error('Failed to save to localStorage', e);
+    }
+  }
+
+  setIrms(irms: IrmProfile[]): void {
+    try {
+      localStorage.setItem('nexus_company_irms', JSON.stringify(irms));
+    } catch (e) {
+      console.error('Failed to save irms to localStorage', e);
     }
   }
 
@@ -209,19 +249,131 @@ class StorageService {
   // Users
   getUsers(companySlug?: string): User[] {
     let users = this.get<User[]>('users', []);
-    if (!users || users.length === 0) {
       try {
-        const raw = localStorage.getItem('nexus_dev_users');
+        const raw = localStorage.getItem('nexus_dev_users') || localStorage.getItem('nexus_users');
         if (raw) users = JSON.parse(raw);
       } catch {}
+    if (!users || users.length === 0) {
+      // Default fallback users corresponding to the database seeds
+      users = [
+        {
+          id: '1',
+          name: 'Yanosh',
+          email: 'yanosh@ghlindiaventures.com',
+          phone: '+91 98800 11000',
+          role: { id: '1', name: 'Super Admin', code: 'super_admin', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Today',
+        },
+        {
+          id: '2',
+          name: 'Vishnu',
+          email: 'vishnu@ghlindiaventures.com',
+          phone: '+91 98450 11223',
+          companyId: '1',
+          companySlug: 'ghl',
+          companyName: 'GHL India Ventures',
+          role: { id: '2', name: 'Company Admin', code: 'company_admin', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Today',
+        },
+        {
+          id: '3',
+          name: 'Naveen',
+          email: 'naveen@ghlindiaventures.com',
+          phone: '+91 98450 22334',
+          companyId: '1',
+          companySlug: 'ghl',
+          companyName: 'GHL India Ventures',
+          role: { id: '3', name: 'Sales Executive', code: 'sales_executive', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Just now',
+        },
+        {
+          id: '4',
+          name: 'Mani',
+          email: 'mani@ghlindiaventures.com',
+          phone: '+91 98450 33445',
+          companyId: '2',
+          companySlug: 'jamin',
+          companyName: 'Jamin Bazaar',
+          role: { id: '2', name: 'Company Admin', code: 'company_admin', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Today',
+        },
+        {
+          id: '5',
+          name: 'Dhinakaran',
+          email: 'dhinakaran@ghlindiaventures.com',
+          phone: '+91 98110 77889',
+          companyId: '1',
+          companySlug: 'ghl',
+          companyName: 'GHL India Ventures',
+          role: { id: '4', name: 'IRM', code: 'irm', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Today',
+        },
+        {
+          id: '6',
+          name: 'Rajesh Sharma',
+          email: 'rajesh@jaminbazaar.com',
+          phone: '+91 98450 44556',
+          companyId: '2',
+          companySlug: 'jamin',
+          companyName: 'Jamin Bazaar',
+          role: { id: '3', name: 'Sales Executive', code: 'sales_executive', permissions: [] },
+          status: 'Active',
+          lastLogin: 'Today',
+        },
+      ];
     }
-    return companySlug ? users.filter(u => u.companySlug === companySlug || (u as any).companyId === companySlug) : users;
+    // Sanitize: strictly map any legacy sales_manager to sales_executive
+    users = (users || []).map(u => {
+      if ((u.role?.code as string) === 'sales_manager' || (u.role?.name && u.role.name.toLowerCase().includes('manager') && !u.role.name.toLowerCase().includes('irm') && !u.role.name.toLowerCase().includes('investor'))) {
+        return {
+          ...u,
+          role: {
+            ...u.role,
+            code: 'sales_executive' as const,
+            name: 'Sales Executive'
+          }
+        };
+      }
+      return u;
+    });
+    if (!companySlug || companySlug === 'all') return users;
+    const target = String(companySlug).toLowerCase().trim();
+    return users.filter(u => {
+      const uSlug = String(u.companySlug || '').toLowerCase().trim();
+      const uId = String((u as any).companyId || '').toLowerCase().trim();
+      if (!uSlug && !uId) return true;
+      if (target === 'ghl' || target === 't-ghl-01' || target === '1') {
+        return uSlug === 'ghl' || uSlug === 't-ghl-01' || uSlug === '1' || uId === '1' || uId === 't-ghl-01' || !uSlug || (u.companyName && u.companyName.toLowerCase().includes('ghl'));
+      }
+      if (target === 'jamin' || target === 't-jamin-02' || target === '2') {
+        return uSlug === 'jamin' || uSlug === 't-jamin-02' || uSlug === '2' || uId === '2' || uId === 't-jamin-02' || (u.companyName && u.companyName.toLowerCase().includes('jamin'));
+      }
+      return uSlug === target || uId === target;
+    });
   }
 
   setUsers(users: User[]): void {
-    this.set('users', users);
+    const sanitized = (users || []).map(u => {
+      if ((u.role?.code as string) === 'sales_manager' || (u.role?.name && u.role.name.toLowerCase().includes('manager') && !u.role.name.toLowerCase().includes('irm') && !u.role.name.toLowerCase().includes('investor'))) {
+        return {
+          ...u,
+          role: {
+            ...u.role,
+            code: 'sales_executive' as const,
+            name: 'Sales Executive'
+          }
+        };
+      }
+      return u;
+    });
+    this.set('users', sanitized);
     try {
-      localStorage.setItem('nexus_dev_users', JSON.stringify(users));
+      localStorage.setItem('nexus_dev_users', JSON.stringify(sanitized));
     } catch {}
     window.dispatchEvent(new Event('nexus_storage_updated'));
   }
@@ -246,6 +398,76 @@ class StorageService {
     try {
       localStorage.setItem('nexus_dev_users', JSON.stringify(users));
     } catch {}
+  }
+
+  deleteUserWithHandover(userId: string, handoverToUserId?: string, companyId?: string): void {
+    if (handoverToUserId) {
+      const users = this.getUsers();
+      const handoverUser = users.find(u => String(u.id) === String(handoverToUserId));
+      const handoverName = handoverUser?.name || 'Assigned Agent';
+
+      // 1. Reassign leads
+      const leads = this.getLeads();
+      let leadsUpdated = false;
+      leads.forEach(l => {
+        if (
+          String(l.assignedAgentId) === String(userId) ||
+          (l.assignedAgentName && handoverUser && l.assignedAgentName.toLowerCase() === handoverUser.name.toLowerCase())
+        ) {
+          l.assignedAgentId = handoverToUserId;
+          l.assignedAgentName = handoverName;
+          leadsUpdated = true;
+        }
+      });
+      if (leadsUpdated) {
+        this.set('leads', leads);
+      }
+
+      // 2. Reassign followups
+      const followups = this.getFollowups();
+      let followupsUpdated = false;
+      followups.forEach(f => {
+        if (String(f.assignedAgentId) === String(userId)) {
+          f.assignedAgentId = handoverToUserId;
+          f.assignedAgentName = handoverName;
+          f.assignedToName = handoverName;
+          followupsUpdated = true;
+        }
+      });
+      if (followupsUpdated) {
+        this.set('followups', followups);
+      }
+
+      // 3. Reassign deals
+      const deals = this.getDeals();
+      let dealsUpdated = false;
+      deals.forEach(d => {
+        if (String(d.assignedAgentId) === String(userId)) {
+          d.assignedAgentId = handoverToUserId;
+          d.assignedAgentName = handoverName;
+          dealsUpdated = true;
+        }
+      });
+      if (dealsUpdated) {
+        this.set('deals', deals);
+      }
+
+      // 4. Reassign customers
+      const customers = this.getCustomers();
+      let customersUpdated = false;
+      customers.forEach(c => {
+        if (String(c.assignedAgentId) === String(userId)) {
+          c.assignedAgentId = handoverToUserId;
+          c.assignedAgentName = handoverName;
+          customersUpdated = true;
+        }
+      });
+      if (customersUpdated) {
+        this.set('customers', customers);
+      }
+    }
+
+    this.deleteUser(userId);
   }
 
   // Leads (Defaults to empty [] - real-time data only)
@@ -397,6 +619,23 @@ class StorageService {
       deals.unshift(deal);
     }
     this.set('deals', deals);
+  }
+
+  setDeals(deals: Deal[], silent = true): void {
+    if (silent) {
+      try {
+        localStorage.setItem('nexus_deals', JSON.stringify(deals));
+      } catch (e) {
+        console.error('Failed to save to localStorage', e);
+      }
+    } else {
+      this.set('deals', deals);
+    }
+  }
+
+  deleteDeal(dealId: string): void {
+    const deals = this.getDeals();
+    this.set('deals', deals.filter(d => String(d.id) !== String(dealId)));
   }
 
   // Deal Activities
@@ -1011,17 +1250,25 @@ class StorageService {
   getAgents(companyId?: string): Array<{ id: number | string; name: string; email?: string; role?: string }> {
     const users = this.getUsers(companyId);
     const agents = users
-      .filter(u => u.role?.code === 'sales_executive' || u.role?.name?.toLowerCase().includes('sales'))
+      .filter(u => !u.isCovered && (u.role?.code === 'sales_executive' || u.role?.name?.toLowerCase().includes('sales')))
       .map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role?.name || 'Sales Executive' }));
-    return agents;
+    if (agents.length > 0) return agents;
+    return [
+      { id: '3', name: 'Naveen', role: 'Sales Executive', email: 'naveen@ghlindiaventures.com' },
+    ];
   }
 
   getIrms(companyId?: string): IrmProfile[] {
+    const cachedApiIrms = this.get<IrmProfile[]>('company_irms', []);
+    if (cachedApiIrms && cachedApiIrms.length > 0) {
+      return cachedApiIrms;
+    }
+
     const users = this.getUsers(companyId);
-    const irms = users
-      .filter(u => u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('irm') || u.role?.name?.toLowerCase().includes('investor'))
+    const irms: IrmProfile[] = users
+      .filter(u => !u.isCovered && (u.role?.code === 'irm' || u.role?.name?.toLowerCase().includes('irm') || u.role?.name?.toLowerCase().includes('investor') || String(u.role?.id) === '4'))
       .map(u => ({
-        id: u.id,
+        id: String(u.id),
         name: u.name,
         email: u.email,
         phone: u.phone,
@@ -1031,7 +1278,18 @@ class StorageService {
         performance: 95,
         status: 'Available' as const,
       }));
-    return irms;
+
+    if (irms.length > 0) return irms;
+
+    // Safety fallback for GHL India Ventures
+    const isJamin = companyId === '2' || companyId === 't-jamin-02' || companyId === 'jamin';
+    if (isJamin) return [];
+
+    return [
+      { id: '50', name: 'karnan', email: 'dhina729@gmail.com', phone: '+91 98450', experience: '5 Years', experienceYears: 5, experienceLevel: 'Experienced' as const, performance: 95, status: 'Available' as const },
+      { id: '5', name: 'Dhinakaran', email: 'dhinakaran@ghlindiaventures.com', phone: '+91 98110 77889', experience: '5 Years', experienceYears: 5, experienceLevel: 'Experienced' as const, performance: 95, status: 'Available' as const },
+      { id: '43', name: 'Sample_IRM', email: 'vishnunagaraj808@gmail.com', phone: '+91 98450 74125', experience: '3 Years', experienceYears: 3, experienceLevel: 'Mid-Level' as const, performance: 90, status: 'Available' as const },
+    ];
   }
 
   getInitialCustomers(): Customer[] {

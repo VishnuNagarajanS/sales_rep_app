@@ -28,7 +28,11 @@ public class CustomerService : ICustomerService
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Customers.AsNoTracking().Include(c => c.AssignedAgent).AsQueryable();
+        var query = _context.Customers.AsNoTracking()
+            .Include(c => c.AssignedAgent)
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .AsQueryable();
 
         if (role == "super_admin")
         {
@@ -56,7 +60,11 @@ public class CustomerService : ICustomerService
         var agentId = _currentUser.UserId;
         var companyId = _currentUser.CompanyId;
 
-        var query = _context.Customers.Include(c => c.AssignedAgent).Where(c => c.Id == id);
+        var query = _context.Customers
+            .Include(c => c.AssignedAgent)
+            .Include(c => c.OriginalOwner)
+            .Include(c => c.Handover)
+            .Where(c => c.Id == id);
 
         if (role == "super_admin")
         {
@@ -328,6 +336,15 @@ public class CustomerService : ICustomerService
 
     private static CustomerResponseDto MapToDto(Customer c)
     {
+        var customFields = DeserializeCustomFields(c.CustomFieldsJson);
+        bool isReturned = customFields.TryGetValue("returnedFromHandover", out var retVal) && retVal == "true";
+        string? returnedCoveringName = customFields.TryGetValue("returnedFromCoveringUserName", out var rcn) ? rcn : null;
+        DateTime? returnedAt = null;
+        if (customFields.TryGetValue("returnedAt", out var retAtStr) && DateTime.TryParse(retAtStr, out var parsedRetAt))
+        {
+            returnedAt = parsedRetAt;
+        }
+
         return new CustomerResponseDto
         {
             Id = c.Id,
@@ -341,10 +358,17 @@ public class CustomerService : ICustomerService
             Status = c.Status,
             TotalValue = c.TotalValue,
             Notes = c.Notes,
-            CustomFields = DeserializeCustomFields(c.CustomFieldsJson),
+            CustomFields = customFields,
             LastContactedAt = c.LastContactedAt,
             CreatedAt = c.CreatedAt,
-            UpdatedAt = c.UpdatedAt
+            UpdatedAt = c.UpdatedAt,
+            HandoverId = c.HandoverId,
+            HandedOverFromName = c.OriginalOwner?.Name,
+            HandoverPlannedEnd = c.Handover?.PlannedEndAt,
+            OriginalOwnerId = c.OriginalOwnerId,
+            IsReturnedFromHandover = isReturned,
+            ReturnedFromCoveringUserName = returnedCoveringName,
+            ReturnedAt = returnedAt
         };
     }
 

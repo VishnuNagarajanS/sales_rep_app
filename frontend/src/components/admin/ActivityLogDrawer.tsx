@@ -142,6 +142,9 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
               </div>
             </div>
 
+
+
+
           </div>
 
           <div className="activity-summary-grid">
@@ -236,7 +239,11 @@ export const ActivityLogDrawer: React.FC<ActivityLogDrawerProps> = ({
           )}
         </div>
 
+
+
+
         {/* Add Note / Activity Form Removed */}
+
 
         {/* Chronological Timeline */}
         <div className="activity-timeline-section">

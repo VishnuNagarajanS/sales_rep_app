@@ -16,6 +16,11 @@ public class InvestorKyc
     public int? IrmId { get; set; }
     public User? Irm { get; set; }
 
+    public int? HandoverId { get; set; }
+    public WorkHandover? Handover { get; set; }
+    public int? OriginalOwnerId { get; set; }
+    public User? OriginalOwner { get; set; }
+
     public KycStatus Status { get; set; } = KycStatus.Draft;
 
     // Step 1: Basic Details

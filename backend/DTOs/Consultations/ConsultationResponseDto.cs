@@ -13,6 +13,12 @@ public class ConsultationResponseDto
     public string Status { get; set; } = string.Empty;
     public string Agenda { get; set; } = string.Empty;
     public string OutcomeNotes { get; set; } = string.Empty;
+    public string? ReferredByAgentName { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+
+    public int? HandoverId { get; set; }
+    public string? HandedOverFromName { get; set; }
+    public DateTime? HandoverPlannedEnd { get; set; }
+    public int? OriginalOwnerId { get; set; }
 }

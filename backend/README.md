@@ -298,11 +298,12 @@ Prevents account enumeration by returning the exact same generic error message r
    ```bash
    cd sales_rep_app/backend
    ```
-2. Verify `appsettings.json` connection string:
-   ```json
-   "ConnectionStrings": {
-     "DefaultConnection": "Host=127.0.0.1;Port=5432;Database=SalesAppDB;Username=postgres;Password=YOUR_PASSWORD"
-   }
+2. Configure your environment:
+   You can either verify/edit `appsettings.json` directly, or (recommended) create a `.env` file in the `backend/` directory. The application loads `.env` automatically via DotNetEnv.
+   Example `.env` file:
+   ```env
+   ConnectionStrings__DefaultConnection=Host=127.0.0.1;Port=5432;Database=SalesAppDB;Username=postgres;Password=YOUR_PASSWORD
+   JwtSettings__SecretKey=your-very-long-secret-key-32-chars-min
    ```
 3. Apply migrations to initialize and seed PostgreSQL:
    ```bash
@@ -314,6 +315,8 @@ Whenever you pull new code or a new migration file appears in `backend/Migration
 ```bash
 dotnet ef database update
 ```
+**Warning:** Be sure your `ASPNETCORE_ENVIRONMENT` is set to `Development` before running this locally (e.g. `$env:ASPNETCORE_ENVIRONMENT="Development"`). Some migrations execute logic that behaves differently in non-dev environments (like disabling demo users).
+
 The backend startup checks will log a warning banner if any migrations are pending.
 
 4. Run the API:

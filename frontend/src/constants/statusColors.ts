@@ -30,6 +30,7 @@ export const STATUS_COLOR_MAP: Record<string, { bg: string; text: string; border
   'Call Back': { bg: 'rgba(59, 130, 246, 0.12)', text: '#2563eb', border: 'rgba(59, 130, 246, 0.3)', variant: 'info' },
   Callback: { bg: 'rgba(59, 130, 246, 0.12)', text: '#2563eb', border: 'rgba(59, 130, 246, 0.3)', variant: 'info' },
   'Wrong Number': { bg: 'rgba(100, 116, 139, 0.12)', text: '#64748b', border: 'rgba(100, 116, 139, 0.3)', variant: 'neutral' },
+  Junk: { bg: 'rgba(100, 116, 139, 0.12)', text: '#64748b', border: 'rgba(100, 116, 139, 0.3)', variant: 'neutral' },
   'No Response': { bg: 'rgba(100, 116, 139, 0.12)', text: '#64748b', border: 'rgba(100, 116, 139, 0.3)', variant: 'neutral' },
   Skipped: { bg: 'rgba(245, 158, 11, 0.12)', text: '#d97706', border: 'rgba(245, 158, 11, 0.3)', variant: 'warning' },
 

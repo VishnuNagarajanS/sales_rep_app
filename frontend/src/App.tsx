@@ -20,6 +20,13 @@ export const routeToPath = (route: string, isSuperAdmin: boolean): string => {
         return '/audit';
       case 'admin-security':
         return '/security';
+      case 'admin-documents':
+        return '/documents';
+      case 'admin-converted-customers':
+      case 'converted-customers':
+        return '/converted-customers';
+      case 'admin-tickets':
+        return '/tickets';
       case 'admin-system':
         return '/system-health';
       default:
@@ -31,10 +38,23 @@ export const routeToPath = (route: string, isSuperAdmin: boolean): string => {
         return '/dashboard';
       case 'company-users':
         return '/users';
+      case 'company-documents':
+        return '/documents';
+      case 'leave-requests':
+        return '/leave-requests';
+      case 'work-handover':
+        return '/handover';
       case 'company-settings':
         return '/settings';
       case 'company-audit':
         return '/audit';
+      case 'support':
+        return '/support';
+      case 'converted-customers':
+        return '/converted-customers';
+      case 'irm-other':
+      case 'other':
+        return '/other';
       default:
         return `/${route}`;
     }
@@ -59,10 +79,16 @@ export const pathToRoute = (pathname: string, isSuperAdmin: boolean): string => 
       case '/settings':
       case '/call-config':
         return 'admin-call-config';
+      case '/documents':
+        return 'admin-documents';
       case '/audit':
         return 'admin-audit';
       case '/security':
         return 'admin-security';
+      case '/converted-customers':
+        return 'admin-converted-customers';
+      case '/tickets':
+        return 'admin-tickets';
       case '/system-health':
       case '/system':
         return 'admin-system';
@@ -73,10 +99,23 @@ export const pathToRoute = (pathname: string, isSuperAdmin: boolean): string => 
     switch (cleanPath) {
       case '/users':
         return 'company-users';
+      case '/documents':
+        return 'company-documents';
+      case '/leave-requests':
+        return 'leave-requests';
+      case '/handover':
+      case '/work-handover':
+        return 'work-handover';
       case '/settings':
         return 'company-settings';
       case '/audit':
         return 'company-audit';
+      case '/support':
+        return 'support';
+      case '/converted-customers':
+        return 'converted-customers';
+      case '/other':
+        return 'irm-other';
       default: {
         const seg = cleanPath.slice(1);
         return seg || 'dashboard';
@@ -125,12 +164,19 @@ import { ConsultationsPage } from './pages/Consultations/ConsultationsPage';
 import { OpportunitiesPage } from './pages/InvestmentOpportunities/OpportunitiesPage';
 import { AssignedLeadsPage } from './pages/AssignedLeads/AssignedLeadsPage';
 import { PendingLeadsPage } from './pages/PendingLeads/PendingLeadsPage';
+import { ArchivedLeadsPage } from './pages/ArchivedLeads/ArchivedLeadsPage';
 import { KYCPage } from './pages/KYC/KYCPage';
+import { IrmOtherPage } from './pages/IrmOther/IrmOtherPage';
+import { AllLeadsPage } from './pages/Irm/AllLeadsPage';
 
 // Company Admin
 import { CompanyUsersPage } from './pages/Company/CompanyUsersPage';
+import { CompanyDocumentsPage } from './pages/Company/CompanyDocumentsPage';
+import { LeaveRequestsPage } from './pages/Company/LeaveRequestsPage';
+import { WorkHandoverPage } from './pages/Company/WorkHandoverPage';
 import { CompanySettingsPage } from './pages/Company/CompanySettingsPage';
 import { CompanyAuditPage } from './pages/Company/CompanyAuditPage';
+import { SmartyAIPage } from './pages/AI/SmartyAIPage';
 
 // Super Admin Platform Pages
 import { PlatformDashboardPage } from './pages/Admin/Dashboard/PlatformDashboardPage';
@@ -139,13 +185,18 @@ import { PlatformUsersPage } from './pages/Admin/Users/PlatformUsersPage';
 import { PlatformRolesPage } from './pages/Admin/Roles/PlatformRolesPage';
 import { PlatformFeaturesPage } from './pages/Admin/Features/PlatformFeaturesPage';
 import { PlatformCallConfigPage } from './pages/Admin/CallConfig/PlatformCallConfigPage';
+import { PlatformDocumentsPage } from './pages/Admin/Documents/PlatformDocumentsPage';
 import { PlatformAuditPage } from './pages/Admin/Audit/PlatformAuditPage';
 import { PlatformSystemPage } from './pages/Admin/System/PlatformSystemPage';
 import { PlatformSecurityPage } from './pages/Admin/Security/PlatformSecurityPage';
+import { PlatformTicketsPage } from './pages/Admin/Tickets/PlatformTicketsPage';
+import { ConvertedCustomersPage } from './pages/Admin/Customers/ConvertedCustomersPage';
+import { TenantSupportPage } from './pages/Support/TenantSupportPage';
 import { signalRService } from './services/signalRService';
 
 import { ProtectedRoute } from './components/common/Guards';
 import { Modal } from './components/common/Modal';
+import { ImpersonationBanner } from './components/common/ImpersonationBanner';
 import { storageService } from './services/storageService';
 import { Investor, Customer } from './types';
 import {
@@ -181,7 +232,7 @@ export const App: React.FC = () => {
 
   const roleCode = user?.role?.code;
   const isGhlAdmin =
-    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') &&
+    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1' || tenant?.slug === '1' || tenant?.name?.toLowerCase().includes('ghl') || user?.companySlug === 'ghl') &&
     (roleCode === 'company_admin' || (roleCode as string) === 'admin' || roleCode === 'super_admin');
 
   // Set default route for IRM user
@@ -192,7 +243,7 @@ export const App: React.FC = () => {
         setCurrentRoute('dashboard');
         sessionStorage.setItem('nexus_current_route', 'dashboard');
       }
-    } else if (user?.role?.code === 'sales_executive' && currentRoute === 'kyc') {
+    } else if (user?.role?.code === 'sales_executive' && (currentRoute === 'kyc' || currentRoute === 'all-leads' || currentRoute === 'irm-other' || currentRoute === 'other' || currentRoute === 'investors' || currentRoute === 'opportunities')) {
       setCurrentRoute('dashboard');
       sessionStorage.setItem('nexus_current_route', 'dashboard');
     }
@@ -653,44 +704,63 @@ export const App: React.FC = () => {
   // Super Admin Console
   if (isSuperAdmin) {
     return (
-      <AdminLayout currentRoute={currentRoute} onNavigate={navigate}>
-        {currentRoute === 'admin-dashboard' || currentRoute === 'dashboard' ? (
-          <PlatformDashboardPage onNavigate={navigate} />
-        ) : currentRoute === 'admin-companies' ? (
-          <CompaniesPage
-            initialOpenWizard={Boolean(navExtraState?.openWizard)}
-            selectedTenantId={navExtraState?.selectedTenantId}
-          />
-        ) : currentRoute === 'admin-users' ? (
-          <PlatformUsersPage />
-        ) : currentRoute === 'admin-roles' ? (
-          <PlatformRolesPage />
-        ) : currentRoute === 'admin-features' ? (
-          <PlatformFeaturesPage />
-        ) : currentRoute === 'admin-call-config' ? (
-          <PlatformCallConfigPage />
-        ) : currentRoute === 'admin-audit' ? (
-          <PlatformAuditPage />
-        ) : currentRoute === 'admin-system' ? (
-          <PlatformSystemPage />
-        ) : currentRoute === 'admin-security' ? (
-          <PlatformSecurityPage />
-        ) : (
-          <PlatformDashboardPage onNavigate={navigate} />
-        )}
-      </AdminLayout>
+      <>
+        <ImpersonationBanner />
+        <AdminLayout currentRoute={currentRoute} onNavigate={navigate}>
+          {currentRoute === 'admin-dashboard' || currentRoute === 'dashboard' ? (
+            <PlatformDashboardPage onNavigate={navigate} />
+          ) : currentRoute === 'admin-companies' ? (
+            <CompaniesPage
+              initialOpenWizard={Boolean(navExtraState?.openWizard)}
+              selectedTenantId={navExtraState?.selectedTenantId}
+            />
+          ) : currentRoute === 'admin-users' ? (
+            <PlatformUsersPage />
+          ) : currentRoute === 'admin-roles' ? (
+            <PlatformRolesPage />
+          ) : currentRoute === 'admin-features' ? (
+            <PlatformFeaturesPage />
+          ) : currentRoute === 'admin-call-config' ? (
+            <PlatformCallConfigPage />
+          ) : currentRoute === 'admin-documents' ? (
+            <PlatformDocumentsPage />
+          ) : currentRoute === 'admin-audit' ? (
+            <PlatformAuditPage />
+          ) : currentRoute === 'admin-tickets' ? (
+            <PlatformTicketsPage />
+          ) : currentRoute === 'admin-converted-customers' || currentRoute === 'converted-customers' ? (
+            <ConvertedCustomersPage onNavigate={navigate} />
+          ) : currentRoute === 'admin-system' ? (
+            <PlatformSystemPage />
+          ) : currentRoute === 'admin-security' ? (
+            <PlatformSecurityPage />
+          ) : (
+            <PlatformDashboardPage onNavigate={navigate} />
+          )}
+        </AdminLayout>
+      </>
     );
   }
 
   // Company User Layout (GHL & Jamin)
   return (
-    <SalesLayout
-      currentRoute={currentRoute}
-      onNavigate={navigate}
-      onOpenQuickCreate={handleOpenQuickCreate}
-    >
+    <>
+      <ImpersonationBanner />
+      <SalesLayout
+        currentRoute={currentRoute}
+        onNavigate={navigate}
+        onOpenQuickCreate={handleOpenQuickCreate}
+      >
       {currentRoute === 'dashboard' ? (
         <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+      ) : currentRoute === 'all-leads' ? (
+        user?.role?.code !== 'irm' && !isGhlAdmin && !isSuperAdmin ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+            <AllLeadsPage onNavigate={navigate} />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           <LeadsPage onNavigate={navigate} />
@@ -698,7 +768,7 @@ export const App: React.FC = () => {
       ) : currentRoute === 'assigned-leads' ? (
         <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
           {isGhlAdmin ? (
-            <AssignedLeadsPage />
+            <AssignedLeadsPage onNavigate={navigate} />
           ) : (
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
           )}
@@ -711,9 +781,21 @@ export const App: React.FC = () => {
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
           )}
         </ProtectedRoute>
+      ) : currentRoute === 'archived-leads' ? (
+        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+          {isGhlAdmin ? (
+            <ArchivedLeadsPage />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
+        </ProtectedRoute>
       ) : currentRoute === 'customers' ? (
         <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_VIEW}>
           <CustomersPage />
+        </ProtectedRoute>
+      ) : currentRoute === 'converted-customers' ? (
+        <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_VIEW}>
+          <ConvertedCustomersPage onNavigate={navigate} />
         </ProtectedRoute>
       ) : currentRoute === 'pipeline' ? (
         <ProtectedRoute permission={PERMISSIONS.DEALS_VIEW}>
@@ -762,29 +844,47 @@ export const App: React.FC = () => {
           </ProtectedRoute>
         )
       ) : currentRoute === 'investors' ? (
-        <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
-          <InvestorsPage />
-        </ProtectedRoute>
+        user?.role?.code === 'sales_executive' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+            <InvestorsPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'consultations' ? (
         <ProtectedRoute permission={PERMISSIONS.CONSULTATIONS_VIEW}>
           <ConsultationsPage />
         </ProtectedRoute>
       ) : currentRoute === 'opportunities' ? (
-        <ProtectedRoute permission={PERMISSIONS.OPPORTUNITIES_VIEW}>
-          <OpportunitiesPage />
-        </ProtectedRoute>
+        user?.role?.code === 'sales_executive' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.OPPORTUNITIES_VIEW}>
+            <OpportunitiesPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'not-interested' ? (
-        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          <NotInterestedPage />
-        </ProtectedRoute>
+        user?.role?.code === 'irm' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+            <NotInterestedPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'junk' ? (
-        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          <JunkPage />
-        </ProtectedRoute>
+        user?.role?.code === 'irm' ? (
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+            <JunkPage />
+          </ProtectedRoute>
+        )
       ) : currentRoute === 'chat' ? (
         <ChatPage onNavigate={navigate} />
       ) : currentRoute === 'smarty-ai' ? (
-        <PlaceholderPage title="Smarty AI" />
+        <SmartyAIPage />
+      ) : currentRoute === 'support' ? (
+        <TenantSupportPage />
       ) : currentRoute === 'profile' ? (
         <ProfilePage />
       ) : currentRoute === 'reports' ? (
@@ -797,6 +897,18 @@ export const App: React.FC = () => {
         <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
           <CompanyUsersPage />
         </ProtectedRoute>
+      ) : currentRoute === 'leave-requests' ? (
+        <LeaveRequestsPage onNavigate={navigate} />
+      ) : currentRoute === 'work-handover' ? (
+        <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
+          {isGhlAdmin ? (
+            <WorkHandoverPage initialParams={navExtraState} onNavigate={navigate} />
+          ) : (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          )}
+        </ProtectedRoute>
+      ) : currentRoute === 'company-documents' ? (
+        <CompanyDocumentsPage />
       ) : currentRoute === 'company-settings' ? (
         <ProtectedRoute permission={PERMISSIONS.SETTINGS_VIEW}>
           <CompanySettingsPage />
@@ -805,12 +917,14 @@ export const App: React.FC = () => {
         <ProtectedRoute permission={PERMISSIONS.AUDIT_VIEW}>
           <CompanyAuditPage />
         </ProtectedRoute>
-      ) : (
-        user?.role?.code === 'irm' ? (
-          <InvestorsPage />
-        ) : (
+      ) : currentRoute === 'irm-other' || currentRoute === 'other' ? (
+        user?.role?.code !== 'irm' && !isGhlAdmin && !isSuperAdmin ? (
           <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        ) : (
+          <IrmOtherPage onNavigate={navigate} />
         )
+      ) : (
+        <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
       )}
 
       {/* Global Quick Action Modal */}
@@ -836,7 +950,7 @@ export const App: React.FC = () => {
                   required
                   value={quickName}
                   onChange={e => setQuickName(e.target.value)}
-                  placeholder="e.g. Ramesh Chandra"
+                  placeholder="e.g. Agent One"
                 />
               </div>
 
@@ -865,7 +979,7 @@ export const App: React.FC = () => {
                     className="form-input"
                     value={quickEmail}
                     onChange={e => setQuickEmail(e.target.value)}
-                    placeholder="ramesh@example.com"
+                    placeholder="agent1@example.com"
                   />
                 </div>
               </div>
@@ -1266,6 +1380,7 @@ export const App: React.FC = () => {
         </form>
       </Modal>
     </SalesLayout>
+    </>
   );
 };
 

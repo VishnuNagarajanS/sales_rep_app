@@ -13,6 +13,11 @@ public class Followup
     public int AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
 
+    public int? HandoverId { get; set; }
+    public WorkHandover? Handover { get; set; }
+    public int? OriginalOwnerId { get; set; }
+    public User? OriginalOwner { get; set; }
+
     [NotMapped]
     public int UserId
     {
@@ -49,7 +54,7 @@ public class Followup
     public string ContactType { get; set; } = "lead"; // "lead" | "customer" | "investor"
     public string ContactName { get; set; } = string.Empty;
     public string ContactPhone { get; set; } = string.Empty;
-    public string ContactEmail { get; set; } = string.Empty;
+    public string? ContactEmail { get; set; } = string.Empty;
 
     public DateTime ScheduledAt { get; set; }
     public string Priority { get; set; } = "Medium"; // Low, Medium, High, Urgent

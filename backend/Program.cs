@@ -3,8 +3,31 @@ using backend.Middleware;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 
+// S1: Load .env file (if present) before any configuration is read.
+// This allows developers to keep secrets out of appsettings.json by placing
+// a backend/.env file with environment-variable-style overrides, e.g.:
+//   ConnectionStrings__DefaultConnection=Host=...
+//   JwtSettings__SecretKey=...
+// The file is optional; if missing, standard env vars / appsettings.json apply.
+DotNetEnv.Env.TraversePath().Load();
+
+// Ensure wwwroot directory exists to avoid PhysicalFileProvider DirectoryNotFoundException
+var wwwrootDirectory = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+if (!Directory.Exists(wwwrootDirectory))
+{
+    Directory.CreateDirectory(wwwrootDirectory);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddUserSecrets<Program>(optional: true);
+
+// Support dynamic port for Render / cloud containers
+var renderPort = Environment.GetEnvironmentVariable("PORT");
+if (!string.IsNullOrEmpty(renderPort))
+{
+    builder.WebHost.UseUrls($"http://+:{renderPort}");
+}
+
 
 // 1. Add Controllers
 builder.Services.AddControllers()
@@ -16,6 +39,12 @@ builder.Services.AddControllers()
 
 // 2. Add Layered Application Services & DbContext
 builder.Services.AddApplicationServices(builder.Configuration);
+
+// 2b. Prevent transient background service errors from stopping the application host
+builder.Services.Configure<HostOptions>(options =>
+{
+    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
+});
 
 // 3. Add JWT Authentication & Authorization
 builder.Services.AddJwtAuthentication(builder.Configuration);
@@ -30,10 +59,21 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("DefaultCorsPolicy", policy =>
     {
-        policy.WithOrigins(allowedOrigins)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
+        var hasWildcard = allowedOrigins.Length == 0 || allowedOrigins.Any(o => o == "*" || string.IsNullOrWhiteSpace(o));
+        if (hasWildcard)
+        {
+            policy.SetIsOriginAllowed(_ => true)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
+        else
+        {
+            policy.WithOrigins(allowedOrigins)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
     });
 });
 
@@ -49,6 +89,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 
     c.CustomSchemaIds(type => type.FullName?.Replace("+", ".") ?? type.Name);
+    c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First());
 
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
@@ -99,10 +140,74 @@ using (var scope = app.Services.CreateScope())
         Console.WriteLine($"[Database] Connected to persistent database provider: {db.Database.ProviderName}");
         try
         {
+            var pendingMigrations = db.Database.GetPendingMigrations().ToList();
+            if (pendingMigrations.Any())
+            {
+                Console.WriteLine($"[Database] Applying {pendingMigrations.Count} pending EF Core migration(s)...");
+                try
+                {
+                    db.Database.ExecuteSqlRaw(@"
+                        DO $$
+                        BEGIN
+                            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'roles') THEN
+                                INSERT INTO roles (""Id"", ""Code"", ""Name"", ""CreatedAt"", ""Permissions"")
+                                VALUES
+                                    (1, 'super_admin', 'Super Admin', NOW(), '{}'),
+                                    (2, 'company_admin', 'Company Admin', NOW(), '{}'),
+                                    (3, 'sales_executive', 'Sales Executive', NOW(), '{}'),
+                                    (4, 'irm', 'IRM', NOW(), '{}'),
+                                    (5, 'sales_manager', 'Sales Manager', NOW(), '{}')
+                                ON CONFLICT (""Id"") DO NOTHING;
+                            END IF;
+
+                            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'followups' AND column_name = 'ContactEmail') THEN
+                                IF NOT EXISTS (SELECT 1 FROM ""__EFMigrationsHistory"" WHERE ""MigrationId"" LIKE '%AddKycOtpVerificationAndIrmCoverage%') THEN
+                                    ALTER TABLE followups DROP COLUMN ""ContactEmail"";
+                                END IF;
+                            END IF;
+
+                            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'call_records' AND column_name = 'CallModule') THEN
+                                IF NOT EXISTS (SELECT 1 FROM ""__EFMigrationsHistory"" WHERE ""MigrationId"" LIKE '%AddCallModuleAndReasonToCallRecords%') THEN
+                                    ALTER TABLE call_records DROP COLUMN ""CallModule"";
+                                END IF;
+                            END IF;
+
+                            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'call_records' AND column_name = 'Reason') THEN
+                                IF NOT EXISTS (SELECT 1 FROM ""__EFMigrationsHistory"" WHERE ""MigrationId"" LIKE '%AddCallModuleAndReasonToCallRecords%') THEN
+                                    ALTER TABLE call_records DROP COLUMN ""Reason"";
+                                END IF;
+                            END IF;
+                        END $$;
+                    ");
+                }
+                catch { }
+
+                db.Database.Migrate();
+                Console.WriteLine("[Database] All EF Core migrations applied successfully.");
+            }
+            else
+            {
+                Console.WriteLine("[Database] All EF Core migrations are up to date.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Database Migration Warning] {ex.Message}");
+        }
+
+        try
+        {
             db.Database.ExecuteSqlRaw(@"
                 DO $$
                 BEGIN
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'roles') THEN
+                        -- Restore system role codes if they were corrupted with temp_ prefixes
+                        UPDATE roles SET ""Code"" = 'super_admin' WHERE ""Id"" = 1 OR ""Code"" = 'temp_1';
+                        UPDATE roles SET ""Code"" = 'company_admin' WHERE ""Id"" = 2 OR ""Code"" = 'temp_2';
+                        UPDATE roles SET ""Code"" = 'sales_executive' WHERE ""Id"" = 3 OR ""Code"" = 'temp_3';
+                        UPDATE roles SET ""Code"" = 'irm' WHERE ""Id"" = 4 OR ""Code"" = 'temp_4';
+                        UPDATE roles SET ""Code"" = 'sales_manager' WHERE ""Id"" = 5 OR ""Code"" = 'temp_5';
+
                         ALTER TABLE roles ADD COLUMN IF NOT EXISTS ""Description"" text;
                         ALTER TABLE roles ADD COLUMN IF NOT EXISTS ""IsSystemRole"" boolean NOT NULL DEFAULT FALSE;
                         ALTER TABLE roles ADD COLUMN IF NOT EXISTS ""IsActive"" boolean NOT NULL DEFAULT TRUE;
@@ -141,10 +246,421 @@ using (var scope = app.Services.CreateScope())
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'tenants') THEN
                         ALTER TABLE tenants ADD COLUMN IF NOT EXISTS ""IsProtected"" boolean NOT NULL DEFAULT FALSE;
                         UPDATE tenants SET ""IsProtected"" = TRUE WHERE ""Id"" IN (1, 2) OR ""Slug"" IN ('ghl', 'jamin');
+                        UPDATE tenants SET ""IsActive"" = TRUE, ""Status"" = 'Active' WHERE ""Id"" IN (1, 2) OR ""Slug"" IN ('ghl', 'jamin');
+                        UPDATE tenants SET ""SubscriptionPlan"" = 'Wealth Advisory Enterprise Suite' WHERE ""Id"" IN (1, 2) OR ""Slug"" IN ('ghl', 'jamin');
+                    END IF;
+
+                    -- Call records Duration, Timestamp, and CallModule columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'call_records') THEN
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Timestamp"" timestamp with time zone NOT NULL DEFAULT NOW();
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Duration"" integer NOT NULL DEFAULT 0;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""CallModule"" character varying(50);
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Reason"" text;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""TwilioCallSid"" character varying(64);
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""RecordingUrl"" character varying(256);
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Transcript"" text;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""LeadId"" integer;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'call_records' AND column_name = 'duration') THEN
+                            UPDATE call_records SET ""Duration"" = duration WHERE ""Duration"" = 0;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'call_records' AND column_name = 'DurationSeconds') THEN
+                            UPDATE call_records SET ""Duration"" = ""DurationSeconds"" WHERE ""Duration"" = 0;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'call_records' AND column_name = 'CreatedAt') THEN
+                            UPDATE call_records SET ""Timestamp"" = ""CreatedAt"" WHERE ""Timestamp"" = '0001-01-01' OR ""Timestamp"" IS NULL;
+                        END IF;
+                    END IF;
+
+                    -- Leads columns (Location, Source, Priority, Notes, CustomFieldsJson, NormalizedPhone, NormalizedEmail, HandoverId, etc.)
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'leads') THEN
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Location"" character varying(255) NOT NULL DEFAULT '';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Source"" character varying(100) NOT NULL DEFAULT 'Website Inbound';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'New';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""CustomFieldsJson"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""NormalizedPhone"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""NormalizedEmail"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""IsDuplicate"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""NextFollowupDate"" timestamp with time zone;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssignedById"" integer;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssignedAt"" timestamp with time zone;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'leads' AND column_name = 'city') THEN
+                            UPDATE leads SET ""Location"" = city WHERE ""Location"" = '';
+                        END IF;
+                    END IF;
+
+                    -- Followups columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'followups') THEN
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactId"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactType"" character varying(50) NOT NULL DEFAULT 'lead';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactPhone"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactEmail"" text;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""InvestorId"" integer;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""InvestorName"" text;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""AssignedToName"" text NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""AssignedToRole"" text NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'Pending';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Agenda"" text;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""OutcomeNotes"" text;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ScheduledAt"" timestamp with time zone NOT NULL DEFAULT NOW();
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""CompletedAt"" timestamp with time zone;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""RescheduledTo"" timestamp with time zone;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""OverdueNotifiedAt"" timestamp with time zone;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+
+                    -- Customers table and columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Customers') THEN
+                        ALTER TABLE ""Customers"" RENAME TO customers;
+                    END IF;
+
+                    CREATE TABLE IF NOT EXISTS customers (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""CompanyId"" integer NOT NULL,
+                        ""AssignedAgentId"" integer NOT NULL,
+                        ""Name"" character varying(150) NOT NULL DEFAULT '',
+                        ""Phone"" character varying(50) NOT NULL DEFAULT '',
+                        ""Email"" character varying(255) NOT NULL DEFAULT '',
+                        ""NormalizedPhone"" character varying(20) NULL,
+                        ""NormalizedEmail"" character varying(255) NULL,
+                        ""IsDuplicate"" boolean NOT NULL DEFAULT FALSE,
+                        ""Location"" character varying(255) NOT NULL DEFAULT '',
+                        ""Status"" character varying(50) NOT NULL DEFAULT 'Active',
+                        ""TotalValue"" numeric(18,2) NOT NULL DEFAULT 0,
+                        ""Notes"" text NOT NULL DEFAULT '',
+                        ""CustomFieldsJson"" text NULL,
+                        ""LastContactedAt"" timestamp with time zone NULL,
+                        ""HandoverId"" integer NULL,
+                        ""OriginalOwnerId"" integer NULL,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""UpdatedAt"" timestamp with time zone NULL
+                    );
+
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'customers') THEN
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""Location"" character varying(255) NOT NULL DEFAULT '';
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'Active';
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""TotalValue"" numeric(18,2) NOT NULL DEFAULT 0;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""CustomFieldsJson"" text;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""NormalizedPhone"" text;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""NormalizedEmail"" text;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""IsDuplicate"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""LastContactedAt"" timestamp with time zone;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'customers' AND column_name = 'city') THEN
+                            UPDATE customers SET ""Location"" = city WHERE ""Location"" = '';
+                        END IF;
+                    END IF;
+
+                    -- Lead assignment history table
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'LeadAssignmentHistories') THEN
+                        ALTER TABLE ""LeadAssignmentHistories"" RENAME TO lead_assignment_history;
+                    END IF;
+
+                    CREATE TABLE IF NOT EXISTS lead_assignment_history (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""LeadId"" integer NOT NULL,
+                        ""FromAgentId"" integer NULL,
+                        ""ToAgentId"" integer NOT NULL,
+                        ""AssignedById"" integer NOT NULL,
+                        ""AssignedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""Notes"" text NULL
+                    );
+
+                    -- Consultations columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'consultations') THEN
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""IrmUserId"" integer;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""IrmUserName"" text NOT NULL DEFAULT '';
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""AssetClass"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""ScheduledAt"" timestamp with time zone NOT NULL DEFAULT NOW();
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'Scheduled';
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""MeetingType"" character varying(50) NOT NULL DEFAULT 'Virtual';
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""MeetingLink"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""Feedback"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""CompletedAt"" timestamp with time zone;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+
+                    -- Deals columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'GhlDeals') THEN
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Title"" character varying(200) NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""CustomerName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Stage"" character varying(100) NOT NULL DEFAULT 'new';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Value"" numeric(18,2) NOT NULL DEFAULT 0;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""ExpectedCloseDate"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""LostReason"" text;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""InvestorType"" character varying(50);
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""InvestmentRange"" character varying(100);
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100);
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""StageEnteredAt"" timestamp with time zone;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""DealAmountConfirmed"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""KycStatus"" text;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ghl_deals') THEN
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Title"" character varying(200) NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""CustomerName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Stage"" character varying(100) NOT NULL DEFAULT 'new';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Value"" numeric(18,2) NOT NULL DEFAULT 0;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""ExpectedCloseDate"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""LostReason"" text;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""InvestorType"" character varying(50);
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""InvestmentRange"" character varying(100);
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100);
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""StageEnteredAt"" timestamp with time zone;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""DealAmountConfirmed"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""KycStatus"" text;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+
+                    -- Investors & Opportunities columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'investors') THEN
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""RiskTolerance"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""InvestmentMandate"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""CommittedAum"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""ReferralSource"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""AssignedIrmId"" integer;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""AssignedIrmName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Investors') THEN
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""RiskTolerance"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""InvestmentMandate"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""CommittedAum"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""ReferralSource"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""AssignedIrmId"" integer;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""AssignedIrmName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'InvestmentOpportunities') THEN
+                        ALTER TABLE ""InvestmentOpportunities"" ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE ""InvestmentOpportunities"" ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+
+                    -- InvestorKycs columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'InvestorKycs') THEN
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""FatherName"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""DateOfBirth"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""NameAsPerPan"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""Gender"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""InvestorType"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""ResidentType"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""Occupation"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""PanNumber"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AadhaarNumber"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AddressLine1"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AddressLine2"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""City"" character varying(100) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""State"" character varying(100) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""Pincode"" character varying(20) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""Country"" character varying(100) NOT NULL DEFAULT 'India';
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""BankName"" character varying(150) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AccountNumber"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""IfscCode"" character varying(20) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AccountType"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""DematAccountNumber"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""DpId"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""NomineesJson"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""PanDocumentUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AadhaarDocumentUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""BankChequeUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""DematDocumentUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""PhotoUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""SignatureUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""ReviewRemarks"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""ReviewedByIrmId"" integer NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""ReviewedAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""SubmittedAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""VerifiedBy"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""VerifiedAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""Remarks"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""FlaggedSectionsJson"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""SectionVerificationsJson"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""KycLinkToken"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""KycTokenHash"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""KycLinkExpiresAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""KycLinkSent"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""KycLinkSentAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""IsRevoked"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""RevokedAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""IsAssisted"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AssistedByUserId"" integer NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""CustomerConsentObtained"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""CustomerConsentTimestamp"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""CustomerConsentDetails"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""HandoverId"" integer NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer NULL;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'investor_kycs') THEN
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""FatherName"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""DateOfBirth"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""NameAsPerPan"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""Gender"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""InvestorType"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""ResidentType"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""Occupation"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""PanNumber"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AadhaarNumber"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AddressLine1"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AddressLine2"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""City"" character varying(100) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""State"" character varying(100) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""Pincode"" character varying(20) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""Country"" character varying(100) NOT NULL DEFAULT 'India';
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""BankName"" character varying(150) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AccountNumber"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""IfscCode"" character varying(20) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AccountType"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""DematAccountNumber"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""DpId"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""NomineesJson"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""PanDocumentUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AadhaarDocumentUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""BankChequeUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""DematDocumentUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""PhotoUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""SignatureUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""ReviewRemarks"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""ReviewedByIrmId"" integer NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""ReviewedAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""SubmittedAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""VerifiedBy"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""VerifiedAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""Remarks"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""FlaggedSectionsJson"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""SectionVerificationsJson"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""KycLinkToken"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""KycTokenHash"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""KycLinkExpiresAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""KycLinkSent"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""KycLinkSentAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""IsRevoked"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""RevokedAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""IsAssisted"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AssistedByUserId"" integer NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""CustomerConsentObtained"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""CustomerConsentTimestamp"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""CustomerConsentDetails"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""HandoverId"" integer NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer NULL;
+                    END IF;
+
+                    -- Create work_handovers table if not exists
+                    CREATE TABLE IF NOT EXISTS work_handovers (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""CompanyId"" integer NOT NULL,
+                        ""RoleCode"" character varying(50) NOT NULL,
+                        ""OriginalUserId"" integer NOT NULL,
+                        ""CoveringUserId"" integer NOT NULL,
+                        ""StartedById"" integer NOT NULL,
+                        ""Reason"" character varying(500) NOT NULL,
+                        ""StartedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""PlannedEndAt"" timestamp with time zone NULL,
+                        ""Status"" character varying(50) NOT NULL DEFAULT 'active',
+                        ""EndedAt"" timestamp with time zone NULL,
+                        ""EndedById"" integer NULL,
+                        ""ReturnSummaryJson"" text NULL,
+                        ""LeaveRequestId"" integer NULL,
+                        ""OverdueNotifiedAt"" timestamp with time zone NULL
+                    );
+
+                    -- Ensure work_handovers columns exist if table was created in earlier version
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'work_handovers') THEN
+                        ALTER TABLE work_handovers ADD COLUMN IF NOT EXISTS ""LeaveRequestId"" integer NULL;
+                        ALTER TABLE work_handovers ADD COLUMN IF NOT EXISTS ""OverdueNotifiedAt"" timestamp with time zone NULL;
+                        ALTER TABLE work_handovers ADD COLUMN IF NOT EXISTS ""ReturnSummaryJson"" text NULL;
+                    END IF;
+
+                    -- Create work_handover_items table if not exists
+                    CREATE TABLE IF NOT EXISTS work_handover_items (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""HandoverId"" integer NOT NULL,
+                        ""EntityType"" character varying(50) NOT NULL,
+                        ""EntityId"" integer NOT NULL,
+                        ""Origin"" character varying(50) NOT NULL DEFAULT 'included_at_start',
+                        ""ReturnedAt"" timestamp with time zone NULL,
+                        ""ReturnOutcome"" character varying(50) NULL,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW()
+                    );
+
+                    -- Create LeaveRequests table if not exists
+                    CREATE TABLE IF NOT EXISTS ""LeaveRequests"" (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""CompanyId"" integer NOT NULL,
+                        ""UserId"" integer NOT NULL,
+                        ""StartDate"" timestamp with time zone NOT NULL,
+                        ""EndDate"" timestamp with time zone NOT NULL,
+                        ""Reason"" character varying(500) NOT NULL,
+                        ""Status"" character varying(20) NOT NULL DEFAULT 'Pending',
+                        ""WorkHandoverId"" integer NULL,
+                        ""ApprovedById"" integer NULL,
+                        ""DecidedById"" integer NULL,
+                        ""DecisionAt"" timestamp with time zone NULL,
+                        ""DecisionNote"" character varying(500) NULL,
+                        ""CancelledById"" integer NULL,
+                        ""CancelledAt"" timestamp with time zone NULL,
+                        ""LeaveType"" character varying(50) NOT NULL DEFAULT 'Casual',
+                        ""IsHalfDay"" boolean NOT NULL DEFAULT FALSE,
+                        ""HalfDaySession"" character varying(20) NULL,
+                        ""Days"" numeric(4,1) NOT NULL DEFAULT 1.0,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""UpdatedAt"" timestamp with time zone NULL
+                    );
+
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'LeaveRequests') THEN
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""LeaveType"" character varying(50) NOT NULL DEFAULT 'Casual';
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""IsHalfDay"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""HalfDaySession"" character varying(20) NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""Days"" numeric(4,1) NOT NULL DEFAULT 1.0;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""WorkHandoverId"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""ApprovedById"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""DecidedById"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""DecisionAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""DecisionNote"" character varying(500) NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""CancelledById"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""CancelledAt"" timestamp with time zone NULL;
                     END IF;
 
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'roles') THEN
                         UPDATE roles SET ""IsActive"" = FALSE WHERE ""Code"" IN ('sales_manager', 'presales_rep');
+                    END IF;
+
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Documents') THEN
+                        ALTER TABLE ""Documents"" ADD COLUMN IF NOT EXISTS ""TargetAudience"" text NOT NULL DEFAULT 'all_users';
+                        ALTER TABLE ""Documents"" ADD COLUMN IF NOT EXISTS ""IsPlatformShared"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""Documents"" ADD COLUMN IF NOT EXISTS ""Description"" text;
+                    END IF;
+
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'documents') THEN
+                        ALTER TABLE documents ADD COLUMN IF NOT EXISTS ""TargetAudience"" text NOT NULL DEFAULT 'all_users';
+                        ALTER TABLE documents ADD COLUMN IF NOT EXISTS ""IsPlatformShared"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE documents ADD COLUMN IF NOT EXISTS ""Description"" text;
                     END IF;
 
                     CREATE TABLE IF NOT EXISTS user_sessions (
@@ -183,6 +699,59 @@ using (var scope = app.Services.CreateScope())
                     CREATE INDEX IF NOT EXISTS ix_security_events_created_at_severity ON security_events (""CreatedAt"", ""Severity"");
                     CREATE INDEX IF NOT EXISTS ix_security_events_event_type ON security_events (""EventType"");
 
+                    -- ── Team Chat Tables ────────────────────────────────────────────────
+                    CREATE TABLE IF NOT EXISTS ""ChatConversations"" (
+                        ""Id"" text NOT NULL PRIMARY KEY,
+                        ""CompanyId"" integer NOT NULL,
+                        ""Type"" text NOT NULL DEFAULT 'dm',
+                        ""Name"" text NULL,
+                        ""Description"" text NULL,
+                        ""CreatedByUserId"" integer NOT NULL DEFAULT 1,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""UpdatedAt"" timestamp with time zone NOT NULL DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_chat_conversations_company_type ON ""ChatConversations"" (""CompanyId"", ""Type"");
+
+                    CREATE TABLE IF NOT EXISTS ""ChatParticipants"" (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""ConversationId"" text NOT NULL REFERENCES ""ChatConversations""(""Id"") ON DELETE CASCADE,
+                        ""UserId"" integer NOT NULL REFERENCES users(""Id"") ON DELETE CASCADE,
+                        ""JoinedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""LastReadMessageId"" text NULL,
+                        ""IsPinned"" boolean NOT NULL DEFAULT FALSE,
+                        ""IsMuted"" boolean NOT NULL DEFAULT FALSE
+                    );
+                    CREATE UNIQUE INDEX IF NOT EXISTS ux_chat_participants_conv_user ON ""ChatParticipants"" (""ConversationId"", ""UserId"");
+
+                    CREATE TABLE IF NOT EXISTS ""ChatMessages"" (
+                        ""Id"" text NOT NULL PRIMARY KEY,
+                        ""ConversationId"" text NOT NULL REFERENCES ""ChatConversations""(""Id"") ON DELETE CASCADE,
+                        ""SenderId"" integer NOT NULL,
+                        ""SenderName"" text NOT NULL DEFAULT '',
+                        ""Content"" text NOT NULL DEFAULT '',
+                        ""MessageType"" text NOT NULL DEFAULT 'text',
+                        ""ReplyToMessageId"" text NULL,
+                        ""IsEdited"" boolean NOT NULL DEFAULT FALSE,
+                        ""IsDeleted"" boolean NOT NULL DEFAULT FALSE,
+                        ""ReactionsJson"" text NULL,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""UpdatedAt"" timestamp with time zone NOT NULL DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_chat_messages_conv_created ON ""ChatMessages"" (""ConversationId"", ""CreatedAt"");
+
+                    CREATE TABLE IF NOT EXISTS ""ChatAttachments"" (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""MessageId"" text NOT NULL REFERENCES ""ChatMessages""(""Id"") ON DELETE CASCADE,
+                        ""FileName"" text NOT NULL DEFAULT '',
+                        ""FileUrl"" text NOT NULL DEFAULT '',
+                        ""FileSize"" bigint NOT NULL DEFAULT 0,
+                        ""MimeType"" text NOT NULL DEFAULT 'application/octet-stream',
+                        ""Category"" text NULL,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS ix_chat_attachments_message_id ON ""ChatAttachments"" (""MessageId"");
+
+                    -- ── MFA Security Tables ─────────────────────────────────────────────
                     CREATE TABLE IF NOT EXISTS user_mfa_settings (
                         ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
                         ""UserId"" integer NOT NULL REFERENCES users(""Id"") ON DELETE CASCADE,
@@ -221,6 +790,54 @@ using (var scope = app.Services.CreateScope())
                     );
                     CREATE UNIQUE INDEX IF NOT EXISTS ix_mfa_challenges_token_hash ON mfa_challenges (""ChallengeTokenHash"");
                     CREATE INDEX IF NOT EXISTS ix_mfa_challenges_user_expires ON mfa_challenges (""UserId"", ""ExpiresAt"");
+
+                    CREATE TABLE IF NOT EXISTS platform_tickets (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""TicketNumber"" character varying(32) NOT NULL,
+                        ""Title"" character varying(255) NOT NULL,
+                        ""Description"" text NOT NULL,
+                        ""Category"" character varying(100) NOT NULL DEFAULT 'Telephony / Carrier Trunk',
+                        ""Priority"" character varying(32) NOT NULL DEFAULT 'medium',
+                        ""Status"" character varying(32) NOT NULL DEFAULT 'open',
+                        ""TenantId"" integer NULL REFERENCES tenants(""Id"") ON DELETE SET NULL,
+                        ""TenantName"" character varying(150) NULL,
+                        ""TenantSlug"" character varying(100) NULL,
+                        ""ReportedByName"" character varying(150) NOT NULL DEFAULT 'Super Admin',
+                        ""ReportedByEmail"" character varying(255) NOT NULL DEFAULT 'superadmin@nexusplatform.io',
+                        ""AssignedToName"" character varying(150) NULL DEFAULT 'Platform Operations',
+                        ""AssignedToEmail"" character varying(255) NULL,
+                        ""ResolutionNotes"" text NULL,
+                        ""ResolvedAt"" timestamp with time zone NULL,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""UpdatedAt"" timestamp with time zone NOT NULL DEFAULT NOW()
+                    );
+
+                    CREATE UNIQUE INDEX IF NOT EXISTS ux_platform_tickets_ticket_number ON platform_tickets (""TicketNumber"");
+                    CREATE INDEX IF NOT EXISTS ix_platform_tickets_status ON platform_tickets (""Status"");
+                    CREATE INDEX IF NOT EXISTS ix_platform_tickets_priority ON platform_tickets (""Priority"");
+                    CREATE INDEX IF NOT EXISTS ix_platform_tickets_tenant_id ON platform_tickets (""TenantId"");
+                    CREATE INDEX IF NOT EXISTS ix_platform_tickets_created_at ON platform_tickets (""CreatedAt"");
+
+                    CREATE TABLE IF NOT EXISTS platform_ticket_events (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""TicketId"" integer NOT NULL REFERENCES platform_tickets(""Id"") ON DELETE CASCADE,
+                        ""AuthorName"" character varying(150) NOT NULL DEFAULT 'Super Admin',
+                        ""AuthorEmail"" character varying(255) NOT NULL DEFAULT '',
+                        ""Message"" text NOT NULL DEFAULT '',
+                        ""Type"" character varying(50) NOT NULL DEFAULT 'note',
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW()
+                    );
+
+                    CREATE INDEX IF NOT EXISTS ix_platform_ticket_events_ticket_id ON platform_ticket_events (""TicketId"");
+                    CREATE INDEX IF NOT EXISTS ix_platform_ticket_events_created_at ON platform_ticket_events (""CreatedAt"");
+
+                    -- Purge obsolete mock tickets setting
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'PlatformSettings') THEN
+                        DELETE FROM ""PlatformSettings"" WHERE ""Key"" = 'platform_support_tickets';
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'platform_settings') THEN
+                        DELETE FROM platform_settings WHERE ""Key"" = 'platform_support_tickets';
+                    END IF;
                 END $$;
             ");
         }
@@ -306,12 +923,25 @@ using (var scope = app.Services.CreateScope())
                         ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""TwilioCallSid"" character varying(64) NULL;
                         ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""RecordingUrl"" character varying(256) NULL;
                         ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Transcript"" text NULL;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""CallModule"" character varying(50) NULL;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Reason"" text NULL;
                     END IF;
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'CallRecords') THEN
                         ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""TwilioCallSid"" character varying(64) NULL;
                         ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""RecordingUrl"" character varying(256) NULL;
                         ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""Transcript"" text NULL;
+                        ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""CallModule"" character varying(50) NULL;
+                        ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""Reason"" text NULL;
                     END IF;
+
+                    -- Backfill followups AssignedToName and AssignedToRole if empty
+                    UPDATE followups f
+                    SET ""AssignedToName"" = u.""Name"",
+                        ""AssignedToRole"" = COALESCE(r.""Code"", 'sales_executive')
+                    FROM users u
+                    LEFT JOIN roles r ON r.""Id"" = u.""RoleId""
+                    WHERE f.""AssignedAgentId"" = u.""Id""
+                      AND (f.""AssignedToName"" IS NULL OR f.""AssignedToName"" = '' OR f.""AssignedToRole"" IS NULL OR f.""AssignedToRole"" = '');
                 END $$;
             ";
             db.Database.ExecuteSqlRaw(sql);
@@ -319,6 +949,98 @@ using (var scope = app.Services.CreateScope())
         catch (Exception ex)
         {
             Console.WriteLine($"[Database Init Warning] {ex.Message}");
+        }
+
+        // Patch: reconcile leads whose KYC/Investor records are Approved
+        try
+        {
+            var reconcileSql = @"
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ghl_deals') THEN
+                        -- 1. Active Opportunities
+                        UPDATE leads
+                        SET ""Status"" = 'In Opportunity', ""UpdatedAt"" = NOW()
+                        WHERE ""Status"" != 'In Opportunity'
+                          AND EXISTS (
+                            SELECT 1 FROM ghl_deals d
+                            WHERE d.""CompanyId"" = leads.""CompanyId""
+                              AND LOWER(TRIM(d.""Stage"")) IN ('investment_opportunity', 'opportunity', 'term_sheet', 'committed')
+                              AND (
+                                (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                                OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                              )
+                          );
+
+                        -- 2. Active KYC In Progress
+                        UPDATE leads
+                        SET ""Status"" = 'KYC In Progress', ""UpdatedAt"" = NOW()
+                        WHERE ""Status"" NOT IN ('In Opportunity', 'Converted', 'KYC In Progress')
+                          AND (
+                            EXISTS (
+                                SELECT 1 FROM ghl_deals d
+                                WHERE d.""CompanyId"" = leads.""CompanyId""
+                                  AND LOWER(TRIM(d.""Stage"")) IN ('qualified_investor', 'qualified')
+                                  AND (
+                                    (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                                    OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                                  )
+                            )
+                            OR EXISTS (
+                                SELECT 1 FROM ""InvestorKycs"" k
+                                WHERE k.""CompanyId"" = leads.""CompanyId""
+                                  AND k.""Status"" IN (0, 1, 2)
+                                  AND (
+                                    (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                                    OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                                    OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
+                                  )
+                            )
+                          );
+
+                        -- 3. Won / Converted Investors (without active opportunity)
+                        UPDATE leads
+                        SET ""Status"" = 'Converted', ""UpdatedAt"" = NOW()
+                        WHERE ""Status"" NOT IN ('In Opportunity', 'Converted')
+                          AND (
+                            EXISTS (
+                                SELECT 1 FROM ghl_deals d
+                                WHERE d.""CompanyId"" = leads.""CompanyId""
+                                  AND LOWER(TRIM(d.""Stage"")) IN ('converted', 'won')
+                                  AND (
+                                    (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                                    OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                                  )
+                            )
+                            OR EXISTS (
+                                SELECT 1 FROM ""Investors"" i
+                                WHERE i.""CompanyId"" = leads.""CompanyId""
+                                  AND i.""Status"" = 1
+                                  AND (
+                                    (i.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(i.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                                    OR (i.""Email"" IS NOT NULL AND LOWER(TRIM(i.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                                    OR LOWER(TRIM(i.""Name"")) = LOWER(TRIM(leads.""Name""))
+                                  )
+                            )
+                            OR EXISTS (
+                                SELECT 1 FROM ""InvestorKycs"" k
+                                WHERE k.""CompanyId"" = leads.""CompanyId""
+                                  AND k.""Status"" = 3
+                                  AND (
+                                    (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                                    OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                                    OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
+                                  )
+                            )
+                          );
+                    END IF;
+                END $$;
+            ";
+            db.Database.ExecuteSqlRaw(reconcileSql);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Lead Reconciliation Warning] {ex.Message}");
         }
 
         // Patch: ensure tenants have EnabledFeatures populated
@@ -357,6 +1079,38 @@ using (var scope = app.Services.CreateScope())
         catch (Exception ex)
         {
             Console.WriteLine($"[Tenant Feature Patch Warning] {ex.Message}");
+        }
+
+        // Patch: remove sales_manager role and migrate any users with sales_manager to sales_executive
+        try
+        {
+            var salesManagerRole = db.Roles.FirstOrDefault(r => r.Code == "sales_manager" || r.Id == 5);
+            var salesExecutiveRole = db.Roles.FirstOrDefault(r => r.Code == "sales_executive" || r.Id == 3);
+
+            if (salesExecutiveRole != null)
+            {
+                var managerUsers = db.Users.Where(u => u.RoleId == 5 || (salesManagerRole != null && u.RoleId == salesManagerRole.Id)).ToList();
+                if (managerUsers.Any())
+                {
+                    foreach (var u in managerUsers)
+                    {
+                        u.RoleId = salesExecutiveRole.Id;
+                        Console.WriteLine($"[Role Migration] Migrated user '{u.Email}' (ID: {u.Id}) from sales_manager to sales_executive.");
+                    }
+                    db.SaveChanges();
+                }
+
+                if (salesManagerRole != null)
+                {
+                    salesManagerRole.IsActive = false;
+                    db.SaveChanges();
+                    Console.WriteLine("[Role Migration] Deactivated obsolete 'sales_manager' role in database.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Role Migration Warning] {ex.Message}");
         }
 
         // Patch: ensure roles have Permissions populated
@@ -411,6 +1165,67 @@ using (var scope = app.Services.CreateScope())
         catch (Exception ex)
         {
             Console.WriteLine($"[Role Permissions Patch Warning] {ex.Message}");
+        }
+
+        // Startup deduplication & cleanup for followups table
+        try
+        {
+            // 1. Remove all old superseded placeholder rows created by superseded loops
+            var supersededFollowups = db.Followups.Where(f => f.Notes != null && f.Notes.Contains("Superseded by follow-up scheduled for")).ToList();
+            if (supersededFollowups.Any())
+            {
+                db.Followups.RemoveRange(supersededFollowups);
+                db.SaveChanges();
+                Console.WriteLine($"[Followup Cleanup] Removed {supersededFollowups.Count} superseded placeholder follow-up rows.");
+            }
+
+            // 2. Deduplicate pending followups per company & contact/phone
+            var allPendingFollowups = db.Followups.Where(f => f.Status == backend.Models.Enums.FollowupStatus.Pending).ToList();
+            var groupedPending = allPendingFollowups
+                .GroupBy(f => new
+                {
+                    f.CompanyId,
+                    Key = !string.IsNullOrWhiteSpace(f.ContactId) && f.ContactId != "contact-new" ? f.ContactId.Trim() : (f.ContactPhone != null && f.ContactPhone.Length >= 10 ? f.ContactPhone[^10..] : (f.ContactPhone ?? string.Empty))
+                })
+                .Where(g => !string.IsNullOrEmpty(g.Key.Key) && g.Count() > 1);
+
+            bool dupsCleaned = false;
+            foreach (var group in groupedPending)
+            {
+                var sorted = group.OrderByDescending(f => f.UpdatedAt ?? f.CreatedAt).ThenByDescending(f => f.Id).ToList();
+                var toRemove = sorted.Skip(1).ToList();
+                db.Followups.RemoveRange(toRemove);
+                dupsCleaned = true;
+            }
+            if (dupsCleaned)
+            {
+                db.SaveChanges();
+                Console.WriteLine("[Followup Cleanup] Deduplicated multiple pending follow-up records.");
+            }
+
+            // 3. For any lead that is currently in 'Callback' or 'No Response' or 'New' or 'Contacted',
+            // remove any followup record mistakenly created for it so the lead stays strictly in My Leads.
+            var myLeadsStatuses = new[] { "Callback", "No Response", "New", "Contacted" };
+            var activeMyLeads = db.Leads.Where(l => myLeadsStatuses.Contains(l.Status)).ToList();
+            var activeMyLeadPhones = activeMyLeads.Select(l => l.Phone?.Length >= 10 ? l.Phone[^10..] : l.Phone ?? "").Where(p => !string.IsNullOrEmpty(p)).ToHashSet();
+            var activeMyLeadIds = activeMyLeads.Select(l => l.Id.ToString()).ToHashSet();
+
+            var strayFollowups = db.Followups
+                .Where(f =>
+                    (f.ContactId != null && activeMyLeadIds.Contains(f.ContactId)) ||
+                    (f.ContactPhone != null && activeMyLeadPhones.Contains(f.ContactPhone.Length >= 10 ? f.ContactPhone.Substring(f.ContactPhone.Length - 10) : f.ContactPhone)))
+                .ToList();
+
+            if (strayFollowups.Any())
+            {
+                db.Followups.RemoveRange(strayFollowups);
+                db.SaveChanges();
+                Console.WriteLine($"[Followup Cleanup] Removed {strayFollowups.Count} stray follow-up records for leads that belong in My Leads.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Followup Cleanup Warning] {ex.Message}");
         }
 
         try
@@ -510,33 +1325,6 @@ using (var scope = app.Services.CreateScope())
 
         try
         {
-            var pendingMigrations = db.Database.GetPendingMigrations().ToList();
-            if (pendingMigrations.Any())
-            {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("================================================================================");
-                Console.WriteLine($"[WARNING] There are {pendingMigrations.Count} pending EF Core migration(s) not yet applied to the database:");
-                foreach (var m in pendingMigrations)
-                {
-                    Console.WriteLine($"  - {m}");
-                }
-                Console.WriteLine("Run 'dotnet ef database update' in backend/ to apply pending migrations.");
-                Console.WriteLine("================================================================================");
-                Console.ResetColor();
-            }
-            else
-            {
-                Console.WriteLine("[Database] All EF Core migrations are up to date.");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[Database Migration Check Warning] {ex.Message}");
-
-        }
-
-        try
-        {
             var superAdmin = db.Users.FirstOrDefault(u => u.Id == 1 || u.Email == "yanosh@ghlindiaventures.com");
             if (superAdmin != null && string.IsNullOrWhiteSpace(superAdmin.PasswordHash))
             {
@@ -552,10 +1340,17 @@ using (var scope = app.Services.CreateScope())
         }
     }
 
-    var helpMeDecide = db.Leads.Count(l => l.CustomFieldsJson != null && l.CustomFieldsJson.Contains("help me decide"));
-    var notConfirmed = db.Leads.Count(l => l.CustomFieldsJson != null && (l.CustomFieldsJson.Contains("\"assetClass\":\"") || l.CustomFieldsJson.Contains("\"preferredAssetClass\":\"")) && !l.CustomFieldsJson.Contains("\"irmPreferencesConfirmed\":true"));
-    Console.WriteLine($"[DIAGNOSTIC] Count with help me decide: {helpMeDecide}");
-    Console.WriteLine($"[DIAGNOSTIC] Count with asset class but not confirmed: {notConfirmed}");
+    try
+    {
+        var helpMeDecide = db.Leads.Count(l => l.CustomFieldsJson != null && l.CustomFieldsJson.Contains("help me decide"));
+        var notConfirmed = db.Leads.Count(l => l.CustomFieldsJson != null && (l.CustomFieldsJson.Contains("\"assetClass\":\"") || l.CustomFieldsJson.Contains("\"preferredAssetClass\":\"")) && !l.CustomFieldsJson.Contains("\"irmPreferencesConfirmed\":true"));
+        Console.WriteLine($"[DIAGNOSTIC] Count with help me decide: {helpMeDecide}");
+        Console.WriteLine($"[DIAGNOSTIC] Count with asset class but not confirmed: {notConfirmed}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Diagnostic Count Warning] {ex.Message}");
+    }
 }
 
 app.UseForwardedHeaders(new ForwardedHeadersOptions
@@ -597,12 +1392,28 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("DefaultCorsPolicy");
 
-app.UseStaticFiles(); // Added to serve uploaded documents
+// Serve uploaded documents, but never let the browser render them inline as HTML/scripts.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        var path = ctx.Context.Request.Path.Value ?? string.Empty;
+        if (path.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            ctx.Context.Response.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+            ctx.Context.Response.Headers["Content-Disposition"] = "attachment";
+        }
+    }
+});
 
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<backend.Hubs.PlatformHub>("/hubs/platform");
+
+// Redirect root to Swagger UI
+app.MapGet("/", () => Results.Redirect("/swagger"));
 
 app.Run();

@@ -96,7 +96,9 @@ public class SalesExecutiveFollowupsController : ControllerBase
         {
             if (result.Message.StartsWith("Access denied"))
                 return StatusCode(StatusCodes.Status403Forbidden, result);
-            return NotFound(result);
+            if (result.Message.StartsWith("Follow-up not found"))
+                return NotFound(result);
+            return BadRequest(result);
         }
 
         return Ok(result);

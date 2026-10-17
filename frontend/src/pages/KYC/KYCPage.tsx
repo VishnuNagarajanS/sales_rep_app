@@ -28,6 +28,9 @@ import {
   Save,
   AlertTriangle,
   Info,
+  Copy,
+  Sparkles,
+  Check,
 } from 'lucide-react';
 import { SendKycLinkModal } from './components/SendKycLinkModal';
 import { KycStatusBadge } from './components/KycStatusBadge';
@@ -54,10 +57,13 @@ import { DataTable, Column, RowAction } from '../../components/common/DataTable'
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
 import { getAuthHeaders } from '../../utils/authHeaders';
+import { apiUrl } from '../../utils/apiUrl';
+import { saveKycLocal } from '../../utils/kycStorage';
 import {
   SharedKycFormData,
   NomineeItem,
   validateKycStep,
+  sanitizeDobString,
   GENDER_OPTIONS,
   INVESTOR_TYPE_OPTIONS,
   RESIDENT_TYPE_OPTIONS,
@@ -68,11 +74,25 @@ import './KYCPage.css';
 // ── Types for GHL IRM 5-Step Flow ──────────────────────────────────────────────
 export type { NomineeItem };
 
+/** A KYC document. `url` is set once the file is stored on the server. */
+export interface KycDoc {
+  name: string;
+  size: string;
+  type: string;
+  url?: string;
+}
+
+// File objects can't be serialised; keep them here (keyed by the doc object) until they are uploaded.
+const pendingDocFiles = new WeakMap<object, File>();
+const MAX_KYC_UPLOAD_BYTES = 10 * 1024 * 1024; // matches the server limit (10 MB)
+
 export interface KYCFormData extends SharedKycFormData {
-  aadhaarDoc: { name: string; size: string; type: string } | null;
-  panDoc: { name: string; size: string; type: string } | null;
-  bankProofDoc: { name: string; size: string; type: string } | null;
-  dematDoc: { name: string; size: string; type: string } | null;
+  aadhaarDoc: KycDoc | null;
+  panDoc: KycDoc | null;
+  bankProofDoc: KycDoc | null;
+  dematDoc: KycDoc | null;
+  photoDoc: KycDoc | null;
+  photoUrl?: string;
 }
 
 const BLANK_KYC_FORM: KYCFormData = {
@@ -97,6 +117,7 @@ const BLANK_KYC_FORM: KYCFormData = {
   pincode: '',
   aadhaarDoc: null,
   panDoc: null,
+  photoDoc: null,
 
   accountType: 'Savings Account',
   accountNumber: '',
@@ -129,9 +150,9 @@ function formatBytes(bytes: number): string {
 interface KYCUploadProps {
   label: string;
   required?: boolean;
-  doc: { name: string; size: string; type: string } | null;
+  doc: KycDoc | null;
   error?: string;
-  onUpload: (doc: { name: string; size: string; type: string }) => void;
+  onUpload: (doc: KycDoc) => void;
   onRemove: () => void;
 }
 
@@ -146,11 +167,17 @@ const KYCUploadCard: React.FC<KYCUploadProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = (file: File) => {
-    onUpload({
+    if (file.size > MAX_KYC_UPLOAD_BYTES) {
+      window.alert('File is too large. Maximum allowed size is 10 MB.');
+      return;
+    }
+    const doc: KycDoc = {
       name: file.name,
       size: formatBytes(file.size),
       type: file.type || 'application/pdf',
-    });
+    };
+    pendingDocFiles.set(doc, file);
+    onUpload(doc);
   };
 
   return (
@@ -195,7 +222,7 @@ const KYCUploadCard: React.FC<KYCUploadProps> = ({
               Click to upload or drag & drop
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              PDF, JPG, PNG up to 15 MB
+              PDF, JPG, PNG up to 10 MB
             </div>
           </div>
           <input
@@ -224,6 +251,21 @@ const KYCUploadCard: React.FC<KYCUploadProps> = ({
 // ==============================================================================
 const resolvePreferredAssetClass = (deal: Deal, leadsList: Lead[] = [], customersList: Customer[] = []) => {
   const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+
+  const matchingLead = leadsList.find(l => {
+    if (deal.customerId && (l.id === deal.customerId || String(l.id) === String(deal.customerId))) return true;
+    const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
+    return Boolean(lDigits && fDigits && lDigits === fDigits);
+  });
+  const matchingCustomer = customersList.find(c => {
+    if (deal.customerId && (c.id === deal.customerId || String(c.id) === String(deal.customerId))) return true;
+    const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
+    return Boolean(cDigits && fDigits && cDigits === fDigits);
+  });
+
+  const leadConfirmed = matchingLead?.customFields?.irmPreferencesConfirmed === true;
+  const custConfirmed = matchingCustomer?.customFields?.irmPreferencesConfirmed === true;
+
   let savedLocal: any = null;
   try {
     const raw =
@@ -233,27 +275,39 @@ const resolvePreferredAssetClass = (deal: Deal, leadsList: Lead[] = [], customer
     if (raw) savedLocal = JSON.parse(raw);
   } catch { }
 
-  const matchingLead = leadsList.find(l => {
-    if (deal.customerId && l.id === deal.customerId) return true;
-    const lDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
-    return Boolean(lDigits && fDigits && lDigits === fDigits);
-  });
-  const matchingCustomer = customersList.find(c => {
-    if (deal.customerId && c.id === deal.customerId) return true;
-    const cDigits = (c.phone || '').replace(/\D/g, '').slice(-10);
-    return Boolean(cDigits && fDigits && cDigits === fDigits);
-  });
+  // If a lead or customer is identified and preferences are NOT confirmed,
+  // purge any stale / rogue localStorage entries claiming confirmation.
+  if ((matchingLead && !leadConfirmed) || (matchingCustomer && !custConfirmed)) {
+    if (savedLocal?.confirmed) {
+      try {
+        if (deal.customerId) localStorage.removeItem(`nexus_irm_pref_${deal.customerId}`);
+        if (fDigits) localStorage.removeItem(`nexus_irm_pref_${fDigits}`);
+        localStorage.removeItem(`nexus_irm_pref_${deal.id}`);
+      } catch { }
+      savedLocal = null;
+    }
+  }
 
-  const isConfirmed =
-    savedLocal?.confirmed === true ||
-    matchingLead?.customFields?.irmPreferencesConfirmed === true ||
-    matchingCustomer?.customFields?.irmPreferencesConfirmed === true;
+  // 1. Confirmed lead custom fields
+  if (leadConfirmed && matchingLead?.customFields?.preferredAssetClass) {
+    return matchingLead.customFields.preferredAssetClass;
+  }
 
-  if (savedLocal?.preferredAssetClass && savedLocal.confirmed) return savedLocal.preferredAssetClass;
-  if (matchingLead?.customFields?.preferredAssetClass && isConfirmed) return matchingLead.customFields.preferredAssetClass;
-  if (matchingCustomer?.customFields?.preferredAssetClass && isConfirmed) return matchingCustomer.customFields.preferredAssetClass;
-  if (deal.preferredAssetClass) {
-    return deal.preferredAssetClass;
+  // 2. Confirmed customer custom fields
+  if (custConfirmed && matchingCustomer?.customFields?.preferredAssetClass) {
+    return matchingCustomer.customFields.preferredAssetClass;
+  }
+
+  // 3. Explicitly confirmed deal
+  if (deal.preferredAssetClass && deal.preferredAssetClass !== '—' && deal.preferredAssetClass.trim() !== '') {
+    if (leadConfirmed || custConfirmed || (!matchingLead && !matchingCustomer && savedLocal?.confirmed === true)) {
+      return deal.preferredAssetClass;
+    }
+  }
+
+  // 4. Stored local preference (only if explicitly confirmed and not refuted by unconfirmed lead/customer)
+  if (!matchingLead && !matchingCustomer && savedLocal?.confirmed === true && savedLocal?.preferredAssetClass) {
+    return savedLocal.preferredAssetClass;
   }
 
   return '—';
@@ -265,6 +319,14 @@ const resolvePreferredAssetClass = (deal: Deal, leadsList: Lead[] = [], customer
 const GhlIrmKycView: React.FC = () => {
   const { tenant, user, permissions = [] } = useAuth();
   const { initiateCall } = useCall();
+
+  const roleCode = (user?.role?.code || '').toLowerCase();
+  const isGhlAdmin =
+    roleCode === 'company_admin' ||
+    roleCode === 'admin' ||
+    roleCode === 'super_admin' ||
+    roleCode === 'ghl_admin' ||
+    Boolean(user?.role?.name?.toLowerCase().includes('admin'));
 
   const reqId = useRef(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -287,6 +349,8 @@ const GhlIrmKycView: React.FC = () => {
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [selectedCustomerDeal, setSelectedCustomerDeal] = useState<Deal | null>(null);
   const [profileKycData, setProfileKycData] = useState<Partial<KYCFormData> | null>(null);
+  const [profileDossierTab, setProfileDossierTab] = useState<'all' | 'personal' | 'identity' | 'bank' | 'demat' | 'nominees'>('all');
+  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [verifyModalDeal, setVerifyModalDeal] = useState<Deal | null>(null);
 
   // Quick Section Edit State (Personal Details / Address & Identity)
@@ -306,6 +370,8 @@ const GhlIrmKycView: React.FC = () => {
   const [isAssistedReviewModalOpen, setIsAssistedReviewModalOpen] = useState<boolean>(false);
   const [customerConsentChecked, setCustomerConsentChecked] = useState<boolean>(false);
   const [lastSavedDraftAt, setLastSavedDraftAt] = useState<string | null>(null);
+
+  const todayDateString = useMemo(() => new Date().toISOString().split('T')[0], []);
   const [validationErrorSummary, setValidationErrorSummary] = useState<string | null>(null);
 
   const enrichDealWithContact = (d: Deal, leadsList: Lead[], customersList: Customer[]): Deal => {
@@ -396,12 +462,22 @@ const GhlIrmKycView: React.FC = () => {
       if (emailMatch) return emailMatch;
     }
 
+    // 6. Fallback to customer name match
+    const custName = (deal.customerName || '').toLowerCase().trim();
+    if (custName && custName.length > 2) {
+      const nameMatch = allKycs.find(
+        k => k && (k.investorName || '').toLowerCase().trim() === custName &&
+          (!compIdStr || !k.companyId || String(k.companyId) === compIdStr)
+      );
+      if (nameMatch) return nameMatch;
+    }
+
     return null;
   };
 
   const refreshDbKycs = async () => {
     try {
-      const res = await fetch('/api/irm/kyc/all', {
+      const res = await fetch(apiUrl('/irm/kyc/all'), {
         headers: getAuthHeaders(),
       });
       if (!res.ok) return;
@@ -520,11 +596,17 @@ const GhlIrmKycView: React.FC = () => {
       const enriched = (allDeals || []).map(d => enrichDealWithContact(d, leadsList, customersList));
       const qualified = enriched.filter(d => d.stage === 'qualified_investor');
       const isIrmUser = user?.role?.code === 'irm';
+      const myNameLower = (user?.name || '').toLowerCase().trim();
+      const myIdStr = user?.id ? String(user.id) : '';
       const scopedQualified = isIrmUser
-        ? qualified.filter(d =>
-            (d.assignedAgentId && String(d.assignedAgentId) === String(user?.id)) ||
-            (d.assignedAgentName && d.assignedAgentName === user?.name)
-          )
+        ? qualified.filter(d => {
+            const agentId = d.assignedAgentId ? String(d.assignedAgentId) : '';
+            const agentName = (d.assignedAgentName || '').toLowerCase().trim();
+            if (myIdStr && agentId === myIdStr) return true;
+            if (myNameLower && (agentName === myNameLower || agentName.includes(myNameLower) || myNameLower.includes(agentName))) return true;
+            if (!agentId && !agentName) return true;
+            return false;
+          })
         : qualified;
 
       const seenCustomer = new Set<string>();
@@ -541,14 +623,17 @@ const GhlIrmKycView: React.FC = () => {
       setDeals(dedupedDeals);
       setLeads(leadsList);
       setCustomers(customersList);
-      setIsLoading(false);
     } catch {
-      if (my !== reqId.current) return;
-      setLoadError(true);
-      setIsLoading(false);
+      if (my === reqId.current) {
+        setLoadError(true);
+      }
+    } finally {
+      if (my === reqId.current) {
+        setIsLoading(false);
+      }
     }
 
-    fetch('/api/irm/kyc/all', {
+    fetch(apiUrl('/irm/kyc/all'), {
       headers: getAuthHeaders(),
     })
       .then(res => (res.ok ? res.json() : null))
@@ -755,7 +840,7 @@ const GhlIrmKycView: React.FC = () => {
     dbKyc: any,
     matchingLead?: any,
     matchingCustomer?: any
-  ): Partial<KYCFormData> => {
+  ): Partial<KYCFormData> & Record<string, any> => {
     const savedKycKey = `nexus_kyc_data_${deal.id}`;
     let saved: Partial<KYCFormData> | null = null;
     try {
@@ -786,7 +871,7 @@ const GhlIrmKycView: React.FC = () => {
     }
 
     const docFrom = (url?: string | null, label = 'Uploaded document') =>
-      url && String(url).trim() ? { name: label, size: '', type: '' } : null;
+      url && String(url).trim() ? { name: label, size: '', type: '', url: String(url) } : null;
 
     const savedNonEmpty: Record<string, any> = {};
     if (saved && typeof saved === 'object') {
@@ -820,7 +905,7 @@ const GhlIrmKycView: React.FC = () => {
       nameAsPerPan: dbKyc?.nameAsPerPan || dbKyc?.investorName || savedNonEmpty.nameAsPerPan || deal.customerName || '',
       aadhaarNumber: dbKyc?.aadhaarNumber || savedNonEmpty.aadhaarNumber || '',
       fatherName: dbKyc?.fatherName || savedNonEmpty.fatherName || '',
-      dob: dbKyc?.dateOfBirth || dbKyc?.dob || savedNonEmpty.dob || '',
+      dob: sanitizeDobString(dbKyc?.dateOfBirth || dbKyc?.dob || savedNonEmpty.dob || ''),
       bankName: dbKyc?.bankName || savedNonEmpty.bankName || '',
       accountNumber: dbKyc?.accountNumber || savedNonEmpty.accountNumber || '',
       ifscCode: dbKyc?.ifscCode || savedNonEmpty.ifscCode || '',
@@ -838,6 +923,10 @@ const GhlIrmKycView: React.FC = () => {
       panDoc: docFrom(dbKyc?.panDocumentUrl, 'PAN (uploaded)') || savedNonEmpty.panDoc || null,
       bankProofDoc: docFrom(dbKyc?.bankChequeUrl, 'Bank proof (uploaded)') || savedNonEmpty.bankProofDoc || null,
       dematDoc: docFrom(dbKyc?.dematDocumentUrl, 'Demat proof (uploaded)') || savedNonEmpty.dematDoc || null,
+      photoDoc: docFrom(dbKyc?.photoUrl || savedNonEmpty.photoUrl, 'Investor Photo (uploaded)') || savedNonEmpty.photoDoc || null,
+      photoUrl: dbKyc?.photoUrl || savedNonEmpty.photoUrl || (savedNonEmpty.photoDoc as any)?.url || null,
+      submittedAt: dbKyc?.submittedAt || savedNonEmpty.submittedAt || null,
+      customerConsentTimestamp: dbKyc?.customerConsentTimestamp || savedNonEmpty.customerConsentTimestamp || null,
     };
   };
 
@@ -869,12 +958,14 @@ const GhlIrmKycView: React.FC = () => {
     let isCancelled = false;
     const fetchLiveKycForProfile = async () => {
       try {
+        // Only a real KYC record id may be used here. customerId / deal.id are different id spaces and
+        // would load (and show) some other investor's KYC. Without a KYC id we look up by email instead.
         const targetId = (selectedCustomerDeal as any).kycId ||
                          (selectedCustomerDeal as any).kycRecordId ||
-                         (selectedCustomerDeal.customerId ? Number(selectedCustomerDeal.customerId) : 0);
+                         0;
         let liveRecord: any = null;
         if (targetId) {
-          const res = await fetch(`/api/irm/kyc/${targetId}`, { headers: getAuthHeaders() });
+          const res = await fetch(apiUrl(`/irm/kyc/${targetId}`), { headers: getAuthHeaders() });
           if (res.ok) {
             const json = await res.json();
             if (json.success && json.data) {
@@ -883,13 +974,63 @@ const GhlIrmKycView: React.FC = () => {
           }
         }
         if (!liveRecord && selectedCustomerDeal.email) {
-          const res = await fetch(`/api/irm/kyc/by-email?email=${encodeURIComponent(selectedCustomerDeal.email)}`, { headers: getAuthHeaders() });
+          const res = await fetch(apiUrl(`/irm/kyc/by-email?email=${encodeURIComponent(selectedCustomerDeal.email)}`), { headers: getAuthHeaders() });
           if (res.ok) {
             const json = await res.json();
             if (json.success && json.data) {
               liveRecord = json.data;
             }
           }
+        }
+        if (!liveRecord && selectedCustomerDeal.customerId) {
+          const numId = parseInt(String(selectedCustomerDeal.customerId).replace(/\D/g, ''), 10);
+          if (numId > 0) {
+            try {
+              const res = await fetch(apiUrl(`/irm/kyc/${numId}`), { headers: getAuthHeaders() });
+              if (res.ok) {
+                const json = await res.json();
+                if (json.success && json.data) liveRecord = json.data;
+              }
+            } catch {}
+          }
+        }
+        if (!liveRecord && selectedCustomerDeal.phone && selectedCustomerDeal.phone.trim()) {
+          try {
+            const res = await fetch(apiUrl(`/irm/kyc/by-phone?phone=${encodeURIComponent(selectedCustomerDeal.phone.trim())}`), { headers: getAuthHeaders() });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && json.data) liveRecord = json.data;
+            }
+          } catch {}
+        }
+        if (!liveRecord) {
+          try {
+            const res = await fetch(apiUrl('/irm/kyc/all'), { headers: getAuthHeaders() });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && Array.isArray(json.data)) {
+                const pDigits = (selectedCustomerDeal.phone || '').replace(/\D/g, '').slice(-10);
+                const cleanMail = (selectedCustomerDeal.email || '').trim().toLowerCase();
+                const cleanName = (selectedCustomerDeal.customerName || '').trim().toLowerCase();
+                const matched = json.data.find((k: any) => {
+                  const kp = (k.phone || '').replace(/\D/g, '').slice(-10);
+                  if (pDigits && kp && pDigits === kp) return true;
+                  const km = (k.email || '').trim().toLowerCase();
+                  if (cleanMail && km && cleanMail === km) return true;
+                  const kn = (k.investorName || '').trim().toLowerCase();
+                  if (cleanName && kn && cleanName === kn) return true;
+                  return false;
+                });
+                if (matched?.id) {
+                  const det = await fetch(apiUrl(`/irm/kyc/${matched.id}`), { headers: getAuthHeaders() });
+                  if (det.ok) {
+                    const detJson = await det.json();
+                    if (detJson.success && detJson.data) liveRecord = detJson.data;
+                  }
+                }
+              }
+            }
+          } catch {}
         }
         if (!isCancelled && liveRecord) {
           setDbKycs(prev => ({
@@ -972,9 +1113,7 @@ const GhlIrmKycView: React.FC = () => {
 
     // If backend record exists in dbKycs, reload genuine submitted/drafted KYC data
     if (targetDeal) {
-      const emailKey = (targetDeal.email || '').toLowerCase().trim();
-      const phoneDigits = (targetDeal.phone || '').replace(/\D/g, '').slice(-10);
-      const dbKyc = dbKycs[emailKey] || (phoneDigits ? Object.values(dbKycs).find((k: any) => (k.phone || '').replace(/\D/g, '').slice(-10) === phoneDigits) : null);
+      const dbKyc = findBackendKyc(targetDeal, dbKycs, tenant?.id);
 
       if (dbKyc) {
         let dbNominees: NomineeItem[] = [];
@@ -1000,7 +1139,7 @@ const GhlIrmKycView: React.FC = () => {
         }
 
         const docFrom = (url?: string | null, label = 'Uploaded document') =>
-          url && String(url).trim() ? { name: label, size: 'Saved', type: 'application/pdf' } : null;
+          url && String(url).trim() ? { name: label, size: 'Saved', type: 'application/pdf', url: String(url) } : null;
 
         initialForm = {
           ...initialForm,
@@ -1015,7 +1154,7 @@ const GhlIrmKycView: React.FC = () => {
           nameAsPerPan: dbKyc.nameAsPerPan || dbKyc.investorName || initialForm.nameAsPerPan || '',
           aadhaarNumber: dbKyc.aadhaarNumber || initialForm.aadhaarNumber || '',
           fatherName: dbKyc.fatherName || initialForm.fatherName || '',
-          dob: dbKyc.dateOfBirth || dbKyc.dob || initialForm.dob || '',
+          dob: sanitizeDobString(dbKyc.dateOfBirth || dbKyc.dob || initialForm.dob || ''),
           address: dbKyc.addressLine1 || dbKyc.address || initialForm.address || '',
           courierAddress: dbKyc.addressLine2 || dbKyc.courierAddress || initialForm.courierAddress || '',
           country: dbKyc.country || initialForm.country || 'India',
@@ -1038,6 +1177,7 @@ const GhlIrmKycView: React.FC = () => {
           panDoc: docFrom(dbKyc.panDocumentUrl, 'PAN (saved)') || initialForm.panDoc,
           bankProofDoc: docFrom(dbKyc.bankChequeUrl, 'Bank proof (saved)') || initialForm.bankProofDoc,
           dematDoc: docFrom(dbKyc.dematDocumentUrl, 'Demat statement (saved)') || initialForm.dematDoc,
+          photoDoc: docFrom(dbKyc.photoUrl, 'Investor Photo (saved)') || initialForm.photoDoc,
         };
       }
     }
@@ -1070,8 +1210,64 @@ const GhlIrmKycView: React.FC = () => {
     startKycFlow(deal, targetStep, true);
   };
 
+  /** Uploads a KYC document file to the server (once) and returns its stored URL. */
+  const uploadKycDoc = async (
+    doc: KycDoc | null,
+    category: string,
+    deal: Deal
+  ): Promise<string | null> => {
+    if (!doc) return null;
+    if (doc.url) return doc.url;
+
+    const file = pendingDocFiles.get(doc);
+    if (!file) {
+      throw new Error(`Please re-attach the ${category} document and try again.`);
+    }
+    const investorId = Number(deal.customerId);
+    if (!Number.isFinite(investorId) || investorId <= 0) {
+      throw new Error('Cannot upload documents: this deal is not linked to an investor record yet.');
+    }
+
+    const fd = new FormData();
+    fd.append('Name', file.name);
+    fd.append('Size', doc.size);
+    fd.append('Type', doc.type);
+    fd.append('Category', category);
+    fd.append('EntityType', 'investor');
+    fd.append('EntityId', String(investorId));
+    fd.append('File', file);
+
+    const res = await fetch(apiUrl('/documents'), {
+      method: 'POST',
+      headers: getAuthHeaders(), // no Content-Type: the browser sets the multipart boundary
+      body: fd,
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.success || !json?.data?.fileUrl) {
+      throw new Error(json?.message || `Failed to upload ${category} document.`);
+    }
+    doc.url = String(json.data.fileUrl); // cache so retries don't upload again
+    return doc.url;
+  };
+
   const saveBackendDraft = async (deal: Deal, data: KYCFormData, step: number) => {
     try {
+      // Best-effort document upload for drafts: a failed upload must not block saving the text fields.
+      const tryUpload = async (doc: KycDoc | null, category: string) => {
+        try {
+          return await uploadKycDoc(doc, category, deal);
+        } catch (e) {
+          console.warn('[KYC draft] document not uploaded:', e);
+          return doc?.url || null;
+        }
+      };
+      const docUrls = {
+        pan: await tryUpload(data.panDoc, 'KYC - PAN'),
+        aadhaar: await tryUpload(data.aadhaarDoc, 'KYC - Aadhaar'),
+        bank: await tryUpload(data.bankProofDoc, 'KYC - Bank Proof'),
+        demat: data.hasNoDemat ? null : await tryUpload(data.dematDoc, 'KYC - Demat Statement'),
+        photo: await tryUpload(data.photoDoc, 'KYC - Investor Photo'),
+      };
       const payload = {
         investorId: deal.customerId ? Number(deal.customerId) || 0 : 0,
         kycId: deal.kycId || (deal as any).kycRecordId || undefined,
@@ -1100,27 +1296,40 @@ const GhlIrmKycView: React.FC = () => {
         accountType: data.accountType,
         dematAccountNumber: data.hasNoDemat ? null : data.dematAccountNumber,
         nomineesJson: data.hasNominee && data.nominees && data.nominees.length > 0 ? JSON.stringify(data.nominees) : '[]',
-        panDocumentUrl: data.panDoc?.name || null,
-        aadhaarDocumentUrl: data.aadhaarDoc?.name || null,
-        bankChequeUrl: data.bankProofDoc?.name || null,
-        dematDocumentUrl: data.hasNoDemat ? null : (data.dematDoc?.name || null),
-        customerConsentObtained: true,
-        customerConsentTimestamp: new Date().toISOString(),
-        customerConsentDetails: "Customer verbal and electronic consent obtained during assisted KYC session.",
+        panDocumentUrl: docUrls.pan,
+        aadhaarDocumentUrl: docUrls.aadhaar,
+        bankChequeUrl: docUrls.bank,
+        dematDocumentUrl: docUrls.demat,
+        photoUrl: docUrls.photo || data.photoUrl || undefined,
+        // Consent is only captured on final submit; a draft must never claim it was obtained.
+        customerConsentObtained: false,
+        customerConsentTimestamp: null,
+        customerConsentDetails: null,
         isFinalSubmit: false,
       };
-      await fetch('/api/irm/kyc/assisted-draft', {
+      const res = await fetch(apiUrl('/irm/kyc/assisted-draft'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(payload),
       });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.message || `Draft was not saved on the server (${res.status}).`);
+      }
     } catch (err) {
       console.warn('Draft save error:', err);
+      throw err;
     }
   };
 
   const submitBackendAssistedKyc = async (deal: Deal, data: KYCFormData) => {
     try {
+      // Upload the actual files first; submission fails (and nothing is reported as saved) if an upload fails.
+      const panUrl = await uploadKycDoc(data.panDoc, 'KYC - PAN', deal);
+      const aadhaarUrl = await uploadKycDoc(data.aadhaarDoc, 'KYC - Aadhaar', deal);
+      const bankUrl = await uploadKycDoc(data.bankProofDoc, 'KYC - Bank Proof', deal);
+      const dematUrl = data.hasNoDemat ? null : await uploadKycDoc(data.dematDoc, 'KYC - Demat Statement', deal);
+      const photoUrl = await uploadKycDoc(data.photoDoc, 'KYC - Investor Photo', deal);
       const payload = {
         investorId: deal.customerId ? Number(deal.customerId) || 0 : 0,
         kycId: deal.kycId || (deal as any).kycRecordId || undefined,
@@ -1149,16 +1358,17 @@ const GhlIrmKycView: React.FC = () => {
         accountType: data.accountType,
         dematAccountNumber: data.hasNoDemat ? null : data.dematAccountNumber,
         nomineesJson: data.hasNominee && data.nominees && data.nominees.length > 0 ? JSON.stringify(data.nominees) : '[]',
-        panDocumentUrl: data.panDoc?.name || null,
-        aadhaarDocumentUrl: data.aadhaarDoc?.name || null,
-        bankChequeUrl: data.bankProofDoc?.name || null,
-        dematDocumentUrl: data.hasNoDemat ? null : (data.dematDoc?.name || null),
+        panDocumentUrl: panUrl,
+        aadhaarDocumentUrl: aadhaarUrl,
+        bankChequeUrl: bankUrl,
+        dematDocumentUrl: dematUrl,
+        photoUrl: photoUrl || data.photoUrl || undefined,
         customerConsentObtained: Boolean(customerConsentChecked),
         customerConsentTimestamp: new Date().toISOString(),
         customerConsentDetails: "Customer verbal and electronic consent obtained during assisted KYC session.",
         isFinalSubmit: true,
       };
-      const res = await fetch('/api/irm/kyc/assisted-submit', {
+      const res = await fetch(apiUrl('/irm/kyc/assisted-submit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(payload),
@@ -1187,7 +1397,7 @@ const GhlIrmKycView: React.FC = () => {
       currentResolved === 'Assisted KYC – Submitted for Verification';
 
     // 1. Save all form field values
-    localStorage.setItem(`nexus_kyc_data_${dealId}`, JSON.stringify(formData));
+    saveKycLocal(dealId, formData);
 
     // 2. Save draft metadata
     const nowIso = new Date().toISOString();
@@ -1214,7 +1424,9 @@ const GhlIrmKycView: React.FC = () => {
 
     // 4. Save to backend if authenticated
     if (user) {
-      saveBackendDraft(selectedDeal, formData, currentStep).catch(() => {});
+      saveBackendDraft(selectedDeal, formData, currentStep).catch(err => {
+        showToast(`⚠️ Draft is only saved on this device: ${err?.message || 'server error'}`);
+      });
     }
 
     window.dispatchEvent(new Event('nexus_storage_updated'));
@@ -1241,6 +1453,7 @@ const GhlIrmKycView: React.FC = () => {
         investorType: current.investorType || '',
         residentType: current.residentType || '',
         preferredAssetClass: deal ? (getIrmPreferredAssetClass(deal) === '—' ? '' : getIrmPreferredAssetClass(deal)) : '',
+        preferredAssetClassConfirmed: deal ? getIrmPreferredAssetClass(deal) !== '—' : false,
       });
     } else {
       setSectionFormData({
@@ -1276,7 +1489,7 @@ const GhlIrmKycView: React.FC = () => {
       ...sectionFormData,
     };
 
-    localStorage.setItem(savedKey, JSON.stringify(updatedData));
+    saveKycLocal(dealId, updatedData);
     setProfileKycData(updatedData);
 
     // Update Deal in storageService if primary contact fields changed
@@ -1299,23 +1512,34 @@ const GhlIrmKycView: React.FC = () => {
       dealChanged = true;
     }
 
+    // Save preferred asset class if changed
+    if (editingSection === 'personal') {
+      const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+      const isConfirmed = Boolean(sectionFormData.preferredAssetClass?.trim()) && sectionFormData.preferredAssetClassConfirmed === true;
+      const val = isConfirmed ? (sectionFormData.preferredAssetClass?.trim() || '') : '';
+      if (updatedDeal.preferredAssetClass !== (val || undefined)) {
+        updatedDeal.preferredAssetClass = val || undefined;
+        dealChanged = true;
+      }
+      const prefObj = {
+        preferredAssetClass: val,
+        confirmed: isConfirmed,
+      };
+      if (isConfirmed) {
+        if (deal.customerId) localStorage.setItem(`nexus_irm_pref_${deal.customerId}`, JSON.stringify(prefObj));
+        if (fDigits) localStorage.setItem(`nexus_irm_pref_${fDigits}`, JSON.stringify(prefObj));
+        localStorage.setItem(`nexus_irm_pref_${deal.id}`, JSON.stringify(prefObj));
+      } else {
+        if (deal.customerId) localStorage.removeItem(`nexus_irm_pref_${deal.customerId}`);
+        if (fDigits) localStorage.removeItem(`nexus_irm_pref_${fDigits}`);
+        localStorage.removeItem(`nexus_irm_pref_${deal.id}`);
+      }
+    }
+
     if (dealChanged) {
       persistDeal(updatedDeal).catch(e => showToast("Error saving deal:"));
       setSelectedCustomerDeal(updatedDeal);
       loadData();
-    }
-
-    // Save preferred asset class if changed
-    if (editingSection === 'personal') {
-      const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
-      const val = sectionFormData.preferredAssetClass?.trim() || '';
-      const prefObj = {
-        preferredAssetClass: val,
-        confirmed: Boolean(val),
-      };
-      if (deal.customerId) localStorage.setItem(`nexus_irm_pref_${deal.customerId}`, JSON.stringify(prefObj));
-      if (fDigits) localStorage.setItem(`nexus_irm_pref_${fDigits}`, JSON.stringify(prefObj));
-      localStorage.setItem(`nexus_irm_pref_${deal.id}`, JSON.stringify(prefObj));
     }
 
     const currentStatus = localStorage.getItem(`nexus_kyc_status_${dealId}`);
@@ -1339,23 +1563,23 @@ const GhlIrmKycView: React.FC = () => {
   ) => {
     const newCustStatus =
       newStatus === 'Verified' ? 'Verified' : newStatus === 'Wrong' ? 'Needs Correction' : 'Submitted';
-    const verifiedBy = newStatus === 'Verified' ? (user?.email || 'irm@ghl.com') : undefined;
+    const verifiedBy = newStatus === 'Verified' ? (user?.email || user?.name || 'IRM User') : undefined;
     const verifiedAt = newStatus === 'Verified' ? new Date().toISOString() : undefined;
 
     // Resolve KYC record ID from the deal's own kycId / kycRecordId or matching dbKycs
     const emailKey = (deal.email || '').toLowerCase().trim();
     const phoneDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
     const dbItem = dbKycs[emailKey] || (phoneDigits ? Object.values(dbKycs).find((k: any) => (k.phone || '').replace(/\D/g, '').slice(-10) === phoneDigits) : null);
+    // Never fall back to deal.customerId / deal.id: those are different id spaces and would update
+    // (or verify) an unrelated investor's KYC record.
     const resolvedKycId =
       (deal as any).kycId ||
       (deal as any).kycRecordId ||
-      dbItem?.id ||
-      deal.customerId ||
-      deal.id;
+      dbItem?.id;
 
     if (typeof resolvedKycId === 'number' || /^\d+$/.test(String(resolvedKycId))) {
       try {
-        const res = await fetch(`/api/irm/kyc/${resolvedKycId}/status`, {
+        const res = await fetch(apiUrl(`/irm/kyc/${resolvedKycId}/status`), {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -1380,8 +1604,8 @@ const GhlIrmKycView: React.FC = () => {
         showToast(err?.message || 'Error updating KYC status in backend.');
         throw err;
       }
-    } else if (newStatus === 'Verified') {
-      const errMsg = 'Cannot verify KYC: No valid backend KYC submission found for this customer.';
+    } else {
+      const errMsg = 'Cannot update KYC status: no matching backend KYC submission found for this customer.';
       showToast(errMsg);
       throw new Error(errMsg);
     }
@@ -1511,6 +1735,9 @@ const GhlIrmKycView: React.FC = () => {
       if (!formData.panDoc) {
         errs.panDoc = 'Upload PAN is required';
       }
+      if (!formData.photoDoc) {
+        errs.photoDoc = 'Upload Investor Face Photo is required for biometric verification';
+      }
     }
     if (step === 3) {
       if (!formData.bankProofDoc) {
@@ -1538,7 +1765,7 @@ const GhlIrmKycView: React.FC = () => {
       setFormErrors({});
       setValidationErrorSummary(null);
       if (selectedDeal) {
-        localStorage.setItem(`nexus_kyc_data_${selectedDeal.id}`, JSON.stringify(formData));
+        saveKycLocal(selectedDeal.id, formData);
         if (isAssistedFlow) {
           const nextStep = Math.min(5, currentStep + 1);
           localStorage.setItem(`nexus_kyc_draft_${selectedDeal.id}`, JSON.stringify({
@@ -1593,19 +1820,23 @@ const GhlIrmKycView: React.FC = () => {
     }
     if (!selectedDeal) return;
 
+    if (!user) {
+      showToast('Your session has expired. Please sign in again before submitting KYC.');
+      return;
+    }
+
     let savedKycDto: any = null;
     // Await server submission first; never report success if backend save fails
-    if (user) {
-      try {
-        savedKycDto = await submitBackendAssistedKyc(selectedDeal, formData);
-        if (savedKycDto?.id) {
-          selectedDeal.kycId = savedKycDto.id;
-          (selectedDeal as any).kycRecordId = savedKycDto.id;
-        }
-      } catch (err: any) {
-        showToast(`⚠️ Failed to submit assisted KYC: ${err.message || 'Server error'}`);
-        return;
+    try {
+      savedKycDto = await submitBackendAssistedKyc(selectedDeal, formData);
+      if (savedKycDto?.id) {
+        setSelectedDeal((prev: Deal | null) =>
+          prev ? ({ ...prev, kycId: savedKycDto.id, kycRecordId: savedKycDto.id } as Deal) : prev
+        );
       }
+    } catch (err: any) {
+      showToast(`⚠️ Failed to submit assisted KYC: ${err.message || 'Server error'}`);
+      return;
     }
 
     const investorName = formData.investorName.trim();
@@ -1623,30 +1854,15 @@ const GhlIrmKycView: React.FC = () => {
     };
 
     // 1. Persist full KYC form data in localStorage
-    localStorage.setItem(`nexus_kyc_data_${dealId}`, JSON.stringify({
+    saveKycLocal(dealId, {
       ...formData,
       assistedMetadata,
-    }));
+    });
     localStorage.setItem(`nexus_kyc_status_${dealId}`, 'Submitted for Review');
     localStorage.setItem(`nexus_kyc_assisted_${dealId}`, JSON.stringify(assistedMetadata));
 
     // Clear draft
     localStorage.removeItem(`nexus_kyc_draft_${dealId}`);
-
-    try {
-      const raw = localStorage.getItem('nexus_mock_kyc_records');
-      const records = raw ? JSON.parse(raw) : {};
-      records[dealId] = {
-        ...(records[dealId] || {}),
-        status: 'Submitted',
-        kycStatus: 'Pending',
-        isAssisted: true,
-        assistedByIrmId: user?.id,
-        assistedByIrmName: user?.name,
-        submittedAt: nowIso,
-      };
-      localStorage.setItem('nexus_mock_kyc_records', JSON.stringify(records));
-    } catch {}
 
     window.dispatchEvent(new Event('nexus_storage_updated'));
 
@@ -1792,7 +2008,81 @@ const GhlIrmKycView: React.FC = () => {
     });
   };
 
-  const filteredDeals = deals;
+  const [activeKpiFilter, setActiveKpiFilter] = useState<'all' | 'awaiting' | 'pending' | 'verified'>('all');
+
+  const totalKycInvestors = deals.length;
+
+  const awaitingVerificationCount = useMemo(() => {
+    return deals.filter(d => {
+      const norm = normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy);
+      if (norm === 'Verified') return false;
+      const cStatus = resolveCustomerKycStatus(d);
+      return (
+        cStatus === 'Submitted' ||
+        cStatus === 'Under Verification' ||
+        cStatus === 'Completed' ||
+        cStatus === 'Assisted KYC – Submitted for Verification' ||
+        (d as any).customerKycStatus === 'Assisted KYC – Submitted for Verification'
+      );
+    }).length;
+  }, [deals, dbKycs]);
+
+  const pendingSubmissionCount = useMemo(() => {
+    return deals.filter(d => {
+      const norm = normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy);
+      if (norm === 'Verified') return false;
+      const cStatus = resolveCustomerKycStatus(d);
+      return !(
+        cStatus === 'Submitted' ||
+        cStatus === 'Under Verification' ||
+        cStatus === 'Completed' ||
+        cStatus === 'Assisted KYC – Submitted for Verification' ||
+        (d as any).customerKycStatus === 'Assisted KYC – Submitted for Verification'
+      );
+    }).length;
+  }, [deals, dbKycs]);
+
+  const verifiedCount = useMemo(() => {
+    return deals.filter(d => {
+      return normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy) === 'Verified';
+    }).length;
+  }, [deals]);
+
+  const filteredDeals = useMemo(() => {
+    if (activeKpiFilter === 'all') return deals;
+    if (activeKpiFilter === 'awaiting') {
+      return deals.filter(d => {
+        const norm = normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy);
+        if (norm === 'Verified') return false;
+        const cStatus = resolveCustomerKycStatus(d);
+        return (
+          cStatus === 'Submitted' ||
+          cStatus === 'Under Verification' ||
+          cStatus === 'Completed' ||
+          cStatus === 'Assisted KYC – Submitted for Verification' ||
+          (d as any).customerKycStatus === 'Assisted KYC – Submitted for Verification'
+        );
+      });
+    }
+    if (activeKpiFilter === 'pending') {
+      return deals.filter(d => {
+        const norm = normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy);
+        if (norm === 'Verified') return false;
+        const cStatus = resolveCustomerKycStatus(d);
+        return !(
+          cStatus === 'Submitted' ||
+          cStatus === 'Under Verification' ||
+          cStatus === 'Completed' ||
+          cStatus === 'Assisted KYC – Submitted for Verification' ||
+          (d as any).customerKycStatus === 'Assisted KYC – Submitted for Verification'
+        );
+      });
+    }
+    if (activeKpiFilter === 'verified') {
+      return deals.filter(d => normalizeLegacyKycStatus(d.kycStatus, d.verifiedBy) === 'Verified');
+    }
+    return deals;
+  }, [deals, activeKpiFilter, dbKycs]);
 
   const getDealKycStatus = (deal: Deal) => {
     const status = getDynamicKycStatus(deal);
@@ -1821,39 +2111,45 @@ const GhlIrmKycView: React.FC = () => {
     {
       key: 'customerName',
       header: 'Name & Contact',
-      width: '210px',
+      width: '240px',
       sortable: true,
-      render: deal => (
-        <div>
-          <div
-            className="kyc-customer-name"
-            style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleOpenCustomerProfile(deal);
-            }}
-            title="Click to view KYC profile"
-          >
-            {deal.customerName}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
-            {deal.phone && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
-                <Phone size={11} color="var(--text-muted)" />
-                <span>{deal.phone}</span>
+      render: deal => {
+        const initial = (deal.customerName || 'U').trim().charAt(0).toUpperCase();
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="kyc-row-avatar">{initial}</div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div
+                className="kyc-customer-name"
+                style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenCustomerProfile(deal);
+                }}
+                title="Click to view KYC profile"
+              >
+                {deal.customerName}
               </div>
-            )}
-            {deal.email && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
-                <Mail size={11} color="var(--text-muted)" />
-                <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {deal.email}
-                </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+                {deal.phone && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
+                    <Phone size={11} color="var(--text-muted)" />
+                    <span>{deal.phone}</span>
+                  </div>
+                )}
+                {deal.email && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
+                    <Mail size={11} color="var(--text-muted)" />
+                    <span style={{ maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {deal.email}
+                    </span>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: 'location',
@@ -1876,28 +2172,42 @@ const GhlIrmKycView: React.FC = () => {
       sortable: true,
       render: deal => {
         const capacity = getCustomerFilledCapacity(deal);
-        return (
-          <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
+        const isSpecified = capacity && capacity !== '—' && capacity.trim() !== '' && capacity.toLowerCase() !== 'not specified';
+        return isSpecified ? (
+          <span className="kyc-capacity-badge">
             {capacity}
+          </span>
+        ) : (
+          <span className="kyc-not-specified-badge">
+            Not Specified
           </span>
         );
       },
     },
+    ...(isGhlAdmin ? [{
+      key: 'assignedAgentName',
+      header: 'Assigned IRM',
+      width: '140px',
+      render: (deal: Deal) => (
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+          {deal.assignedAgentName || 'Unassigned'}
+        </span>
+      ),
+    }] : []),
     {
       key: 'preferredAssetClass',
       header: 'Preferred Asset Class',
       width: '150px',
       render: deal => {
         const pref = getIrmPreferredAssetClass(deal);
-        return (
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 600,
-              color: pref !== '—' ? 'var(--text-primary)' : 'var(--text-muted)',
-            }}
-          >
+        const isSpecified = pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified';
+        return isSpecified ? (
+          <span className="kyc-pref-badge">
             {pref}
+          </span>
+        ) : (
+          <span className="kyc-not-specified-badge">
+            Not Specified
           </span>
         );
       },
@@ -1912,7 +2222,8 @@ const GhlIrmKycView: React.FC = () => {
           <KycStatusDropdown
             deal={deal}
             customerKycStatus={custStatus}
-            hideArrow
+            hideArrow={isGhlAdmin}
+            disablePopup={isGhlAdmin}
             onChange={(status, comment, flaggedSections, checklist) =>
               handleStatusChange(deal, status, comment, flaggedSections, checklist)
             }
@@ -1936,6 +2247,147 @@ const GhlIrmKycView: React.FC = () => {
       width: '180px',
       render: deal => {
         const status = resolveCustomerKycStatus(deal);
+
+        // For GHL Admin, render clean read-only status tags rather than operational action buttons or dropdowns
+        if (isGhlAdmin) {
+          if (status === 'Verified') {
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '3px 10px',
+                  borderRadius: 20,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  backgroundColor: 'rgba(16,185,129,0.1)',
+                  color: '#059669',
+                  border: '1px solid rgba(16,185,129,0.3)',
+                }}
+                title="KYC verified by IRM"
+              >
+                <CheckCircle size={12} /> Verified
+              </span>
+            );
+          }
+
+          if (status === 'Assisted KYC – Submitted for Verification') {
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                  color: '#059669',
+                  border: '1px solid rgba(16, 185, 129, 0.35)',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Assisted KYC submitted — awaiting IRM verification"
+              >
+                <UserCheck size={12} /> Assisted Submitted
+              </span>
+            );
+          }
+
+          if (
+            status === 'Submitted' ||
+            status === 'Under Verification' ||
+            status === 'Completed'
+          ) {
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(99, 102, 241, 0.10)',
+                  color: '#6366f1',
+                  border: '1px solid rgba(99, 102, 241, 0.25)',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Customer has submitted KYC form — awaiting IRM review"
+              >
+                <CheckCircle size={12} /> KYC Submitted
+              </span>
+            );
+          }
+
+          if (status === 'Assisted Draft') {
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(245, 158, 11, 0.10)',
+                  color: '#d97706',
+                  border: '1px solid rgba(245, 158, 11, 0.25)',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Assisted KYC is in draft state"
+              >
+                <Clock size={12} /> Assisted Draft
+              </span>
+            );
+          }
+
+          if (['Link Sent', 'In Progress', 'Needs Correction', 'Rejected'].includes(status)) {
+            return (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(59, 130, 246, 0.10)',
+                  color: '#2563eb',
+                  border: '1px solid rgba(59, 130, 246, 0.25)',
+                  whiteSpace: 'nowrap',
+                }}
+                title={`Status: ${status}`}
+              >
+                <Send size={12} /> {status === 'Link Sent' ? 'Link Sent' : status}
+              </span>
+            );
+          }
+
+          return (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 11,
+                fontWeight: 500,
+                padding: '4px 10px',
+                borderRadius: 6,
+                backgroundColor: 'rgba(107, 114, 128, 0.10)',
+                color: '#6b7280',
+                border: '1px solid rgba(107, 114, 128, 0.20)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Pending Submission
+            </span>
+          );
+        }
 
         // IRM-verified: show professional Verified badge with checkmark
         if (status === 'Verified') {
@@ -2110,14 +2562,22 @@ const GhlIrmKycView: React.FC = () => {
         return (
           <KycRowActionsMenu
             deal={deal}
-            onOpenReview={d => setReviewDeal(d)}
+            isGhlAdmin={isGhlAdmin}
+            onOpenReview={d => {
+              const fDigits = (d.phone || '').replace(/\D/g, '').slice(-10);
+              const matchLead = leads.find(l => (d.customerId && l.id === d.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
+              const matchCust = customers.find(c => (d.customerId && c.id === d.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === fDigits));
+              const backendKyc = findBackendKyc(d, dbKycs, tenant?.id);
+              setProfileKycData(buildMergedProfileData(d, backendKyc, matchLead, matchCust));
+              setVerifyModalDeal(d);
+            }}
             onShowToast={msg => showToast(msg)}
             onViewProfile={d => handleOpenCustomerProfile(d)}
-            onEditKyc={d => startKycFlow(d)}
-            onAssistedKyc={d => startAssistedKycFlow(d)}
-            onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.id)}
-            // Only show "Advance to Opportunity" after KYC is fully completed
-            onAdvanceStage={normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' ? d => handleAdvanceStage(d) : undefined}
+            onEditKyc={isGhlAdmin ? undefined : (d => startKycFlow(d))}
+            onAssistedKyc={isGhlAdmin ? undefined : (d => startAssistedKycFlow(d))}
+            onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.customerId || d.id, undefined, 'kyc')}
+            // Only show "Advance to Opportunity" after KYC is fully completed (not available in Admin oversight mode)
+            onAdvanceStage={!isGhlAdmin && normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' ? d => handleAdvanceStage(d) : undefined}
           />
         );
       },
@@ -2167,203 +2627,414 @@ const GhlIrmKycView: React.FC = () => {
         const isContinue = status === 'continue';
         const initial = (deal.customerName || 'U').trim().charAt(0).toUpperCase();
 
-        const renderField = (label: string, value?: string | number | null) => (
-          <div className="kyc-profile-field">
-            <span className="kyc-profile-label">{label}</span>
-            {value && String(value).trim() && String(value).trim() !== 'Not provided' ? (
-              <span className="kyc-profile-value">{String(value)}</span>
-            ) : (
-              <span className="kyc-profile-value not-provided">Not provided</span>
-            )}
-          </div>
-        );
+        const handleCopy = (text?: string | number | null, fieldKey?: string) => {
+          if (!text || text === '—') return;
+          try {
+            navigator.clipboard.writeText(String(text));
+            setCopiedField(fieldKey || String(text));
+            showToast(`✓ Copied ${fieldKey || 'text'} to clipboard`);
+            setTimeout(() => setCopiedField(null), 2200);
+          } catch {}
+        };
 
-        return (
-          <div className="kyc-profile-container">
-            {/* Header: Back Button + Your Profile + Edit Profile button */}
-            <div>
-              <button
-                type="button"
-                className="kyc-flow-back-btn"
-                style={{ marginBottom: 12, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}
-                onClick={() => setViewMode('table')}
-              >
-                <ArrowLeft size={16} /> Back to Qualified Investors
-              </button>
-              <div className="kyc-profile-header-row">
-                <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>
-                  Your Profile
-                </h1>
-              </div>
-            </div>
+        const renderField = (
+          label: string,
+          value?: string | number | null,
+          options?: { copyable?: boolean; isDoc?: boolean; isMono?: boolean }
+        ) => {
+          const valStr = value ? String(value).trim() : '';
+          const hasVal = valStr && valStr !== '—' && valStr.toLowerCase() !== 'not provided' && valStr.toLowerCase() !== 'not specified';
+          const isCopied = copiedField === label || (valStr && copiedField === valStr);
 
-            {/* Profile Completion Progress Card */}
-            <div className="kyc-completion-card">
-              <div className="kyc-completion-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#dc2626', display: 'inline-block' }}></span>
-                  <span>Profile Completion</span>
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#dc2626' }}>
-                  {completionPct}%
-                </span>
-              </div>
-              <div className="kyc-progress-track">
-                <div className="kyc-progress-fill" style={{ width: `${completionPct}%` }}></div>
-              </div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>
-                Complete your profile to unlock all platform features and faster KYC approval.
-              </div>
-            </div>
-
-            {/* Main Layout: Left Sidebar + Right Stacked Cards */}
-            <div className="kyc-profile-layout">
-              {/* Left Sidebar Card */}
-              <div className="kyc-profile-sidebar">
-                <div className="kyc-profile-avatar">
-                  {initial}
-                  <span className="kyc-profile-avatar-badge">CE</span>
-                </div>
-                <div className="kyc-profile-sidebar-name">{deal.customerName}</div>
-                <div className="kyc-profile-sidebar-email">{data.email || deal.email || '—'}</div>
-
-                {/* Status Dropdown on Profile Sidebar */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 12 }}>
-                  <KycStatusDropdown
-                    deal={deal}
-                    customerKycStatus={resolveCustomerKycStatus(deal)}
-                    onChange={(status, comment, flaggedSections, checklist) =>
-                      handleStatusChange(deal, status, comment, flaggedSections, checklist)
-                    }
-                    onShowToast={showToast}
-                  />
-                  {deal.kycStatus === 'Verified' && (deal.verifiedBy || deal.verifiedAt) && (
-                    <span style={{ fontSize: 11, color: '#059669', marginTop: 5, fontWeight: 600, textAlign: 'center' }}>
-                      Verified by {deal.verifiedBy ? deal.verifiedBy.split('@')[0] : 'IRM'}
-                      {deal.verifiedAt ? ' on ' + new Date(deal.verifiedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+          return (
+            <div className="kyc-glass-field">
+              <span className="kyc-glass-label">{label}</span>
+              {hasVal ? (
+                <div className="kyc-glass-val-container">
+                  {options?.isDoc ? (
+                    <span className="kyc-glass-doc-chip" title={valStr}>
+                      <FileText size={13} className="kyc-glass-doc-icon" />
+                      <span className="kyc-glass-doc-name">{valStr}</span>
+                      <span className="kyc-glass-doc-status-pill">Uploaded</span>
+                    </span>
+                  ) : (
+                    <span className={`kyc-glass-value ${options?.isMono ? 'font-mono' : ''}`}>
+                      {valStr}
                     </span>
                   )}
-                </div>
-
-                {/* Meta Details Table */}
-                <div className="kyc-profile-meta-table">
-                  <div className="kyc-profile-meta-row">
-                    <span className="kyc-profile-meta-key">GHL ID</span>
-                    <span className="kyc-profile-meta-val">{getGhlId(deal)}</span>
-                  </div>
-                  <div className="kyc-profile-meta-row">
-                    <span className="kyc-profile-meta-key">PAN</span>
-                    <span className="kyc-profile-meta-val">{data.panNumber || 'Not provided'}</span>
-                  </div>
-                  <div className="kyc-profile-meta-row">
-                    <span className="kyc-profile-meta-key">Mobile</span>
-                    <span className="kyc-profile-meta-val">{data.phone || deal.phone || 'Not provided'}</span>
-                  </div>
-                  <div className="kyc-profile-meta-row">
-                    <span className="kyc-profile-meta-key">Joined</span>
-                    <span className="kyc-profile-meta-val">{getJoinedDate(deal)}</span>
-                  </div>
-                </div>
-
-                {/* Verify KYC Button */}
-                {(() => {
-                  const normalizedStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
-                  const custStatus = resolveCustomerKycStatus(deal);
-                  const backendKyc = findBackendKyc(deal, dbKycs, tenant?.id);
-
-                  // Backend confirmed submission: record has submittedAt and is awaiting review or approved
-                  const backendSubmitted = Boolean(
-                    backendKyc && (
-                      (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'pendingreview') ||
-                      (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'approved') ||
-                      (backendKyc.isAssisted && backendKyc.customerConsentObtained && backendKyc.submittedAt)
-                    )
-                  );
-
-                  // Distinguish draft-only records from submitted records
-                  const isBackendDraft = Boolean(
-                    backendKyc &&
-                    (backendKyc.status || '').toLowerCase() === 'draft' &&
-                    !backendKyc.submittedAt
-                  );
-
-                  const isAssistedSubmitted =
-                    custStatus === 'Assisted KYC – Submitted for Verification' ||
-                    (deal as any).customerKycStatus === 'Assisted KYC – Submitted for Verification' ||
-                    Boolean(backendKyc?.isAssisted && backendSubmitted);
-
-                  const isDraftOnly =
-                    custStatus === 'Assisted Draft' ||
-                    (deal as any).customerKycStatus === 'Assisted Draft' ||
-                    isBackendDraft;
-
-                  const customerSubmitted =
-                    !isDraftOnly && (
-                      backendSubmitted ||
-                      isAssistedSubmitted ||
-                      custStatus === 'Completed' ||
-                      custStatus === 'Submitted' ||
-                      custStatus === 'Under Verification' ||
-                      custStatus === 'Verified'
-                    );
-
-                  const canVerify =
-                    permissions.includes(PERMISSIONS.KYC_VERIFY) ||
-                    user?.role?.code === 'irm' ||
-                    user?.role?.code === 'company_admin' ||
-                    user?.role?.code === 'super_admin' ||
-                    user?.role?.code === 'sales_executive' ||
-                    !permissions ||
-                    permissions.length === 0;
-
-                  const isBtnDisabled = !canVerify || !customerSubmitted;
-                  const tooltipText = !canVerify
-                    ? 'You do not have permission to verify KYC'
-                    : isDraftOnly
-                      ? 'Assisted KYC is currently an incomplete draft and has not been submitted yet'
-                      : !customerSubmitted
-                        ? 'Customer has not submitted KYC yet'
-                        : undefined;
-
-                  return (
+                  {options?.copyable && (
                     <button
                       type="button"
-                      className="btn-complete-kyc"
-                      disabled={isBtnDisabled}
-                      title={tooltipText}
-                      style={{
-                        backgroundColor: normalizedStatus === 'Verified' ? '#059669' : '#2563eb',
-                        borderColor: normalizedStatus === 'Verified' ? '#059669' : '#2563eb',
-                        cursor: isBtnDisabled ? 'not-allowed' : 'pointer',
-                        opacity: isBtnDisabled ? 0.6 : 1,
-                      }}
-                      onClick={() => {
-                        if (!profileKycData) {
-                          const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
-                          const matchLead = leads.find(l => (deal.customerId && l.id === deal.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
-                          const matchCust = customers.find(c => (deal.customerId && c.id === deal.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === fDigits));
-                          setProfileKycData(buildMergedProfileData(deal, backendKyc, matchLead, matchCust));
-                        }
-                        setVerifyModalDeal(deal);
-                      }}
+                      className={`kyc-glass-copy-btn ${isCopied ? 'copied' : ''}`}
+                      onClick={() => handleCopy(valStr, label)}
+                      title={`Copy ${label}`}
                     >
-                      <ShieldCheck size={14} />
-                      {normalizedStatus === 'Verified' ? 'Re-verify KYC' : 'Verify KYC'}
+                      {isCopied ? <Check size={11} color="#10b981" /> : <Copy size={11} />}
                     </button>
-                  );
-                })()}
+                  )}
+                </div>
+              ) : (
+                <div className="kyc-glass-empty-container">
+                  <span className="kyc-glass-empty-pill">Not Specified</span>
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        return (
+          <div className="kyc-glass-canvas">
+            {/* Spatial Ambient Glow Atmosphere */}
+            <div className="kyc-glass-ambient-orbs" aria-hidden="true">
+              <div className="kyc-glass-orb kyc-glass-orb-1" />
+              <div className="kyc-glass-orb kyc-glass-orb-2" />
+              <div className="kyc-glass-orb kyc-glass-orb-3" />
+            </div>
+
+            {/* Floating macOS Top Glass Capsule Bar */}
+            <div className="kyc-glass-top-bar">
+              <div className="kyc-glass-top-left">
+                <button
+                  type="button"
+                  className="kyc-glass-back-btn"
+                  onClick={() => setViewMode('table')}
+                  title="Return to Qualified Investors list"
+                >
+                  <ArrowLeft size={15} /> <span>Qualified Investors</span>
+                </button>
+                <div className="kyc-glass-breadcrumb">
+                  <span className="kyc-glass-crumb-node">Dossier</span>
+                  <span className="kyc-glass-crumb-sep">/</span>
+                  <span className="kyc-glass-crumb-active">{deal.customerName}</span>
+                </div>
               </div>
 
-              {/* Right Stacked Cards */}
-              <div className="kyc-profile-main-cards">
-                {/* 1. Personal Details */}
-                <div className="kyc-profile-card">
-                  <h3 className="kyc-profile-card-title">Personal Details</h3>
-                  <div className="kyc-profile-fields-grid">
+              <div className="kyc-glass-top-right">
+                <button
+                  type="button"
+                  className="kyc-glass-action-pill kyc-btn-call"
+                  onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc')}
+                  title={`Initiate direct phone consultation with ${deal.customerName}`}
+                >
+                  <Phone size={13} /> <span>Call Investor</span>
+                </button>
+                <button
+                  type="button"
+                  className="kyc-glass-action-pill kyc-btn-edit"
+                  onClick={() => startAssistedKycFlow(deal)}
+                  title="Update or submit Assisted KYC details"
+                >
+                  <Edit2 size={13} /> <span>Update Dossier</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Holographic Identity Shield (Floating Spatial Hero Card) */}
+            <div className="kyc-glass-hero-shield">
+              <div className="kyc-glass-specular-light" />
+              
+              <div className="kyc-glass-hero-content">
+                {/* Left: Prismatic Avatar, Customer Name & Status */}
+                <div className="kyc-glass-hero-left">
+                  <div className="kyc-glass-avatar-box">
+                    <div className="kyc-glass-avatar">
+                      {initial}
+                      <span className="kyc-glass-avatar-ring" />
+                    </div>
+                  </div>
+                  <div className="kyc-glass-hero-user">
+                    <div className="kyc-glass-name-row">
+                      <h2 className="kyc-glass-hero-name">{deal.customerName}</h2>
+                      <span className="kyc-glass-vip-pill">
+                        <Sparkles size={11} /> Qualified HNW
+                      </span>
+                    </div>
+                    <div className="kyc-glass-contact-row">
+                      <span className="kyc-glass-contact-chip">
+                        <Mail size={12} /> {data.email || deal.email || '—'}
+                        {deal.email && (
+                          <button
+                            type="button"
+                            className="kyc-glass-mini-copy"
+                            onClick={() => handleCopy(deal.email, 'Email')}
+                            title="Copy Email"
+                          >
+                            <Copy size={10} />
+                          </button>
+                        )}
+                      </span>
+                      <span className="kyc-glass-contact-chip">
+                        <Phone size={12} /> {data.phone || deal.phone || '—'}
+                        {deal.phone && (
+                          <button
+                            type="button"
+                            className="kyc-glass-mini-copy"
+                            onClick={() => handleCopy(deal.phone, 'Phone')}
+                            title="Copy Phone"
+                          >
+                            <Copy size={10} />
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                    <div className="kyc-glass-status-row">
+                      <KycStatusDropdown
+                        deal={deal}
+                        customerKycStatus={resolveCustomerKycStatus(deal)}
+                        disablePopup={true}
+                        onChange={(status, comment, flaggedSections, checklist) =>
+                          handleStatusChange(deal, status, comment, flaggedSections, checklist)
+                        }
+                        onShowToast={showToast}
+                      />
+                      {deal.kycStatus === 'Verified' && (deal.verifiedBy || deal.verifiedAt) && (
+                        <span className="kyc-glass-verified-stamp">
+                          <CheckCircle size={12} /> Verified by {deal.verifiedBy ? deal.verifiedBy.split('@')[0] : 'IRM'}
+                          {deal.verifiedAt ? ' · ' + new Date(deal.verifiedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right: Floating Glass Metrics + Spatial Action Button */}
+                <div className="kyc-glass-hero-right">
+                  <div className="kyc-glass-metrics-grid">
+                    <div className="kyc-glass-metric-cell">
+                      <span className="kyc-glass-metric-label">GHL ID</span>
+                      <span className="kyc-glass-metric-val font-mono">{getGhlId(deal)}</span>
+                    </div>
+                    <div className="kyc-glass-metric-cell">
+                      <span className="kyc-glass-metric-label">PAN Number</span>
+                      <div className="kyc-glass-metric-with-copy">
+                        <span className="kyc-glass-metric-val font-mono">{data.panNumber || '—'}</span>
+                        {data.panNumber && (
+                          <button
+                            type="button"
+                            className="kyc-glass-mini-copy"
+                            onClick={() => handleCopy(data.panNumber, 'PAN Number')}
+                            title="Copy PAN"
+                          >
+                            <Copy size={10} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="kyc-glass-metric-cell">
+                      <span className="kyc-glass-metric-label">Registered Mobile</span>
+                      <span className="kyc-glass-metric-val font-mono">{data.phone || deal.phone || '—'}</span>
+                    </div>
+                    <div className="kyc-glass-metric-cell">
+                      <span className="kyc-glass-metric-label">Pipeline Joined</span>
+                      <span className="kyc-glass-metric-val">{getJoinedDate(deal)}</span>
+                    </div>
+                  </div>
+
+                  <div className="kyc-glass-hero-cta">
+                    {(() => {
+                      const normalizedStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
+                      const custStatus = resolveCustomerKycStatus(deal);
+                      const backendKyc = findBackendKyc(deal, dbKycs, tenant?.id);
+
+                      const backendSubmitted = Boolean(
+                        backendKyc && (
+                          (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'pendingreview') ||
+                          (backendKyc.submittedAt && (backendKyc.status || '').toLowerCase() === 'approved') ||
+                          (backendKyc.isAssisted && backendKyc.customerConsentObtained && backendKyc.submittedAt)
+                        )
+                      );
+
+                      const isBackendDraft = Boolean(
+                        backendKyc &&
+                        (backendKyc.status || '').toLowerCase() === 'draft' &&
+                        !backendKyc.submittedAt
+                      );
+
+                      const isAssistedSubmitted =
+                        custStatus === 'Assisted KYC – Submitted for Verification' ||
+                        (deal as any).customerKycStatus === 'Assisted KYC – Submitted for Verification' ||
+                        Boolean(backendKyc?.isAssisted && backendSubmitted);
+
+                      const isDraftOnly =
+                        custStatus === 'Assisted Draft' ||
+                        (deal as any).customerKycStatus === 'Assisted Draft' ||
+                        isBackendDraft;
+
+                      const customerSubmitted =
+                        !isDraftOnly && (
+                          backendSubmitted ||
+                          isAssistedSubmitted ||
+                          custStatus === 'Completed' ||
+                          custStatus === 'Submitted' ||
+                          custStatus === 'Under Verification' ||
+                          custStatus === 'Verified'
+                        );
+
+                      const canVerify =
+                        permissions.includes(PERMISSIONS.KYC_VERIFY) ||
+                        user?.role?.code === 'irm' ||
+                        user?.role?.code === 'company_admin' ||
+                        user?.role?.code === 'super_admin' ||
+                        user?.role?.code === 'sales_executive' ||
+                        !permissions ||
+                        permissions.length === 0;
+
+                      const isBtnDisabled = !canVerify || !customerSubmitted;
+                      const tooltipText = !canVerify
+                        ? 'You do not have permission to verify KYC'
+                        : isDraftOnly
+                          ? 'Assisted KYC is currently an incomplete draft and has not been submitted yet'
+                          : !customerSubmitted
+                            ? 'Customer has not submitted KYC yet'
+                            : undefined;
+
+                      return (
+                        <button
+                          type="button"
+                          className="kyc-glass-cta-btn"
+                          disabled={isBtnDisabled}
+                          title={tooltipText}
+                          style={{
+                            background: normalizedStatus === 'Verified'
+                              ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)'
+                              : 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)',
+                            cursor: isBtnDisabled ? 'not-allowed' : 'pointer',
+                            opacity: isBtnDisabled ? 0.6 : 1,
+                          }}
+                          onClick={() => {
+                            if (!profileKycData) {
+                              const fDigits = (deal.phone || '').replace(/\D/g, '').slice(-10);
+                              const matchLead = leads.find(l => (deal.customerId && l.id === deal.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
+                              const matchCust = customers.find(c => (deal.customerId && c.id === deal.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === fDigits));
+                              setProfileKycData(buildMergedProfileData(deal, backendKyc, matchLead, matchCust));
+                            }
+                            setVerifyModalDeal(deal);
+                          }}
+                        >
+                          <ShieldCheck size={16} />
+                          <span>{normalizedStatus === 'Verified' ? 'Re-verify KYC' : 'Verify Dossier'}</span>
+                        </button>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Holographic Compliance Tracker Card */}
+            <div className="kyc-glass-compliance-card">
+              <div className="kyc-glass-compliance-header">
+                <div className="kyc-glass-compliance-left">
+                  <div className="kyc-glass-pulse-dot" style={{ background: completionPct === 100 ? '#10b981' : '#ef4444' }} />
+                  <span className="kyc-glass-compliance-title">KYC Compliance Dossier Status</span>
+                  <span className={`kyc-glass-compliance-pct-badge ${completionPct === 100 ? 'done' : ''}`}>
+                    {completionPct}% Complete
+                  </span>
+                </div>
+                <div className="kyc-glass-milestones">
+                  <span className={`kyc-glass-milestone-chip ${data.panNumber ? 'done' : ''}`}>
+                    PAN {data.panNumber ? '✓' : '—'}
+                  </span>
+                  <span className={`kyc-glass-milestone-chip ${data.aadhaarNumber ? 'done' : ''}`}>
+                    Aadhaar {data.aadhaarNumber ? '✓' : '—'}
+                  </span>
+                  <span className={`kyc-glass-milestone-chip ${data.bankName ? 'done' : ''}`}>
+                    Bank {data.bankName ? '✓' : '—'}
+                  </span>
+                  <span className={`kyc-glass-milestone-chip ${data.dematAccountNumber || data.hasNoDemat ? 'done' : ''}`}>
+                    Demat {data.dematAccountNumber || data.hasNoDemat ? '✓' : '—'}
+                  </span>
+                </div>
+              </div>
+              <div className="kyc-glass-progress-track">
+                <div
+                  className="kyc-glass-progress-fill"
+                  style={{
+                    width: `${completionPct}%`,
+                    background: completionPct === 100
+                      ? 'linear-gradient(90deg, #059669 0%, #10b981 100%)'
+                      : 'linear-gradient(90deg, #991b1b 0%, #dc2626 50%, #ef4444 100%)'
+                  }}
+                />
+              </div>
+              <div className="kyc-glass-compliance-footer">
+                <span>SEBI &amp; PMLA institutional verification tracker</span>
+                <span className="kyc-glass-compliance-counter">
+                  {completionPct === 100 ? '✓ Ready for institutional tranche allocations' : `${100 - completionPct}% remaining to complete onboarding`}
+                </span>
+              </div>
+            </div>
+
+            {/* Floating macOS Segmented Island Dock */}
+            <div className="kyc-glass-dock-wrapper">
+              <div className="kyc-glass-dock">
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'all' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('all')}
+                >
+                  <span>All Sections (5)</span>
+                </button>
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'personal' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('personal')}
+                >
+                  <User size={13} /> <span>Personal Details</span>
+                </button>
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'identity' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('identity')}
+                >
+                  <ShieldCheck size={13} /> <span>Address &amp; Identity</span>
+                </button>
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'bank' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('bank')}
+                >
+                  <Building size={13} /> <span>Bank Details</span>
+                </button>
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'demat' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('demat')}
+                >
+                  <Layers size={13} /> <span>Demat Account</span>
+                </button>
+                <button
+                  type="button"
+                  className={`kyc-glass-dock-item ${profileDossierTab === 'nominees' ? 'active' : ''}`}
+                  onClick={() => setProfileDossierTab('nominees')}
+                >
+                  <Users size={13} /> <span>Nominees</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Floating Acrylic Bento Panels Grid (Zero Empty Space 2+3 Bento Architecture) */}
+            <div className="kyc-glass-bento-grid">
+              {/* 1. Personal Details */}
+              {(profileDossierTab === 'all' || profileDossierTab === 'personal') && (
+                <div className="kyc-glass-panel kyc-panel-personal">
+                  <div className="kyc-glass-panel-header">
+                    <div className="kyc-glass-panel-title-box">
+                      <div className="kyc-glass-icon-chip kyc-icon-personal">
+                        <User size={16} />
+                      </div>
+                      <div>
+                        <h3 className="kyc-glass-panel-title">Personal Details</h3>
+                        <p className="kyc-glass-panel-desc">Investor demographics, capacity &amp; asset preferences</p>
+                      </div>
+                    </div>
+                    <span className="kyc-glass-badge">12 Fields</span>
+                  </div>
+                  <div className="kyc-glass-fields-matrix">
                     {renderField('Full Name', data.investorName || deal.customerName)}
-                    {renderField('Email', data.email || deal.email)}
-                    {renderField('Phone', data.phone || deal.phone)}
-                    {renderField('Pan Number', data.panNumber)}
+                    {renderField('Email', data.email || deal.email, { copyable: true })}
+                    {renderField('Phone', data.phone || deal.phone, { copyable: true, isMono: true })}
+                    {renderField('PAN Number', data.panNumber, { copyable: true, isMono: true })}
                     {renderField('City', data.city || getResolvedLocation(deal))}
                     {renderField('Date of Birth', data.dob)}
                     {renderField('Occupation', data.occupation)}
@@ -2374,63 +3045,115 @@ const GhlIrmKycView: React.FC = () => {
                     {renderField('Preferred Asset Class', getIrmPreferredAssetClass(deal))}
                   </div>
                 </div>
+              )}
 
-                {/* 2. Address & Identity */}
-                <div className="kyc-profile-card">
-                  <h3 className="kyc-profile-card-title">Address &amp; Identity</h3>
-                  <div className="kyc-profile-fields-grid">
+              {/* 2. Address & Identity */}
+              {(profileDossierTab === 'all' || profileDossierTab === 'identity') && (
+                <div className="kyc-glass-panel kyc-panel-identity">
+                  <div className="kyc-glass-panel-header">
+                    <div className="kyc-glass-panel-title-box">
+                      <div className="kyc-glass-icon-chip kyc-icon-identity">
+                        <ShieldCheck size={16} />
+                      </div>
+                      <div>
+                        <h3 className="kyc-glass-panel-title">Address &amp; Identity</h3>
+                        <p className="kyc-glass-panel-desc">Statutory Aadhaar, PAN documents &amp; residence</p>
+                      </div>
+                    </div>
+                    <span className="kyc-glass-badge">11 Fields</span>
+                  </div>
+                  <div className="kyc-glass-fields-matrix">
                     {renderField('Name on Document', data.nameAsPerPan || data.investorName || deal.customerName)}
                     {renderField("Father's Name", data.fatherName)}
-                    {renderField('Aadhaar Number', data.aadhaarNumber)}
+                    {renderField('Aadhaar Number', data.aadhaarNumber, { copyable: true, isMono: true })}
                     {renderField('Permanent Address', data.address)}
                     {renderField('Courier Address', data.courierAddress || data.address)}
                     {renderField('City', data.city || getResolvedLocation(deal))}
                     {renderField('State', data.state)}
-                    {renderField('Pincode', data.pincode)}
+                    {renderField('Pincode', data.pincode, { isMono: true })}
                     {renderField('Country', data.country || 'India')}
-                    {renderField('Aadhaar Document', data.aadhaarDoc?.name)}
-                    {renderField('PAN Document', data.panDoc?.name)}
+                    {renderField('Aadhaar Document', data.aadhaarDoc?.name, { isDoc: true })}
+                    {renderField('PAN Document', data.panDoc?.name, { isDoc: true })}
                   </div>
                 </div>
+              )}
 
-                {/* 3. Nominee Details */}
-                <div className="kyc-profile-card">
-                  <h3 className="kyc-profile-card-title">Nominee Details</h3>
-                  <div className="kyc-profile-fields-grid">
+              {/* 3. Bank Details */}
+              {(profileDossierTab === 'all' || profileDossierTab === 'bank') && (
+                <div className="kyc-glass-panel kyc-panel-bank">
+                  <div className="kyc-glass-panel-header">
+                    <div className="kyc-glass-panel-title-box">
+                      <div className="kyc-glass-icon-chip kyc-icon-bank">
+                        <Building size={16} />
+                      </div>
+                      <div>
+                        <h3 className="kyc-glass-panel-title">Bank Details</h3>
+                        <p className="kyc-glass-panel-desc">Verified payout &amp; subscription settlement account</p>
+                      </div>
+                    </div>
+                    <span className="kyc-glass-badge">5 Fields</span>
+                  </div>
+                  <div className="kyc-glass-fields-matrix">
+                    {renderField('Bank Name', data.bankName)}
+                    {renderField('Account No', data.accountNumber, { copyable: true, isMono: true })}
+                    {renderField('IFSC Code', data.ifscCode, { copyable: true, isMono: true })}
+                    {renderField('Account Type', data.accountType)}
+                    {renderField('Bank Proof Document', data.bankProofDoc?.name, { isDoc: true })}
+                  </div>
+                </div>
+              )}
+
+              {/* 4. Demat Details */}
+              {(profileDossierTab === 'all' || profileDossierTab === 'demat') && (
+                <div className="kyc-glass-panel kyc-panel-demat">
+                  <div className="kyc-glass-panel-header">
+                    <div className="kyc-glass-panel-title-box">
+                      <div className="kyc-glass-icon-chip kyc-icon-demat">
+                        <Layers size={16} />
+                      </div>
+                      <div>
+                        <h3 className="kyc-glass-panel-title">Demat Details</h3>
+                        <p className="kyc-glass-panel-desc">Depository participant details for securities allotment</p>
+                      </div>
+                    </div>
+                    <span className="kyc-glass-badge">6 Fields</span>
+                  </div>
+                  <div className="kyc-glass-fields-matrix">
+                    {renderField('Demat Account Status', data.hasNoDemat ? 'No Demat Account' : (data.dematAccountNumber || data.dematDepository || data.dematDpId ? 'Active Demat' : null))}
+                    {renderField('Demat Account Number', data.dematAccountNumber, { copyable: true, isMono: true })}
+                    {renderField('Depository', data.dematDepository)}
+                    {renderField('DP ID', data.dematDpId, { copyable: true, isMono: true })}
+                    {renderField('Client ID', data.dematClientId, { copyable: true, isMono: true })}
+                    {renderField('Demat Statement Proof', data.dematDoc?.name, { isDoc: true })}
+                  </div>
+                </div>
+              )}
+
+              {/* 5. Nominee Details */}
+              {(profileDossierTab === 'all' || profileDossierTab === 'nominees') && (
+                <div className="kyc-glass-panel kyc-panel-nominees">
+                  <div className="kyc-glass-panel-header">
+                    <div className="kyc-glass-panel-title-box">
+                      <div className="kyc-glass-icon-chip kyc-icon-nominee">
+                        <Users size={16} />
+                      </div>
+                      <div>
+                        <h3 className="kyc-glass-panel-title">Nominee Details</h3>
+                        <p className="kyc-glass-panel-desc">Primary succession &amp; legal beneficiaries</p>
+                      </div>
+                    </div>
+                    <span className="kyc-glass-badge">6 Fields</span>
+                  </div>
+                  <div className="kyc-glass-fields-matrix">
                     {renderField('Nominee Name', data.nominees?.[0]?.name)}
                     {renderField('Relationship', data.nominees?.[0]?.relationship)}
-                    {renderField('ID Proof', data.nominees?.[0]?.guardianName ? `Guardian: ${data.nominees[0].guardianName}` : (data.nominees?.[0] ? 'Provided' : null))}
-                    {renderField('Share', data.nominees?.[0]?.allocationPercentage ? `${data.nominees[0].allocationPercentage}%` : null)}
+                    {renderField('ID Proof / Guardian', data.nominees?.[0]?.guardianName ? `Guardian: ${data.nominees[0].guardianName}` : (data.nominees?.[0] ? 'Provided' : null))}
+                    {renderField('Share Allocation', data.nominees?.[0]?.allocationPercentage ? `${data.nominees[0].allocationPercentage}%` : null)}
                     {renderField('Date of Birth / Age', data.nominees?.[0]?.dob)}
                     {renderField('Nominee Address', data.nominees?.[0]?.address)}
                   </div>
                 </div>
-
-                {/* 4. Bank Details */}
-                <div className="kyc-profile-card">
-                  <h3 className="kyc-profile-card-title">Bank Details</h3>
-                  <div className="kyc-profile-fields-grid">
-                    {renderField('Bank Name', data.bankName)}
-                    {renderField('Account No', data.accountNumber)}
-                    {renderField('IFSC', data.ifscCode)}
-                    {renderField('Account Type', data.accountType)}
-                    {renderField('Bank Proof Document', data.bankProofDoc?.name)}
-                  </div>
-                </div>
-
-                {/* 5. Demat Details */}
-                <div className="kyc-profile-card">
-                  <h3 className="kyc-profile-card-title">Demat Details</h3>
-                  <div className="kyc-profile-fields-grid">
-                    {renderField('Demat Account', data.hasNoDemat ? 'No Demat Account' : (data.dematAccountNumber || data.dematDepository || data.dematDpId ? 'Active Demat' : null))}
-                    {renderField('Demat Account Number', data.dematAccountNumber)}
-                    {renderField('Depository', data.dematDepository)}
-                    {renderField('DP ID', data.dematDpId)}
-                    {renderField('Client ID', data.dematClientId)}
-                    {renderField('Demat Statement Proof', data.dematDoc?.name)}
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         );
@@ -2440,13 +3163,93 @@ const GhlIrmKycView: React.FC = () => {
           <div className="page-header" style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <h1 className="page-title">
-                <FileCheck size={24} color="#06b6d4" /> Qualified Investor & KYC Verification
+                <FileCheck size={24} color="#06b6d4" /> {isGhlAdmin ? 'KYC Leads & Verification Directory' : 'Qualified Investor & KYC Verification'}
               </h1>
               <p className="page-subtitle">
-                SEBI compliance checked, ticket size verified, KYC validated investors ready for investment opportunities.
+                {isGhlAdmin
+                  ? 'Company-wide oversight of leads undergoing KYC verification across all IRMs before moving to Opportunities.'
+                  : 'SEBI compliance checked, ticket size verified, KYC validated investors ready for investment opportunities.'}
               </p>
             </div>
+          </div>
 
+          {/* Executive KPI Metric Cards */}
+          <div className="kyc-kpi-container">
+            <div
+              className={`kyc-metric-card ${activeKpiFilter === 'all' ? 'active' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveKpiFilter('all')}
+              title={activeKpiFilter === 'all' ? 'Showing all investors' : 'Click to show all investors'}
+            >
+              <div className="kyc-metric-header">
+                <span className="kyc-metric-label">Total in KYC</span>
+                <div className="kyc-metric-icon kyc-metric-icon--blue">
+                  <Users size={16} />
+                </div>
+              </div>
+              <div className="kyc-metric-val">{totalKycInvestors}</div>
+              <div className="kyc-metric-subtext">
+                {activeKpiFilter === 'all' ? 'Showing all investors' : 'Click to view all'}
+              </div>
+            </div>
+
+            <div
+              className={`kyc-metric-card ${activeKpiFilter === 'awaiting' ? 'active' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveKpiFilter(prev => prev === 'awaiting' ? 'all' : 'awaiting')}
+              title={activeKpiFilter === 'awaiting' ? 'Click to reset filter' : 'Click to filter awaiting verification'}
+            >
+              <div className="kyc-metric-header">
+                <span className="kyc-metric-label">Awaiting Verification</span>
+                <div className="kyc-metric-icon kyc-metric-icon--amber">
+                  <Clock size={16} />
+                </div>
+              </div>
+              <div className="kyc-metric-val">{awaitingVerificationCount}</div>
+              <div className="kyc-metric-subtext">
+                {activeKpiFilter === 'awaiting' ? '● Filter active (Click to reset)' : 'Ready for compliance review'}
+              </div>
+            </div>
+
+            <div
+              className={`kyc-metric-card ${activeKpiFilter === 'pending' ? 'active' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveKpiFilter(prev => prev === 'pending' ? 'all' : 'pending')}
+              title={activeKpiFilter === 'pending' ? 'Click to reset filter' : 'Click to filter pending submission'}
+            >
+              <div className="kyc-metric-header">
+                <span className="kyc-metric-label">Pending Submission</span>
+                <div className="kyc-metric-icon kyc-metric-icon--purple">
+                  <Send size={16} />
+                </div>
+              </div>
+              <div className="kyc-metric-val">{pendingSubmissionCount}</div>
+              <div className="kyc-metric-subtext">
+                {activeKpiFilter === 'pending' ? '● Filter active (Click to reset)' : 'Link sent or draft in progress'}
+              </div>
+            </div>
+
+            <div
+              className={`kyc-metric-card ${activeKpiFilter === 'verified' ? 'active' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveKpiFilter(prev => prev === 'verified' ? 'all' : 'verified')}
+              title={activeKpiFilter === 'verified' ? 'Click to reset filter' : 'Click to filter verified & qualified'}
+            >
+              <div className="kyc-metric-header">
+                <span className="kyc-metric-label">Verified &amp; Qualified</span>
+                <div className="kyc-metric-icon kyc-metric-icon--green">
+                  <CheckCircle size={16} />
+                </div>
+              </div>
+              <div className="kyc-metric-val">{verifiedCount}</div>
+              <div className="kyc-metric-subtext">
+                {activeKpiFilter === 'verified' ? '● Filter active (Click to reset)' : 'SEBI verified & cleared'}
+              </div>
+            </div>
           </div>
 
           {/* Inline Error Banner */}
@@ -2837,10 +3640,13 @@ const GhlIrmKycView: React.FC = () => {
                       <label className="form-label">Date of Birth (DOB) <span className="kyc-required-star">*</span></label>
                       <input
                         type="date"
+                        min="1900-01-01"
+                        max={todayDateString}
                         className={`form-input ${formErrors.dob ? 'kyc-input-error' : ''}`}
-                        value={formData.dob}
+                        value={sanitizeDobString(formData.dob)}
                         onChange={e => {
-                          setFormData({ ...formData, dob: e.target.value });
+                          const val = sanitizeDobString(e.target.value);
+                          setFormData({ ...formData, dob: val });
                           if (formErrors.dob) {
                             setFormErrors(prev => { const c = { ...prev }; delete c.dob; return c; });
                           }
@@ -2978,7 +3784,7 @@ const GhlIrmKycView: React.FC = () => {
                 <div className="kyc-form-section-card">
                   <div className="kyc-form-section-header">
                     <h3 className="kyc-form-section-title">Identity Proof Documents</h3>
-                    <p className="kyc-form-section-subtitle">Upload clear scanned copies or photos of the investor's Aadhaar and PAN cards</p>
+                    <p className="kyc-form-section-subtitle">Upload clear scanned copies or photos of the investor's Aadhaar, PAN card, and Face Photo for Biometric verification</p>
                   </div>
                   <div className="kyc-form-grid">
                     <KYCUploadCard
@@ -3007,6 +3813,20 @@ const GhlIrmKycView: React.FC = () => {
                         }
                       }}
                       onRemove={() => setFormData({ ...formData, panDoc: null })}
+                    />
+
+                    <KYCUploadCard
+                      label="Upload Investor Face Photo / Live Selfie (Biometric Verification) *"
+                      required
+                      doc={formData.photoDoc}
+                      error={formErrors.photoDoc}
+                      onUpload={doc => {
+                        setFormData({ ...formData, photoDoc: doc });
+                        if (formErrors.photoDoc) {
+                          setFormErrors(prev => { const c = { ...prev }; delete c.photoDoc; return c; });
+                        }
+                      }}
+                      onRemove={() => setFormData({ ...formData, photoDoc: null })}
                     />
                   </div>
                 </div>
@@ -3423,9 +4243,11 @@ const GhlIrmKycView: React.FC = () => {
                             <label className="form-label">Date of Birth / Age <span className="kyc-required-star">*</span></label>
                             <input
                               type="date"
+                              min="1900-01-01"
+                              max={todayDateString}
                               className={`form-input ${formErrors[`nominee_${idx}_dob`] ? 'kyc-input-error' : ''}`}
-                              value={nom.dob}
-                              onChange={e => handleNomineeChange(nom.id || idx, 'dob', e.target.value)}
+                              value={sanitizeDobString(nom.dob)}
+                              onChange={e => handleNomineeChange(nom.id || idx, 'dob', sanitizeDobString(e.target.value))}
                             />
                             {formErrors[`nominee_${idx}_dob`] && (
                               <div className="kyc-field-error">{formErrors[`nominee_${idx}_dob`]}</div>
@@ -3726,9 +4548,11 @@ const GhlIrmKycView: React.FC = () => {
                   <label className="form-label">Date of Birth</label>
                   <input
                     type="date"
+                    min="1900-01-01"
+                    max={todayDateString}
                     className="form-input"
-                    value={sectionFormData.dob || ''}
-                    onChange={e => setSectionFormData({ ...sectionFormData, dob: e.target.value })}
+                    value={sanitizeDobString(sectionFormData.dob || '')}
+                    onChange={e => setSectionFormData({ ...sectionFormData, dob: sanitizeDobString(e.target.value) })}
                   />
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
@@ -3793,6 +4617,14 @@ const GhlIrmKycView: React.FC = () => {
                     <option value="CO-AIF">CO-AIF</option>
                     <option value="AIF">AIF</option>
                   </select>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={sectionFormData.preferredAssetClassConfirmed === true}
+                      onChange={e => setSectionFormData({ ...sectionFormData, preferredAssetClassConfirmed: e.target.checked })}
+                    />
+                    Confirmed by investor
+                  </label>
                 </div>
               </div>
             </div>
@@ -4212,20 +5044,36 @@ const OriginalKYCView: React.FC = () => {
       key: 'investmentRange',
       header: 'Investment Capacity',
       sortable: true,
-      render: deal => (
-        <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
-          {deal.investmentRange || (deal.value > 0 ? formatCurrency(deal.value) : '—')}
-        </span>
-      ),
+      render: deal => {
+        const val = deal.investmentRange || (deal.value > 0 ? formatCurrency(deal.value) : null);
+        const isSpecified = val && val !== '—' && val.trim() !== '' && val.toLowerCase() !== 'not specified';
+        return isSpecified ? (
+          <span className="kyc-capacity-badge">
+            {val}
+          </span>
+        ) : (
+          <span className="kyc-not-specified-badge">
+            Not Specified
+          </span>
+        );
+      },
     },
     {
       key: 'preferredAssetClass',
       header: 'Preferred Asset Class',
-      render: deal => (
-        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {resolvePreferredAssetClass(deal)}
-        </span>
-      ),
+      render: deal => {
+        const pref = resolvePreferredAssetClass(deal, storageService.getLeads(tenant?.id), storageService.getCustomers(tenant?.id));
+        const isSpecified = pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified';
+        return isSpecified ? (
+          <span className="kyc-pref-badge">
+            {pref}
+          </span>
+        ) : (
+          <span className="kyc-not-specified-badge">
+            Not Specified
+          </span>
+        );
+      },
     },
     {
       key: 'kycStatus',
@@ -4266,7 +5114,7 @@ const OriginalKYCView: React.FC = () => {
             type="button"
             className="btn btn-sm btn-ghost btn-icon"
             title={`Call ${deal.customerName}`}
-            onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.id)}
+            onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc')}
           >
             <Phone size={14} color="#059669" />
           </button>
@@ -4292,7 +5140,7 @@ const OriginalKYCView: React.FC = () => {
     {
       label: 'Call Investor',
       icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
-      onClick: deal => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.id),
+      onClick: deal => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc'),
     },
     {
       label: 'Advance to Opportunity',
@@ -4476,18 +5324,20 @@ export const KYCPage: React.FC = () => {
   const isGhl =
     tenant?.slug === 'ghl' ||
     tenant?.id === 't-ghl-01' ||
+    tenant?.id === '1' ||
     tenant?.name === 'GHL India Ventures' ||
     user?.companySlug === 'ghl' ||
     user?.companyName === 'GHL India Ventures';
 
-  const isIrm = user?.role?.code === 'irm';
+  const roleCode = (user?.role?.code || '').toLowerCase();
+  const isIrm = roleCode === 'irm';
+  const isGhlAdmin = isGhl && (roleCode === 'company_admin' || roleCode === 'admin' || roleCode === 'super_admin');
   const isGhlIrm = isGhl && isIrm;
 
-  // STRICT REQUIREMENT: Only GHL India Ventures IRM receives the new 5-step KYC & Documents flow.
-  // Every other persona, role, or tenant retains the exact existing KYC implementation.
-  if (!isGhlIrm) {
-    return <OriginalKYCView />;
+  // GHL IRM and GHL Admin use the GHL IRM KYC pipeline view (Admin has read-only oversight)
+  if (isGhlIrm || isGhlAdmin) {
+    return <GhlIrmKycView />;
   }
 
-  return <GhlIrmKycView />;
+  return <OriginalKYCView />;
 };

@@ -36,6 +36,8 @@ import {
 } from '../../types';
 import { StatusChip } from '../../components/common/StatusChip';
 import { FEATURES } from '../../constants/features';
+import { IrmDashboardView } from './components/IrmDashboardView';
+import { formatSmartScheduleDate } from '../../utils/dateUtils';
 import './DashboardPage.css';
 
 const getStoredPlots = (): Plot[] => {
@@ -68,13 +70,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   const loadData = async () => {
     try {
       const [l, d, c, f, con, inv, opp] = await Promise.all([
-        getLeads(tenant?.id),
-        getDeals(tenant?.id),
-        getCalls(tenant?.id),
-        getFollowups(tenant?.id),
-        getConsultations(tenant?.id),
-        getInvestors(tenant?.id),
-        getOpportunities(tenant?.id),
+        getLeads(tenant?.id).catch(err => { console.warn('[Dashboard] getLeads failed', err); return []; }),
+        getDeals(tenant?.id).catch(err => { console.warn('[Dashboard] getDeals failed', err); return []; }),
+        getCalls(tenant?.id).catch(err => { console.warn('[Dashboard] getCalls failed', err); return []; }),
+        getFollowups(tenant?.id).catch(err => { console.warn('[Dashboard] getFollowups failed', err); return []; }),
+        getConsultations(tenant?.id).catch(err => { console.warn('[Dashboard] getConsultations failed', err); return []; }),
+        getInvestors(tenant?.id).catch(err => { console.warn('[Dashboard] getInvestors failed', err); return []; }),
+        getOpportunities(tenant?.id).catch(err => { console.warn('[Dashboard] getOpportunities failed', err); return []; }),
       ]);
       setLeads(l);
       setDeals(d);
@@ -84,25 +86,44 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
       setInvestors(inv);
       setOpportunities(opp);
     } catch (err) {
-      console.error('Failed to load dashboard data', err);
+      console.error('[Dashboard] Failed to load dashboard data', err);
     }
     setPlots(getStoredPlots());
   };
 
-  // Sync with storage updates
+  // Sync with storage updates, polling interval, and focus events
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
+    const handleUpdate = () => {
+      loadData();
+    };
     window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
-  }, [tenant?.id]);
+    window.addEventListener('focus', handleUpdate);
+    const interval = setInterval(loadData, 10000); // 10s auto-refresh for live dashboard updates
+
+    return () => {
+      window.removeEventListener('nexus_storage_updated', handleUpdate);
+      window.removeEventListener('focus', handleUpdate);
+      clearInterval(interval);
+    };
+  }, [tenant?.id, user?.id]);
 
   // ── Role-based scoping (Task 2 & IRM) ────────────────────────────────────
   const roleCode = user?.role?.code;
   const isExec = roleCode === 'sales_executive';
   const isIrm = roleCode === 'irm';
 
-  const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
+  if (isIrm) {
+    return <IrmDashboardView onNavigate={onNavigate} onOpenQuickCreate={onOpenQuickCreate} />;
+  }
+
+  const EXCLUDED_PENDING_STATUSES = ['Qualified', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk', 'Wrong Number', 'Lost', 'Closed'];
+
+  const isUserMatch = (agentId?: string | number, agentName?: string) => {
+    if (agentId && user?.id && String(agentId) === String(user.id)) return true;
+    if (agentName && user?.name && agentName.trim().toLowerCase() === user.name.trim().toLowerCase()) return true;
+    return false;
+  };
 
   // Unassigned leads for Admin (leads not yet assigned to any sales rep)
   const unassignedLeads = leads.filter(l => 
@@ -113,83 +134,74 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
 
   const scopedLeads = isExec
     ? leads.filter(l =>
-      (l.assignedAgentId && l.assignedAgentId === user?.id) ||
-      (l.assignedAgentName && l.assignedAgentName === user?.name)
-    )
-    : unassignedLeads;
-
-  // Pending Leads: Leads assigned to agents that are still in initial leads stage (haven't moved to next step)
-  const allPendingLeads = leads.filter(l => 
-    (l.assignedAgentId && l.assignedAgentId !== '0' && l.assignmentStatus !== 'unassigned') &&
-    !MOVED_LEAD_STATUSES.includes(l.status)
-  );
-
-  const scopedPendingLeads = isExec
-    ? allPendingLeads.filter(l =>
-        (l.assignedAgentId && l.assignedAgentId === user?.id) ||
-        (l.assignedAgentName && l.assignedAgentName === user?.name)
+        (isUserMatch(l.assignedAgentId, l.assignedAgentName) || !l.assignedAgentId) &&
+        (l.status === 'New' || l.status === 'Contacted')
       )
+    : unassignedLeads.filter(l => !EXCLUDED_PENDING_STATUSES.includes(l.status));
+
+  // Pending Leads: Leads assigned to agents that are still in initial leads stage (New for Sales Exec, Interested for IRM)
+  const allPendingLeads = leads.filter(l => {
+    const isAssigned = Boolean((l.assignedAgentId && l.assignedAgentId !== '0') || l.assignedAgentName) && l.assignmentStatus !== 'unassigned';
+    if (!isAssigned) return false;
+    if (l.status !== 'New' && l.status !== 'Interested') return false;
+    return true;
+  });
+
+  const scopedPendingLeads = isIrm
+    ? allPendingLeads.filter(l => isUserMatch(l.assignedAgentId, l.assignedAgentName) && l.status === 'Interested')
     : allPendingLeads;
 
-  // IRM "My Leads" KPI — leads assigned to this IRM that the agent has marked Interested
+  // IRM "My Leads" KPI — leads assigned to this IRM that are Interested, No Response, Callback, etc.
   const myInterestedLeads = isIrm
-    ? leads.filter(l =>
-      l.status === 'Interested' &&
-      ((l.assignedAgentId && l.assignedAgentId === user?.id) ||
-        (l.assignedAgentName && l.assignedAgentName === user?.name))
-    )
+    ? leads.filter(l => {
+      const s = (l.status || '').trim().toLowerCase();
+      return ['interested', 'no response', 'callback', 'new', 'contacted'].includes(s) &&
+        isUserMatch(l.assignedAgentId, l.assignedAgentName);
+    })
     : [];
 
   const scopedDeals = isExec
-    ? deals.filter(d =>
-      (d.assignedAgentId && d.assignedAgentId === user?.id) ||
-      (d.assignedAgentName && d.assignedAgentName === user?.name)
-    )
+    ? deals.filter(d => isUserMatch(d.assignedAgentId, d.assignedAgentName) || !d.assignedAgentId)
     : deals;
 
   const scopedCalls = isExec
-    ? calls.filter(c =>
-      (c.agentId && c.agentId === user?.id) ||
-      (c.agentName && c.agentName === user?.name)
-    )
+    ? calls.filter(c => isUserMatch(c.agentId, c.agentName) || !c.agentId)
     : calls;
 
   const scopedFollowups = isExec
-    ? followups.filter(f =>
-      (f.assignedAgentId && f.assignedAgentId === user?.id) ||
-      (f.assignedAgentName && f.assignedAgentName === user?.name)
-    )
+    ? followups.filter(f => isUserMatch(f.assignedAgentId, f.assignedAgentName) || !f.assignedAgentId)
     : followups;
 
   // Investor domain scoping for IRM (and isExec if applicable)
   const scopedInvestors = (isIrm || isExec)
     ? investors.filter(inv =>
-      (inv.assignedAgentId && inv.assignedAgentId === user?.id) ||
-      (inv.assignedAgentName && inv.assignedAgentName === user?.name)
+      isUserMatch(inv.assignedAgentId, inv.assignedAgentName) || (!inv.assignedAgentId && !inv.assignedAgentName)
     )
     : investors;
 
   const scopedOpportunities = (isIrm || isExec)
     ? opportunities.filter(o =>
-      (o.assignedAgentId && o.assignedAgentId === user?.id) ||
-      (o.assignedAgentName && o.assignedAgentName === user?.name) ||
+      isUserMatch(o.assignedAgentId, o.assignedAgentName) ||
       scopedInvestors.some(inv => inv.id === o.investorId)
     )
     : opportunities;
 
   const scopedConsultations = (isIrm || isExec)
     ? consultations.filter(c =>
-      (c.consultantId && c.consultantId === user?.id) ||
-      (c.consultantName && c.consultantName === user?.name) ||
+      isUserMatch(c.consultantId, c.consultantName) ||
       scopedInvestors.some(inv => inv.id === c.investorId)
     )
     : consultations;
 
   // ── Derived metrics ──────────────────────────────────────────────────────
   const totalPipelineValue = scopedDeals.reduce((sum, d) => sum + (d.value || 0), 0);
-  const overdueFollowups = scopedFollowups.filter(
-    f => f.status === 'Pending' && f.scheduledAt?.toLowerCase()?.includes('yesterday')
-  );
+  const overdueFollowups = scopedFollowups.filter(f => {
+    if (f.status !== 'Pending') return false;
+    if (!f.scheduledAt) return false;
+    if (f.scheduledAt.toLowerCase().includes('yesterday')) return true;
+    const d = new Date(f.scheduledAt);
+    return !isNaN(d.getTime()) && d.getTime() < Date.now();
+  });
   const pendingFollowups = scopedFollowups.filter(f => f.status === 'Pending');
 
   // Task 1a — real "+N this week" delta from scopedLeads.createdAt
@@ -270,7 +282,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
   // ── Task 3 & IRM — label helpers ─────────────────────────────────────────
   const label = {
     activeleads: isExec ? 'MY ACTIVE LEADS' : 'ACTIVE LEADS',
-    pendingleads: isExec ? 'MY PENDING LEADS' : 'PENDING LEADS',
+    pendingleads: 'PENDING LEADS',
     pendingfollowups: isExec ? 'MY FOLLOW-UPS' : 'FOLLOW-UPS',
     callslogged: isExec ? 'MY CALLS LOGGED' : 'CALLS LOGGED',
     pipelinevalue: isExec ? 'MY PIPELINE VALUE' : 'PIPELINE VALUE',
@@ -428,21 +440,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
               </div>
             </div>
 
-            {/* Card 2: Pending Leads */}
-            <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('pending-leads')}>
-              <div className="dashboard-kpi-header">
-                <span className="dashboard-kpi-label">{label.pendingleads}</span>
-                <div className="dashboard-kpi-icon-box" style={{ backgroundColor: 'rgba(245, 158, 11, 0.12)', color: '#d97706' }}>
-                  <Clock size={18} />
+            {/* Card 2: Pending Leads (Admin only - not for Sales Executive) */}
+            {!isExec && (
+              <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('pending-leads')}>
+                <div className="dashboard-kpi-header">
+                  <span className="dashboard-kpi-label">{label.pendingleads}</span>
+                  <div className="dashboard-kpi-icon-box" style={{ backgroundColor: 'rgba(245, 158, 11, 0.12)', color: '#d97706' }}>
+                    <Clock size={18} />
+                  </div>
+                </div>
+                <div className="dashboard-kpi-value">
+                  {scopedPendingLeads.length}
+                </div>
+                <div className="dashboard-kpi-subtext" style={{ fontSize: 12, color: scopedPendingLeads.length > 0 ? '#d97706' : 'var(--text-muted)' }}>
+                  {scopedPendingLeads.length > 0 ? 'Awaiting first action / call' : 'All leads in progress'}
                 </div>
               </div>
-              <div className="dashboard-kpi-value">
-                {scopedPendingLeads.length}
-              </div>
-              <div className="dashboard-kpi-subtext" style={{ fontSize: 12, color: scopedPendingLeads.length > 0 ? '#d97706' : 'var(--text-muted)' }}>
-                {scopedPendingLeads.length > 0 ? 'Awaiting first action / call' : 'All leads in progress'}
-              </div>
-            </div>
+            )}
 
             {/* Card 3: Follow-ups */}
             <div className="card card-hover dashboard-kpi-card" onClick={() => onNavigate('followups')}>
@@ -661,6 +675,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                       </td>
                     </tr>
                   ))}
+                  {scopedLeads.length === 0 && (
+                    <tr>
+                      <td colSpan={4} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                        {isExec ? 'No active leads assigned yet.' : 'No inbound leads found.'}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -692,7 +713,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                       {c.agenda}
                     </p>
                     <div className="dashboard-followup-schedule">
-                      ⏰ {c.scheduledAt} • Advisor: {c.consultantName}
+                      ⏰ {formatSmartScheduleDate(c.scheduledAt)} • Advisor: {c.consultantName}
                     </div>
                   </div>
 
@@ -736,7 +757,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                       {f.notes}
                     </p>
                     <div className="dashboard-followup-schedule">
-                      ⏰ {f.scheduledAt} • Assignee: {f.assignedAgentName}
+                      ⏰ {formatSmartScheduleDate(f.scheduledAt)} • Assignee: {f.assignedAgentName}
                     </div>
                   </div>
 
@@ -748,6 +769,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                   </button>
                 </div>
               ))}
+              {scopedFollowups.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                  No pending follow-ups scheduled
+                </div>
+              )}
             </div>
           </div>
         )}

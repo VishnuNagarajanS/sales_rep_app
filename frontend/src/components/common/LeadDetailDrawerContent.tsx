@@ -9,8 +9,9 @@ import {
   Calendar,
   Clock,
 } from 'lucide-react';
-import { CallDisposition, Consultation } from '../../types';
+import { CallDisposition, Consultation, CallRecord, Lead } from '../../types';
 import { storageService } from '../../services/storageService';
+import { getCalls } from '../../services/ghlApiService';
 import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from './StatusChip';
 
@@ -44,6 +45,10 @@ interface LeadDetailDrawerContentProps {
   hideAutoNotes?: boolean;
   /** Optional — when provided, renders only the specified sections */
   sectionsOnly?: ('callRecordings' | 'summary' | 'details' | 'consultations')[];
+  /** Optional — explicitly provided call records */
+  calls?: CallRecord[];
+  /** Optional — explicitly provided lead entity */
+  lead?: Lead | null;
 }
 
 export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = ({
@@ -57,6 +62,8 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   consultationHistory,
   hideAutoNotes = false,
   sectionsOnly,
+  calls,
+  lead,
 }) => {
   const { user } = useAuth();
   const isSalesExecutive = user?.role?.code === 'sales_executive';
@@ -64,16 +71,28 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   const [expandedTranscripts, setExpandedTranscripts] = useState<Record<string, boolean>>({});
   const [callTab, setCallTab] = useState<'agent' | 'irm'>('agent');
   const [isPreviousConsultationsOpen, setIsPreviousConsultationsOpen] = useState(true);
+  const [apiCalls, setApiCalls] = useState<CallRecord[]>([]);
 
   useEffect(() => {
     setCallTab('agent');
   }, [contactPhone, contactId]);
 
+  useEffect(() => {
+    if (calls && calls.length > 0) return;
+    getCalls(tenantId)
+      .then(res => {
+        if (Array.isArray(res) && res.length > 0) {
+          setApiCalls(res);
+        }
+      })
+      .catch(console.error);
+  }, [tenantId, calls]);
+
   // ── Lead record lookup ───────────────────────────────────────────────────────
-  const selectedLead = (() => {
+  const selectedLead = lead || (() => {
     const leads = storageService.getLeads(tenantId) || [];
     return leads.find(l => {
-      if (contactId && contactId !== 'contact-new' && l.id === contactId) return true;
+      if (contactId && contactId !== 'contact-new' && String(l.id) === String(contactId)) return true;
       const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
       const fPhone = (contactPhone || '').replace(/\D/g, '').slice(-10);
       return lPhone && fPhone && lPhone === fPhone;
@@ -81,15 +100,28 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
   })();
 
   // ── Call history lookup ──────────────────────────────────────────────────────
-  const allCalls = storageService.getCalls(tenantId) || [];
+  const allCalls = (calls && calls.length > 0 ? calls : null) || (apiCalls.length > 0 ? apiCalls : null) || storageService.getCalls(tenantId) || [];
   const fPhoneDigits = (contactPhone || '').replace(/\D/g, '').slice(-10);
 
   const selectedCalls = allCalls.filter(c => {
-    const isMatch =
-      (contactId && contactId !== 'contact-new' &&
-        (c.leadId === contactId || (c as any).contactId === contactId || (c as any).investorId === contactId)) ||
-      ((c.contactPhone || '').replace(/\D/g, '').slice(-10) === fPhoneDigits &&
-        fPhoneDigits.length > 0);
+    const cPhoneDigits = (c.contactPhone || '').replace(/\D/g, '').slice(-10);
+    const isPhoneMatch = fPhoneDigits.length > 0 && cPhoneDigits.length > 0 && cPhoneDigits === fPhoneDigits;
+
+    const isIdMatch = Boolean(
+      contactId && contactId !== 'contact-new' &&
+        (String(c.leadId) === String(contactId) ||
+         String((c as any).contactId) === String(contactId) ||
+         String((c as any).investorId) === String(contactId))
+    );
+
+    const isNameMatch =
+      !isIdMatch && !isPhoneMatch &&
+      Boolean(
+        contactName && c.contactName &&
+        c.contactName.trim().toLowerCase() === contactName.trim().toLowerCase()
+      );
+
+    const isMatch = isIdMatch || isPhoneMatch || isNameMatch;
 
     if (!isMatch) return false;
 

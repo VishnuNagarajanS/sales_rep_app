@@ -63,7 +63,19 @@ export const ResetPasswordPage: React.FC = () => {
 
   return (
     <div className="auth-page-container">
-      <div className="auth-bg-layer" />
+      {/* Fixed background video */}
+      <div className="auth-bg-layer">
+        <video
+          className="auth-bg-video"
+          autoPlay
+          loop
+          muted
+          playsInline
+          poster="/connectng bg.jpg"
+        >
+          <source src="/login-bg.mp4" type="video/mp4" />
+        </video>
+      </div>
       <div className="auth-bg-overlay" />
 
       <div className="auth-card-container">

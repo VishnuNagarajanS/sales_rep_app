@@ -29,7 +29,8 @@ public class FollowupConfiguration : IEntityTypeConfiguration<Followup>
             .IsRequired();
 
         builder.Property(f => f.ContactEmail)
-            .HasMaxLength(255);
+            .HasMaxLength(255)
+            .IsRequired(false);
 
         builder.Property(f => f.Priority)
             .HasMaxLength(50);

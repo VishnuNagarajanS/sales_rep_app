@@ -22,5 +22,9 @@ namespace backend.Models.Entities
         public string? FileUrl { get; set; } // Nullable for backwards compatibility
 
         public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+
+        public string TargetAudience { get; set; } = "all_users"; // "all_users", "admin_only"
+        public bool IsPlatformShared { get; set; } = false;
+        public string? Description { get; set; }
     }
 }

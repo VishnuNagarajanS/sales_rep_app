@@ -6,6 +6,7 @@ import { FEATURES } from '../constants/features';
 import { apiClient } from '../services/apiClient';
 import { authService } from '../services/authService';
 import { isMockMode } from '../config/environment';
+import { clearKycLocalData, clearAllKycLocalStorage } from '../utils/kycStorage';
 
 const getStoredTenants = (): Tenant[] => {
   try {
@@ -37,7 +38,7 @@ const saveStoredUser = (targetUser: User) => {
       users.push(targetUser);
     }
     localStorage.setItem('nexus_users', JSON.stringify(users));
-  } catch {}
+  } catch { }
 };
 
 export function isJwtExpired(token: string | null | undefined): boolean {
@@ -62,6 +63,22 @@ export function isJwtExpired(token: string | null | undefined): boolean {
     return false;
   }
 }
+
+export const normalizeUserRole = (u: any): User | null => {
+  if (!u) return null;
+  const userObj = { ...u };
+  if (userObj.role) {
+    let code = userObj.role.code;
+    const name = (userObj.role.name || '').toLowerCase();
+    if (code === 'temp_1' || name === 'super admin') code = 'super_admin';
+    else if (code === 'temp_2' || name === 'company admin') code = 'company_admin';
+    else if (code === 'temp_3' || name === 'sales executive') code = 'sales_executive';
+    else if (code === 'temp_4' || name === 'irm') code = 'irm';
+    else if (code === 'temp_5' || name === 'sales manager') code = 'sales_manager';
+    userObj.role = { ...userObj.role, code };
+  }
+  return userObj;
+};
 
 export { getStoredTenants, getStoredUsers, saveStoredUser };
 
@@ -107,7 +124,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (saved) {
       try {
         const rawParsed = JSON.parse(saved);
-        const parsed = rawParsed?.user && (rawParsed.user.id || rawParsed.user.email) ? rawParsed.user : rawParsed;
+        let parsed = rawParsed?.user && (rawParsed.user.id || rawParsed.user.email) ? rawParsed.user : rawParsed;
+        parsed = normalizeUserRole(parsed);
         if (parsed?.role?.code && SYSTEM_ROLES[parsed.role.code]) {
           parsed.role.permissions = Array.from(
             new Set([...(parsed.role.permissions || []), ...SYSTEM_ROLES[parsed.role.code].permissions])
@@ -136,13 +154,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           return null;
         }
-      } catch {}
+      } catch { }
     }
     const saved = sessionStorage.getItem('nexus_current_tenant') || localStorage.getItem('nexus_current_tenant');
     if (saved) {
       try {
         return JSON.parse(saved);
-      } catch {}
+      } catch { }
     }
     return null;
   });
@@ -226,7 +244,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (userData) {
-          setUser(userData);
+          setUser(normalizeUserRole(userData));
         }
 
         if (tenantData) {
@@ -259,7 +277,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           sessionStorage.setItem('nexus_auth_token', token);
           localStorage.setItem('nexus_auth_token', token);
         }
-        if (userData) setUser(userData);
+        if (userData) setUser(normalizeUserRole(userData));
         if (tenantData) setTenant(tenantData);
         setMfaChallenge(null);
         return true;
@@ -287,7 +305,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           sessionStorage.setItem('nexus_auth_token', token);
           localStorage.setItem('nexus_auth_token', token);
         }
-        if (userData) setUser(userData);
+        if (userData) setUser(normalizeUserRole(userData));
         if (tenantData) setTenant(tenantData);
         setMfaChallenge(null);
         return true;
@@ -315,13 +333,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('nexus_auth_token');
     localStorage.removeItem('nexus_current_user');
     localStorage.removeItem('nexus_current_tenant');
+    clearAllKycLocalStorage();
     setMfaChallenge(null);
+    setMfaChallenge(null);
+    clearAllKycLocalStorage();
     setLoginError(reason || null);
     setUser(null);
     setTenant(null);
     try {
       window.history.replaceState({ unauth: true }, '', '/login');
-    } catch {}
+    } catch { }
   };
 
   const userRef = useRef<User | null>(user);
@@ -426,7 +447,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         };
       }
-    } catch {}
+    } catch { }
 
     const handleStorageEvent = (e: StorageEvent) => {
       // Multi-tab synchronization
@@ -450,25 +471,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
                 setUser(u);
               }
-            } catch {}
+            } catch { }
           }
           const rawTenant = localStorage.getItem('nexus_current_tenant');
           if (rawTenant) {
             try {
               setTenant(JSON.parse(rawTenant));
-            } catch {}
+            } catch { }
           }
         }
       } else if (e.key === 'nexus_account_suspended' && e.newValue) {
         try {
           const payload = JSON.parse(e.newValue);
           checkSuspensionAndLogout(payload);
-        } catch {}
+        } catch { }
       }
     };
 
     const handleUnauthorized = () => {
-      logout('Your account has been suspended by an administrator.');
+      logout('Your session has expired. Please sign in again.');
     };
 
     const handleRevalidate = () => {
@@ -506,7 +527,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       clearInterval(intervalId);
       try {
         bc?.close();
-      } catch {}
+      } catch { }
       window.removeEventListener('storage', handleStorageEvent);
       window.removeEventListener('nexus_auth_unauthorized', handleUnauthorized);
       window.removeEventListener('focus', handleRevalidate);

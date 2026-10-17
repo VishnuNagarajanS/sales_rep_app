@@ -17,6 +17,8 @@ public class CallRecordDto
     public string Disposition { get; set; } = string.Empty;
     public string? Notes { get; set; }
     public string? Reason { get; set; }
+    public string? CallModule { get; set; }
+    public string? Module => CallModule;
     public string? RecordingUrl { get; set; }
     public string? Transcript { get; set; }
     public string? TwilioCallSid { get; set; }

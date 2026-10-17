@@ -7,8 +7,6 @@ import {
   Clock,
   Phone,
   Mail,
-  ChevronLeft,
-  ChevronRight,
   Plus,
   Briefcase,
   Layers,
@@ -107,7 +105,9 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({
 
         // Seed fallbacks from the database in case API returns empty
         if (irmMap.size === 0) {
+          irmMap.set('karnan', { id: '50', name: 'karnan' });
           irmMap.set('dhinakaran', { id: '5', name: 'Dhinakaran' });
+          irmMap.set('sample_irm', { id: '43', name: 'Sample_IRM' });
         }
         if (salesMap.size === 0) {
           salesMap.set('naveen', { id: '3', name: 'Naveen' });
@@ -119,7 +119,9 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({
         console.warn('Could not fetch DB users for Kanban person dropdown:', e);
         if (mounted) {
           setIrmUsers([
-            { id: '5', name: 'Dhinakaran' }
+            { id: '50', name: 'karnan' },
+            { id: '5', name: 'Dhinakaran' },
+            { id: '43', name: 'Sample_IRM' },
           ]);
           setSalesUsers([
             { id: '3', name: 'Naveen' }
@@ -541,17 +543,6 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({
     });
   }, [cards, selectedRole, selectedPerson, dateRangePreset, customStartDate, customEndDate]);
 
-  const handleMoveCard = async (card: AdminKanbanCard, direction: 'forward' | 'backward', e: React.MouseEvent) => {
-    e.stopPropagation();
-    const currentIndex = stages.findIndex(s => s.id === card.stageId);
-    if (currentIndex === -1) return;
-
-    const newIndex = direction === 'forward' ? currentIndex + 1 : currentIndex - 1;
-    if (newIndex >= 0 && newIndex < stages.length) {
-      const newStage = stages[newIndex];
-      await performStageUpdate(card, newStage.id);
-    }
-  };
 
   const performStageUpdate = async (card: AdminKanbanCard, targetStageId: string) => {
     try {
@@ -897,39 +888,13 @@ export const AdminKanbanBoard: React.FC<AdminKanbanBoardProps> = ({
 
                         {/* Last Action Snippet Removed */}
 
-                        {/* Footer & Stage Transition Controls */}
-                        <div className="admin-card-footer">
-                          {card.investmentAmount && (
+                        {card.investmentAmount && (
+                          <div className="admin-card-footer">
                             <span className="admin-card-amount">
                               {card.investmentAmount}
                             </span>
-                          )}
-
-                          {selectedRole !== 'irm' && (
-                            <div className="admin-card-stage-movers">
-                              {colIdx > 0 && (
-                                <button
-                                  type="button"
-                                  className="admin-stage-nav-btn"
-                                  title={`Move backward to ${stages[colIdx - 1].name}`}
-                                  onClick={e => handleMoveCard(card, 'backward', e)}
-                                >
-                                  <ChevronLeft size={13} />
-                                </button>
-                              )}
-                              {colIdx < stages.length - 1 && (
-                                <button
-                                  type="button"
-                                  className="admin-stage-nav-btn"
-                                  title={`Advance forward to ${stages[colIdx + 1].name}`}
-                                  onClick={e => handleMoveCard(card, 'forward', e)}
-                                >
-                                  <ChevronRight size={13} />
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })

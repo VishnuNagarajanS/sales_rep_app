@@ -5,9 +5,12 @@ using backend.DTOs.Common;
 using backend.DTOs.GhlDeals;
 using backend.Extensions;
 using backend.Models.Entities;
+using backend.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using backend.Services.Interfaces;
+using backend.Services.Implementations;
 
 namespace backend.Controllers.GhlAdmin;
 
@@ -28,11 +31,13 @@ public class GhlDealsController : ControllerBase
 
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IIrmOtherService _otherService;
 
-    public GhlDealsController(ApplicationDbContext db, ICurrentUserService currentUser)
+    public GhlDealsController(ApplicationDbContext db, ICurrentUserService currentUser, IIrmOtherService? otherService = null)
     {
         _db = db;
         _currentUser = currentUser;
+        _otherService = otherService ?? new IrmOtherService(db);
     }
 
     private static bool IsIrmDeal(GhlDeal deal)
@@ -59,6 +64,8 @@ public class GhlDealsController : ControllerBase
         var query = _db.GhlDeals.AsNoTracking()
             .Include(d => d.AssignedAgent)
             .Include(d => d.Customer)   // needed to resolve Phone / Email / Location
+            .Include(d => d.OriginalOwner)
+            .Include(d => d.Handover)
             .AsQueryable();
 
         var companyId = _currentUser.CompanyId;
@@ -94,18 +101,39 @@ public class GhlDealsController : ControllerBase
             query = query.Where(d => d.Title.ToLower().Contains(s) || d.CustomerName.ToLower().Contains(s));
         }
 
-        var total = await query.CountAsync(ct);
-        page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, 200);
+        var companyId = _currentUser.CompanyId ?? 1;
+        string? moduleForStage = (stage?.Trim().ToLowerInvariant()) switch
+        {
+            "qualified_investor" => "kyc",
+            "investment_opportunity" => "opportunities",
+            "followup" => "follow_up",
+            "leads" => "my_leads",
+            _ => null
+        };
+        var otherMatcher = await _otherService.GetOtherMatcherAsync(companyId, moduleForStage, ct);
 
         var entities = await query
             .OrderByDescending(d => d.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
             .ToListAsync(ct);
 
-        var items = entities.Select(MapToDto).ToList();
-        await PopulateContactDetailsAsync(items, entities, ct);
+        if (otherMatcher.HasAnyOther)
+        {
+            entities = entities
+                .Where(d => !otherMatcher.IsInOther(d.Customer?.Phone, d.CustomerId, null, d.CustomerName))
+                .ToList();
+        }
+
+        var total = entities.Count;
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var paged = entities
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        var items = paged.Select(MapToDto).ToList();
+        await PopulateContactDetailsAsync(items, paged, ct);
 
         return Ok(ApiResponse<PagedResult<GhlDealResponseDto>>.SuccessResult(
             PagedResult<GhlDealResponseDto>.Create(items, total, page, pageSize),
@@ -139,10 +167,10 @@ public class GhlDealsController : ControllerBase
         }
 
         var role = _currentUser.Role?.ToLowerInvariant();
-        if (role == "irm")
+        if (role == "irm" && (string.IsNullOrWhiteSpace(dto.Stage) || !IrmStages.Contains(dto.Stage.Trim())))
         {
             return StatusCode(StatusCodes.Status403Forbidden,
-                ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: IRM users cannot create deals directly."));
+                ApiResponse<GhlDealResponseDto>.FailureResult("Access denied: IRM users cannot create deals directly outside IRM stages."));
         }
 
         var agentId = _currentUser.UserId;
@@ -195,10 +223,34 @@ public class GhlDealsController : ControllerBase
             await _db.SaveChangesAsync(ct);
             await _db.Entry(existingDeal).Reference(d => d.AssignedAgent).LoadAsync(ct);
 
+            await EnsureStageIsolationForDealAsync(existingDeal, ct);
+
             var existingDto = MapToDto(existingDeal);
             await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { existingDto }, new List<GhlDeal> { existingDeal }, ct);
 
             return Ok(ApiResponse<GhlDealResponseDto>.SuccessResult(existingDto, "Deal updated."));
+        }
+
+        int? inheritedHandoverId = null;
+        int? inheritedOriginalOwnerId = null;
+
+        if (dto.CustomerId.HasValue && dto.CustomerId.Value > 0)
+        {
+            var parentCust = await _db.Customers.AsNoTracking().FirstOrDefaultAsync(c => c.Id == dto.CustomerId.Value, ct);
+            if (parentCust?.HandoverId != null)
+            {
+                inheritedHandoverId = parentCust.HandoverId;
+                inheritedOriginalOwnerId = parentCust.OriginalOwnerId;
+            }
+            else
+            {
+                var parentLead = await _db.Leads.AsNoTracking().FirstOrDefaultAsync(l => l.Id == dto.CustomerId.Value, ct);
+                if (parentLead?.HandoverId != null)
+                {
+                    inheritedHandoverId = parentLead.HandoverId;
+                    inheritedOriginalOwnerId = parentLead.OriginalOwnerId;
+                }
+            }
         }
 
         var deal = new GhlDeal
@@ -218,11 +270,33 @@ public class GhlDealsController : ControllerBase
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
             StageEnteredAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
+            HandoverId = inheritedHandoverId,
+            OriginalOwnerId = inheritedOriginalOwnerId
         };
 
         _db.GhlDeals.Add(deal);
         await _db.SaveChangesAsync(ct);
+
+        if (inheritedHandoverId.HasValue)
+        {
+            _db.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = inheritedHandoverId.Value,
+                EntityType = "GhlDeal",
+                EntityId = deal.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+        }
+
         await _db.Entry(deal).Reference(d => d.AssignedAgent).LoadAsync(ct);
+        if (deal.OriginalOwnerId.HasValue)
+            await _db.Entry(deal).Reference(d => d.OriginalOwner).LoadAsync(ct);
+        if (deal.HandoverId.HasValue)
+            await _db.Entry(deal).Reference(d => d.Handover).LoadAsync(ct);
+
+        await EnsureStageIsolationForDealAsync(deal, ct);
 
         var newDto = MapToDto(deal);
         await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { newDto }, new List<GhlDeal> { deal }, ct);
@@ -267,6 +341,8 @@ public class GhlDealsController : ControllerBase
 
         deal.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+
+        await EnsureStageIsolationForDealAsync(deal, ct);
 
         var updateDto = MapToDto(deal);
         await PopulateContactDetailsAsync(new List<GhlDealResponseDto> { updateDto }, new List<GhlDeal> { deal }, ct);
@@ -421,6 +497,10 @@ public class GhlDealsController : ControllerBase
         Phone = (!string.IsNullOrWhiteSpace(d.Customer?.Phone) ? d.Customer.Phone : null),
         Email = (!string.IsNullOrWhiteSpace(d.Customer?.Email) ? d.Customer.Email : null),
         Location = (!string.IsNullOrWhiteSpace(d.Customer?.Location) ? d.Customer.Location : null),
+        HandoverId = d.HandoverId,
+        HandedOverFromName = d.OriginalOwner?.Name,
+        HandoverPlannedEnd = d.Handover?.PlannedEndAt,
+        OriginalOwnerId = d.OriginalOwnerId,
     };
 
     private async Task PopulateContactDetailsAsync(
@@ -539,6 +619,69 @@ public class GhlDealsController : ControllerBase
                     ? matchedLead.Location
                     : matchedCust?.Location;
             }
+        }
+    }
+
+    private async Task EnsureStageIsolationForDealAsync(GhlDeal deal, CancellationToken ct)
+    {
+        var stage = (deal.Stage ?? string.Empty).Trim().ToLowerInvariant();
+        var kycAndAbove = new[] { "qualified_investor", "qualified", "investment_opportunity", "opportunity", "term_sheet", "committed", "converted", "won" };
+        if (!kycAndAbove.Contains(stage)) return;
+
+        var companyId = deal.CompanyId;
+        var custName = (deal.CustomerName ?? string.Empty).Trim().ToLower();
+
+        // Find matching lead
+        var matchingLeads = await _db.Leads
+            .Where(l => l.CompanyId == companyId &&
+                ((deal.CustomerId.HasValue && l.Id == deal.CustomerId.Value) ||
+                 (!string.IsNullOrWhiteSpace(custName) && l.Name.ToLower() == custName)))
+            .ToListAsync(ct);
+
+        bool changesMade = false;
+        string targetStatus = "KYC In Progress";
+        if (stage == "investment_opportunity" || stage == "opportunity" || stage == "term_sheet" || stage == "committed")
+            targetStatus = "In Opportunity";
+        else if (stage == "converted" || stage == "won")
+            targetStatus = "Converted";
+
+        foreach (var l in matchingLeads)
+        {
+            if (l.Status != targetStatus)
+            {
+                l.Status = targetStatus;
+                l.UpdatedAt = DateTime.UtcNow;
+                changesMade = true;
+            }
+        }
+
+        // Complete any pending followups for this contact
+        var matchingLeadIds = matchingLeads.Select(l => l.Id.ToString()).ToList();
+        var matchingPhones = matchingLeads.Select(l => l.Phone).Where(p => !string.IsNullOrEmpty(p)).ToList();
+
+        var pendingFollowups = await _db.Followups
+            .Where(f => f.CompanyId == companyId && f.Status == FollowupStatus.Pending &&
+                ((f.ContactId != null && matchingLeadIds.Contains(f.ContactId)) ||
+                 (deal.CustomerId.HasValue && f.ContactId == deal.CustomerId.Value.ToString()) ||
+                 (!string.IsNullOrWhiteSpace(custName) && f.ContactName.ToLower() == custName) ||
+                 (f.ContactPhone != null && matchingPhones.Contains(f.ContactPhone))))
+            .ToListAsync(ct);
+
+        foreach (var pf in pendingFollowups)
+        {
+            pf.Status = FollowupStatus.Completed;
+            pf.CompletedAt = DateTime.UtcNow;
+            pf.UpdatedAt = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(pf.Notes) && !pf.Notes.Contains("Auto-completed"))
+                pf.Notes += " | Auto-completed: deal advanced to KYC/Opportunities stage";
+            else if (string.IsNullOrWhiteSpace(pf.Notes))
+                pf.Notes = "Auto-completed: deal advanced to KYC/Opportunities stage";
+            changesMade = true;
+        }
+
+        if (changesMade)
+        {
+            await _db.SaveChangesAsync(ct);
         }
     }
 }

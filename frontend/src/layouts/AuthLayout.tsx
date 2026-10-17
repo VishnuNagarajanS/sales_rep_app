@@ -84,8 +84,19 @@ export const AuthLayout: React.FC = () => {
 
   return (
     <div className="auth-page-container">
-      {/* Fixed background image */}
-      <div className="auth-bg-layer" />
+      {/* Fixed background video */}
+      <div className="auth-bg-layer">
+        <video
+          className="auth-bg-video"
+          autoPlay
+          loop
+          muted
+          playsInline
+          poster="/connectng bg.jpg"
+        >
+          <source src="/login-bg.mp4" type="video/mp4" />
+        </video>
+      </div>
       {/* Subtle dark overlay for contrast */}
       <div className="auth-bg-overlay" />
 

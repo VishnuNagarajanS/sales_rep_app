@@ -72,8 +72,16 @@ public class KycDto
     public bool CustomerConsentObtained { get; set; }
     public DateTime? CustomerConsentTimestamp { get; set; }
 
+    public string? KycLinkToken { get; set; }
+    public DateTime? KycLinkExpiresAt { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+
+    public int? HandoverId { get; set; }
+    public string? HandedOverFromName { get; set; }
+    public DateTime? HandoverPlannedEnd { get; set; }
+    public int? OriginalOwnerId { get; set; }
 }
 
 public class KycListDto
@@ -138,16 +146,23 @@ public class KycListDto
 
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+
+    public int? HandoverId { get; set; }
+    public string? HandedOverFromName { get; set; }
+    public DateTime? HandoverPlannedEnd { get; set; }
+    public int? OriginalOwnerId { get; set; }
 }
 
 public class SendKycLinkDto
 {
     public int? InvestorId { get; set; }
     public string? CustomerName { get; set; }
+    public string? InvestorName { get => CustomerName; set => CustomerName = value; }
     public string Phone { get; set; } = string.Empty;
     public string? Email { get; set; }
     public string Channel { get; set; } = "email";
     public string Expiry { get; set; } = "48h";
+    public int? ExpiryDays { get; set; }
     public string? BaseUrl { get; set; }
     public bool ForceNewToken { get; set; } = false;
 }
@@ -310,5 +325,11 @@ public class VerifyKycOtpResponseDto
     public bool Verified { get; set; }
     public string Message { get; set; } = string.Empty;
     public string? Email { get; set; }
+}
+
+public class ResendKycLinkDto
+{
+    public string? BaseUrl { get; set; }
+    public int? ExpiryDays { get; set; }
 }
 

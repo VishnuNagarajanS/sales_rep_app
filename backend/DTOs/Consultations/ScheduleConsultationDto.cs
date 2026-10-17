@@ -8,4 +8,7 @@ public class ScheduleConsultationDto
     public DateTime ScheduledAt { get; set; }
     public string? Agenda { get; set; }
     public string? Notes { get; set; }
+    public int? ConsultantId { get; set; }
+    public string? ConsultantName { get; set; }
+    public string? ReferredByAgentName { get; set; }
 }

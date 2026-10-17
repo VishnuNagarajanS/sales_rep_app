@@ -883,3 +883,80 @@
   align-items: center;
   gap: 14px;
 }
+
+/* ── Backup Vault Styles ─────────────────────────────────────────────────── */
+.backup-vault-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.backup-gen-box {
+  background: #0f172a;
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 14px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.backup-gen-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.backup-table-card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 20px;
+}
+
+.backup-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.backup-data-table th {
+  padding: 12px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+  border-bottom: 1px solid #1e293b;
+}
+
+.backup-data-table td {
+  padding: 14px;
+  border-bottom: 1px solid rgba(30, 41, 59, 0.7);
+  color: #e2e8f0;
+  vertical-align: middle;
+}
+
+.backup-filename {
+  font-family: monospace;
+  font-weight: 600;
+  color: #38bdf8;
+}
+
+.checksum-pill {
+  font-family: monospace;
+  font-size: 11px;
+  color: #94a3b8;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid #334155;
+  padding: 2px 6px;
+  border-radius: 4px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+}
+

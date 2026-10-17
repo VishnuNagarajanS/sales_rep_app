@@ -5,11 +5,13 @@ using backend.DTOs.Calls;
 using backend.DTOs.Common;
 using backend.Extensions;
 using backend.Models.Entities;
+using backend.Services.Implementations;
 using backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 
 namespace backend.Controllers.SalesExecutive;
 
@@ -253,6 +255,8 @@ public class SalesExecutiveCallsController : ControllerBase
             Duration = c.Duration,
             Disposition = c.Disposition,
             Notes = c.Notes,
+            Reason = c.Reason,
+            CallModule = c.CallModule,
             LeadId = c.LeadId,
             CustomerId = c.CustomerId,
             Timestamp = c.Timestamp,
@@ -317,6 +321,44 @@ public class SalesExecutiveCallsController : ControllerBase
         if (!companyId.HasValue || companyId.Value <= 0)
             return Unauthorized(ApiResponse<CallRecordResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
+        var normalizedModule = (role == "irm") ? IrmOtherService.NormalizeModule(dto.Module) : null;
+        if (role == "irm")
+        {
+            if (!string.IsNullOrWhiteSpace(normalizedModule))
+            {
+                if (!IrmOtherService.ModuleOutcomes.TryGetValue(normalizedModule, out var allowedOutcomes))
+                {
+                    return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult($"Invalid module '{dto.Module}'. Allowed IRM modules are: my_leads, follow_up, kyc, opportunities, investor_360, all_leads, other."));
+                }
+
+                var dispo = dto.Disposition?.Trim() ?? string.Empty;
+                if (!allowedOutcomes.Any(o => o.Equals(dispo, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult($"Disposition '{dto.Disposition}' is not valid for module '{dto.Module}'."));
+                }
+            }
+
+            if (dto.Disposition != null && dto.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase))
+            {
+                var effectiveReason = (dto.Reason ?? dto.Notes)?.Trim();
+                if (string.IsNullOrWhiteSpace(effectiveReason))
+                {
+                    return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult("Reason is required when disposition is Other."));
+                }
+            }
+        }
+        else
+        {
+            if (dto.Disposition != null && dto.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase))
+            {
+                var effectiveReason = (dto.Reason ?? dto.Notes)?.Trim();
+                if (string.IsNullOrWhiteSpace(effectiveReason))
+                {
+                    return BadRequest(ApiResponse<CallRecordResponseDto>.FailureResult("Reason is required when disposition is Other."));
+                }
+            }
+        }
+
         // Use actual provider results; do not mark simulated calls as connected or successful
         var hasTwilioSid = !string.IsNullOrWhiteSpace(dto.TwilioCallSid);
         var twilioConfigured = _twilioOptions.Value.IsConfigured;
@@ -353,6 +395,44 @@ public class SalesExecutiveCallsController : ControllerBase
             rawNotes = $"{rawNotes} [Source: irm]".Trim();
         }
 
+        string? storedReason = null;
+        if (!string.IsNullOrWhiteSpace(dto.Reason))
+        {
+            storedReason = dto.Reason.Trim();
+        }
+        else if (dto.Disposition != null && (dto.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase) || dto.Disposition.Trim().Equals("Contacted", StringComparison.OrdinalIgnoreCase)))
+        {
+            storedReason = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
+        }
+
+        int? validLeadId = dto.LeadId;
+        if (validLeadId.HasValue)
+        {
+            if (validLeadId.Value <= 0)
+            {
+                validLeadId = null;
+            }
+            else if (!_context.Database.IsInMemory())
+            {
+                var leadExists = await _context.Leads.AnyAsync(l => l.Id == validLeadId.Value, ct);
+                if (!leadExists) validLeadId = null;
+            }
+        }
+
+        int? validCustomerId = dto.CustomerId;
+        if (validCustomerId.HasValue)
+        {
+            if (validCustomerId.Value <= 0)
+            {
+                validCustomerId = null;
+            }
+            else if (!_context.Database.IsInMemory())
+            {
+                var customerExists = await _context.Customers.AnyAsync(c => c.Id == validCustomerId.Value, ct);
+                if (!customerExists) validCustomerId = null;
+            }
+        }
+
         var call = new CallRecord
         {
             CompanyId = companyId.Value,
@@ -363,17 +443,143 @@ public class SalesExecutiveCallsController : ControllerBase
             Duration = effectiveDuration,
             Disposition = effectiveDisposition,
             Notes = rawNotes,
-            LeadId = dto.LeadId,
-            CustomerId = dto.CustomerId,
+            Reason = storedReason,
+            CallModule = normalizedModule,
+            LeadId = validLeadId,
+            CustomerId = validCustomerId,
             TwilioCallSid = dto.TwilioCallSid,
             Timestamp = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow
         };
 
+        int? resolvedLeadId = dto.LeadId;
+        if ((!resolvedLeadId.HasValue || resolvedLeadId.Value <= 0) && !string.IsNullOrWhiteSpace(dto.ContactPhone))
+        {
+            var cleanPhone = dto.ContactPhone.Trim();
+            var phoneDigits = System.Text.RegularExpressions.Regex.Replace(cleanPhone, @"\D", "");
+            if (phoneDigits.Length >= 10)
+            {
+                var last10 = phoneDigits.Substring(phoneDigits.Length - 10);
+                var matchingLead = await _context.Leads.FirstOrDefaultAsync(l =>
+                    l.CompanyId == companyId.Value &&
+                    (l.Phone.Contains(last10) || (l.NormalizedPhone != null && l.NormalizedPhone.Contains(last10))), ct);
+                if (matchingLead != null)
+                {
+                    resolvedLeadId = matchingLead.Id;
+                    call.LeadId = matchingLead.Id;
+                }
+            }
+        }
+
+        if (resolvedLeadId.HasValue && resolvedLeadId.Value > 0)
+        {
+            var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == resolvedLeadId.Value && l.CompanyId == companyId.Value, ct);
+            if (lead != null)
+            {
+                var dispo = dto.Disposition.Trim();
+                if (string.Equals(dispo, "Follow-up Required", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(dispo, "Follow Up Required", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Follow-up Required";
+                }
+                else if (string.Equals(dispo, "Interested", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Interested";
+
+                    // Qualified lead: remove its open sales follow-ups (lead stays in leads) (same SaveChanges).
+                    await backend.Services.Implementations.InterestedLeadConversion.RemoveSalesFollowupsAsync(_context, lead, ct);
+                }
+                else if (string.Equals(dispo, "Not Interested", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Not Interested";
+                    lead.UpdatedAt = DateTime.UtcNow;
+                    await backend.Services.Implementations.InterestedLeadConversion.RemoveSalesFollowupsAsync(_context, lead, ct);
+                    var cf = DeserializeCustomFields(lead.CustomFieldsJson);
+                    cf["dispositionReason"] = !string.IsNullOrWhiteSpace(dto.Notes) ? dto.Notes : "Not Interested";
+                    lead.CustomFieldsJson = JsonSerializer.Serialize(cf);
+                    if (!string.IsNullOrWhiteSpace(dto.Notes))
+                    {
+                        lead.Notes = string.IsNullOrWhiteSpace(lead.Notes)
+                            ? $"[{DateTime.UtcNow:yyyy-MM-dd}] Not Interested: {dto.Notes}"
+                            : $"{lead.Notes}\n\n[{DateTime.UtcNow:yyyy-MM-dd}] Not Interested: {dto.Notes}";
+                    }
+                }
+                else if (string.Equals(dispo, "Wrong Number", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Junk";
+                    lead.UpdatedAt = DateTime.UtcNow;
+                    await backend.Services.Implementations.InterestedLeadConversion.RemoveSalesFollowupsAsync(_context, lead, ct);
+                    var cf = DeserializeCustomFields(lead.CustomFieldsJson);
+                    cf["dispositionReason"] = !string.IsNullOrWhiteSpace(dto.Notes) ? dto.Notes : "Wrong Number";
+                    lead.CustomFieldsJson = JsonSerializer.Serialize(cf);
+                    if (!string.IsNullOrWhiteSpace(dto.Notes))
+                    {
+                        lead.Notes = string.IsNullOrWhiteSpace(lead.Notes)
+                            ? $"[{DateTime.UtcNow:yyyy-MM-dd}] Wrong Number: {dto.Notes}"
+                            : $"{lead.Notes}\n\n[{DateTime.UtcNow:yyyy-MM-dd}] Wrong Number: {dto.Notes}";
+                    }
+                }
+                else if (string.Equals(dispo, "Other", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Other";
+
+                    // Reclassified to Other: complete its pending follow-ups so they leave the Follow-ups page
+                    var leadIdStr = lead.Id.ToString();
+                    var leadPrefixedStr = $"lead-{lead.Id}";
+                    var cleanLeadPhone = lead.Phone ?? dto.ContactPhone ?? string.Empty;
+                    var phoneDigits = System.Text.RegularExpressions.Regex.Replace(cleanLeadPhone, @"\D", "");
+                    var last10 = phoneDigits.Length >= 10 ? phoneDigits.Substring(phoneDigits.Length - 10) : phoneDigits;
+
+                    var pendingFollowups = await _context.Followups
+                        .Where(f => f.CompanyId == lead.CompanyId &&
+                                    f.Status == backend.Models.Enums.FollowupStatus.Pending &&
+                                    (f.ContactId == leadIdStr ||
+                                     f.ContactId == leadPrefixedStr ||
+                                     (!string.IsNullOrEmpty(last10) && f.ContactPhone.Contains(last10))))
+                        .ToListAsync(ct);
+                    foreach (var pf in pendingFollowups)
+                    {
+                        pf.Status = backend.Models.Enums.FollowupStatus.Completed;
+                        pf.OutcomeNotes = $"Reclassified to Other: {storedReason ?? "Marked as Other"}";
+                        pf.UpdatedAt = DateTime.UtcNow;
+                    }
+                }
+            }
+        }
+
+        // Close pending follow-ups for Other by Customer or Phone even if no lead matched
+        if (string.Equals(dto.Disposition?.Trim(), "Other", StringComparison.OrdinalIgnoreCase))
+        {
+            var cleanPhone = dto.ContactPhone ?? string.Empty;
+            var phoneDigits = System.Text.RegularExpressions.Regex.Replace(cleanPhone, @"\D", "");
+            var last10 = phoneDigits.Length >= 10 ? phoneDigits.Substring(phoneDigits.Length - 10) : "";
+
+            var pendingFollowupsToClose = await _context.Followups
+                .Where(f => f.CompanyId == companyId.Value &&
+                            f.Status == backend.Models.Enums.FollowupStatus.Pending &&
+                            ((dto.CustomerId.HasValue && f.InvestorId == dto.CustomerId.Value) ||
+                             (!string.IsNullOrEmpty(last10) && f.ContactPhone.Contains(last10))))
+                .ToListAsync(ct);
+
+            foreach (var pf in pendingFollowupsToClose)
+            {
+                pf.Status = backend.Models.Enums.FollowupStatus.Completed;
+                pf.OutcomeNotes = $"Reclassified to Other: {storedReason ?? "Marked as Other"}";
+                pf.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         _context.CallRecords.Add(call);
         await _context.SaveChangesAsync(ct);
 
-        await _context.Entry(call).Reference(c => c.Agent).Query().Include(a => a.Role).LoadAsync(ct);
+        try
+        {
+            await _context.Entry(call).Reference(c => c.Agent).Query().Include(a => a.Role).LoadAsync(ct);
+        }
+        catch
+        {
+            // Suppress if navigation is already loaded or in test contexts
+        }
 
         var response = MapToResponseDto(call);
 
@@ -392,6 +598,45 @@ public class SalesExecutiveCallsController : ControllerBase
                 ApiResponse<CallRecordDto>.FailureResult("Access denied: GHL Admin has read-only access to call disposition records."));
         }
 
+        if (role == "irm")
+        {
+            var normalizedModule = IrmOtherService.NormalizeModule(request.Module);
+            if (!string.IsNullOrWhiteSpace(normalizedModule))
+            {
+                if (!IrmOtherService.ModuleOutcomes.TryGetValue(normalizedModule, out var allowedOutcomes))
+                {
+                    return BadRequest(ApiResponse<CallRecordDto>.FailureResult($"Invalid module '{request.Module}'. Allowed IRM modules are: my_leads, follow_up, kyc, opportunities, investor_360, all_leads, other."));
+                }
+
+                var dispo = request.Disposition?.Trim() ?? string.Empty;
+                if (!allowedOutcomes.Any(o => o.Equals(dispo, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return BadRequest(ApiResponse<CallRecordDto>.FailureResult($"Disposition '{request.Disposition}' is not valid for module '{request.Module}'."));
+                }
+            }
+
+            if (request.Disposition != null && request.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase))
+            {
+                var effectiveReason = (request.Reason ?? request.Notes)?.Trim();
+                if (string.IsNullOrWhiteSpace(effectiveReason))
+                {
+                    return BadRequest(ApiResponse<CallRecordDto>.FailureResult("Reason is required when disposition is Other."));
+                }
+            }
+        }
+        else
+        {
+            request.Module = null;
+            if (request.Disposition != null && request.Disposition.Trim().Equals("Other", StringComparison.OrdinalIgnoreCase))
+            {
+                var effectiveReason = (request.Reason ?? request.Notes)?.Trim();
+                if (string.IsNullOrWhiteSpace(effectiveReason))
+                {
+                    return BadRequest(ApiResponse<CallRecordDto>.FailureResult("Reason is required when disposition is Other."));
+                }
+            }
+        }
+
         var result = await _callService.ProcessDispositionAsync(request, ct);
         if (!result.Success)
         {
@@ -400,6 +645,86 @@ public class SalesExecutiveCallsController : ControllerBase
             return BadRequest(result);
         }
         return Ok(result);
+    }
+
+    [HttpGet("other")]
+    public async Task<IActionResult> GetOtherRecords(
+        [FromServices] IIrmOtherService otherService,
+        [FromQuery] string? module,
+        [FromQuery] string? search,
+        [FromQuery] int? irmId,
+        CancellationToken ct = default)
+    {
+        var companyId = _currentUser.CompanyId ?? User.GetCompanyId();
+        var role = (_currentUser.Role ?? User.GetUserRole()).ToLowerInvariant();
+        int? effectiveIrmId = (role == "irm") ? (_currentUser.UserId ?? User.GetUserId()) : irmId;
+
+        var result = await otherService.GetOtherRecordsAsync(companyId, effectiveIrmId, module, search, ct);
+        return Ok(result);
+    }
+
+    [HttpPost("other/{callId:int}/move")]
+    public async Task<IActionResult> MoveOtherRecord(
+        int callId,
+        [FromQuery] string? targetModule,
+        [FromServices] IIrmOtherService otherService,
+        CancellationToken ct = default)
+    {
+        var companyId = _currentUser.CompanyId ?? User.GetCompanyId();
+        var result = await otherService.MoveOtherRecordAsync(companyId, callId, targetModule, ct);
+        if (!result.Success) return BadRequest(result);
+        return Ok(result);
+    }
+
+    [HttpGet("outcomes")]
+    [HttpGet("call-outcomes")]
+    public IActionResult GetCallOutcomes(
+        [FromServices] IIrmOtherService otherService,
+        [FromQuery] string? module)
+    {
+        var role = (_currentUser.Role ?? User.GetUserRole()).ToLowerInvariant();
+        if (role == "sales_executive")
+        {
+            var salesExecOutcomes = new List<string>
+            {
+                "Interested",
+                "Follow-up Required",
+                "Call Back",
+                "Not Interested",
+                "Wrong Number",
+                "No Response"
+            };
+            return Ok(ApiResponse<List<string>>.SuccessResponse(salesExecOutcomes, "Sales Executive call outcomes retrieved successfully."));
+        }
+
+        if (!string.IsNullOrWhiteSpace(module))
+        {
+            var normalized = IrmOtherService.NormalizeModule(module);
+            if (normalized != null)
+            {
+                var irmOutcomes = otherService.GetCallOutcomes();
+                if (irmOutcomes.Data != null && irmOutcomes.Data.TryGetValue(normalized, out var list))
+                {
+                    return Ok(ApiResponse<List<string>>.SuccessResponse(list, $"Call outcomes for module {normalized} retrieved."));
+                }
+            }
+        }
+
+        if (role == "irm")
+        {
+            return Ok(otherService.GetCallOutcomes());
+        }
+
+        var defaultOutcomes = new List<string>
+        {
+            "Interested",
+            "Follow-up Required",
+            "Call Back",
+            "Not Interested",
+            "Wrong Number",
+            "No Response"
+        };
+        return Ok(ApiResponse<List<string>>.SuccessResponse(defaultOutcomes, "Sales Executive call outcomes retrieved successfully."));
     }
 
     [HttpPost("send-customer-message")]
@@ -647,5 +972,18 @@ public class SalesExecutiveCallsController : ControllerBase
         return Ok(ApiResponse<SendCustomerMessageResponseDto>.SuccessResult(
             response, 
             "Customer message dispatched successfully."));
+    }
+
+    private static Dictionary<string, string> DeserializeCustomFields(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, string>();
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>();
+        }
+        catch
+        {
+            return new Dictionary<string, string>();
+        }
     }
 }

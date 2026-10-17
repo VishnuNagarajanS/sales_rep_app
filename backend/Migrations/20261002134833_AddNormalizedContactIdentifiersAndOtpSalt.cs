@@ -13,6 +13,13 @@ namespace backend.Migrations
         {
             migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_leads_CompanyId\";");
             migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_customers_CompanyId_Phone\";");
+            migrationBuilder.Sql("ALTER TABLE customers DROP COLUMN IF EXISTS \"IsDuplicate\";");
+            migrationBuilder.Sql("ALTER TABLE leads DROP COLUMN IF EXISTS \"IsDuplicate\";");
+            migrationBuilder.Sql("ALTER TABLE customers DROP COLUMN IF EXISTS \"NormalizedEmail\";");
+            migrationBuilder.Sql("ALTER TABLE customers DROP COLUMN IF EXISTS \"NormalizedPhone\";");
+            migrationBuilder.Sql("ALTER TABLE leads DROP COLUMN IF EXISTS \"NormalizedEmail\";");
+            migrationBuilder.Sql("ALTER TABLE leads DROP COLUMN IF EXISTS \"NormalizedPhone\";");
+            migrationBuilder.Sql("ALTER TABLE \"KycOtpVerifications\" DROP COLUMN IF EXISTS \"Salt\";");
 
             migrationBuilder.AddColumn<bool>(
                 name: "IsDuplicate",

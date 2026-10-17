@@ -15,7 +15,10 @@ export interface PagedResult<T = any> {
 
 import { isMockMode as envIsMockMode } from '../config/environment';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const rawBase = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+const API_BASE_URL = rawBase
+  ? (rawBase.endsWith('/api') ? rawBase : `${rawBase}/api`)
+  : '/api';
 
 class ApiClient {
   isMockMode(): boolean {
@@ -30,16 +33,22 @@ class ApiClient {
     };
   }
 
+  private static isLoggingOut = false;
+
   private async handleResponse<T>(res: Response): Promise<T> {
     if (res.status === 401) {
       const err = await res.json().catch(() => ({ message: 'Invalid credentials.' }));
       if (!res.url.includes('/auth/login')) {
-        sessionStorage.removeItem('nexus_auth_token');
-        sessionStorage.removeItem('nexus_current_user');
-        localStorage.removeItem('nexus_auth_token');
-        localStorage.removeItem('nexus_current_user');
-        window.dispatchEvent(new Event('nexus_auth_unauthorized'));
-        throw new Error('Session expired. Please sign in again.');
+        if (!ApiClient.isLoggingOut) {
+          ApiClient.isLoggingOut = true;
+          sessionStorage.removeItem('nexus_auth_token');
+          sessionStorage.removeItem('nexus_current_user');
+          localStorage.removeItem('nexus_auth_token');
+          localStorage.removeItem('nexus_current_user');
+          window.dispatchEvent(new Event('nexus_auth_unauthorized'));
+        }
+        // Return a never-resolving promise so the component doesn't catch an error, re-render, and retry in a loop
+        return new Promise<any>(() => {}); 
       }
       throw new Error(err.message || 'Invalid email or password.');
     }
@@ -49,6 +58,9 @@ class ApiClient {
       if (err.errors && typeof err.errors === 'object' && !Array.isArray(err.errors)) {
         const validationMsgs = Object.values(err.errors).flat().join('; ');
         if (validationMsgs) errorMsg = validationMsgs;
+      } else if (Array.isArray(err.errors) && err.errors.length > 0) {
+        const specificMsg = err.errors.slice().reverse().find((m: any) => typeof m === 'string' && !m.includes('See the inner exception for details'));
+        if (specificMsg) errorMsg = specificMsg;
       }
       const error: any = new Error(errorMsg || `HTTP Error ${res.status}`);
       error.errors = err.errors;

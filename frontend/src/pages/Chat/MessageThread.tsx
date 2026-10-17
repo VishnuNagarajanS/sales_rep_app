@@ -82,7 +82,7 @@ export const MessageThread: React.FC<Props> = ({
   const [emojiPickerId, setEmojiPickerId] = useState<string | null>(null);
   const [touchActiveMsgId, setTouchActiveMsgId] = useState<string | null>(null);
   const [typingEntry, setTypingEntry] = useState<cs.TypingEntry | null>(null);
-  
+
   // File Share Pre-Send Modal
   const [showFileModal, setShowFileModal] = useState(false);
 
@@ -163,9 +163,9 @@ export const MessageThread: React.FC<Props> = ({
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
-    cs.setTyping(conversation.id, { userId: me.id, userName: me.name, ts: Date.now() });
+    cs.setTyping(conversation.id, { userId: me.id, userName: me.name, ts: Date.now() }, conversation.companyId, me.id);
     if (typingTimer.current) clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(() => cs.setTyping(conversation.id, null), 2500);
+    typingTimer.current = setTimeout(() => cs.setTyping(conversation.id, null, conversation.companyId, me.id), 2500);
     const el = e.target;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
@@ -268,7 +268,7 @@ export const MessageThread: React.FC<Props> = ({
           if (isCallCard) {
             try {
               callPayload = JSON.parse(msg.content.slice(6, -1));
-            } catch {}
+            } catch { }
           }
 
           return (

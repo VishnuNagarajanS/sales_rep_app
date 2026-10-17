@@ -66,6 +66,15 @@ public class InvestorCallService : IInvestorCallService
             callOutcome = parsedOutcome;
         }
 
+        if (callOutcome == CallOutcome.Other)
+        {
+            var effectiveReason = (dto.Reason ?? dto.Notes)?.Trim();
+            if (string.IsNullOrWhiteSpace(effectiveReason))
+            {
+                return ApiResponse<CallLogDto>.ErrorResponse("Reason is required when disposition is Other.");
+            }
+        }
+
         // If telephony trunk is offline or simulated, do not mark as connected or successful
         if (!hasCarrierCredentials && (callOutcome == CallOutcome.Interested || callOutcome == CallOutcome.MandateDiscussed))
         {

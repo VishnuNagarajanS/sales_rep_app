@@ -20,8 +20,8 @@ public class OpportunityRepository : IOpportunityRepository
 
     public async Task<InvestmentOpportunity?> GetByIdAsync(int id, int companyId, CancellationToken ct = default)
         => await _db.InvestmentOpportunities
-            .Include(o => o.Pitches)
             .FirstOrDefaultAsync(o => o.Id == id && o.CompanyId == companyId, ct);
+
 
     public async Task<InvestmentOpportunity> CreateAsync(InvestmentOpportunity opportunity, CancellationToken ct = default)
     {

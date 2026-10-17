@@ -35,8 +35,12 @@ class SignalRService {
     this.isConnecting = true;
 
     try {
+      const rawApiUrl = (import.meta.env.VITE_API_URL as string | undefined) || '';
+      const hubOrigin = rawApiUrl.replace(/\/api\/?$/, '');
+      const hubUrl = hubOrigin ? `${hubOrigin}/hubs/platform` : '/hubs/platform';
+
       this.connection = new HubConnectionBuilder()
-        .withUrl('/hubs/platform', {
+        .withUrl(hubUrl, {
           accessTokenFactory: () =>
             sessionStorage.getItem('nexus_auth_token') ||
             localStorage.getItem('nexus_auth_token') ||
@@ -137,6 +141,20 @@ class SignalRService {
 
       this.connection.on('PlatformDataUpdated', (entityType: string, action: string) => {
         this.emit('PlatformDataUpdated', { entityType, action });
+      });
+
+      // Real-Time Chat handlers
+      this.connection.on('ReceiveChatMessage', (message: any) => {
+        this.emit('ReceiveChatMessage', message);
+      });
+      this.connection.on('ChatUserTyping', (convId: string, userId: number, userName: string, isTyping: boolean) => {
+        this.emit('ChatUserTyping', { convId, userId, userName, isTyping });
+      });
+      this.connection.on('ChatConversationUpdated', (conversationId: string) => {
+        this.emit('ChatConversationUpdated', { conversationId });
+      });
+      this.connection.on('ChatMessageRead', (conversationId: string, userId: number, messageId: string) => {
+        this.emit('ChatMessageRead', { conversationId, userId, messageId });
       });
 
       this.connection.onreconnecting((error?: Error) => {

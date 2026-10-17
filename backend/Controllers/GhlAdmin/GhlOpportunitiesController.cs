@@ -7,6 +7,8 @@ using backend.Models.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using backend.Services.Interfaces;
+using backend.Services.Implementations;
 
 namespace backend.Controllers.GhlAdmin;
 
@@ -22,11 +24,13 @@ public class GhlOpportunitiesController : ControllerBase
 {
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IIrmOtherService _otherService;
 
-    public GhlOpportunitiesController(ApplicationDbContext db, ICurrentUserService currentUser)
+    public GhlOpportunitiesController(ApplicationDbContext db, ICurrentUserService currentUser, IIrmOtherService? otherService = null)
     {
         _db = db;
         _currentUser = currentUser;
+        _otherService = otherService ?? new IrmOtherService(db);
     }
 
     private IQueryable<GhlInvestmentOpportunity> ScopedQuery()
@@ -34,6 +38,8 @@ public class GhlOpportunitiesController : ControllerBase
         var query = _db.GhlInvestmentOpportunities.AsNoTracking()
             .Include(o => o.AssignedAgent)
             .Include(o => o.Investor)
+            .Include(o => o.Handover)
+            .Include(o => o.OriginalOwner)
             .AsQueryable();
 
         var companyId = _currentUser.CompanyId;
@@ -71,17 +77,30 @@ public class GhlOpportunitiesController : ControllerBase
                 (o.Investor != null && o.Investor.Name.ToLower().Contains(s)));
         }
 
-        var total = await query.CountAsync(ct);
-        page = Math.Max(1, page);
-        pageSize = Math.Clamp(pageSize, 1, 200);
+        var companyId = _currentUser.CompanyId ?? 1;
+        var otherMatcher = await _otherService.GetOtherMatcherAsync(companyId, "opportunities", ct);
 
         var entities = await query
             .OrderByDescending(o => o.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
             .ToListAsync(ct);
 
-        var items = entities.Select(MapToDto).ToList();
+        if (otherMatcher.HasAnyOther)
+        {
+            entities = entities
+                .Where(o => !otherMatcher.IsInOther(o.Investor?.Phone, o.InvestorId, null, o.Investor?.Name ?? o.Title))
+                .ToList();
+        }
+
+        var total = entities.Count;
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var paged = entities
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        var items = paged.Select(MapToDto).ToList();
 
         return Ok(ApiResponse<PagedResult<GhlOpportunityResponseDto>>.SuccessResult(
             PagedResult<GhlOpportunityResponseDto>.Create(items, total, page, pageSize),
@@ -120,11 +139,14 @@ public class GhlOpportunitiesController : ControllerBase
             return Unauthorized(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Unauthorized: Company ID is missing."));
 
         // Verify investor exists
-        var investorExists = await _db.Investors
-            .AnyAsync(i => i.Id == dto.InvestorId && i.CompanyId == companyId.Value, ct);
+        var investor = await _db.Investors
+            .FirstOrDefaultAsync(i => i.Id == dto.InvestorId && i.CompanyId == companyId.Value, ct);
 
-        if (!investorExists)
+        if (investor == null)
             return BadRequest(ApiResponse<GhlOpportunityResponseDto>.FailureResult("Investor not found."));
+
+        int? handoverId = investor.HandoverId;
+        int? originalOwnerId = investor.OriginalOwnerId;
 
         var opp = new GhlInvestmentOpportunity
         {
@@ -138,10 +160,25 @@ public class GhlOpportunitiesController : ControllerBase
             ExpectedCloseDate = dto.ExpectedCloseDate.Trim(),
             Notes = dto.Notes.Trim(),
             CreatedAt = DateTime.UtcNow,
+            HandoverId = handoverId,
+            OriginalOwnerId = originalOwnerId
         };
 
         _db.GhlInvestmentOpportunities.Add(opp);
         await _db.SaveChangesAsync(ct);
+
+        if (handoverId.HasValue)
+        {
+            _db.WorkHandoverItems.Add(new WorkHandoverItem
+            {
+                HandoverId = handoverId.Value,
+                EntityType = "GhlInvestmentOpportunity",
+                EntityId = opp.Id,
+                Origin = "created_during_coverage",
+                CreatedAt = DateTime.UtcNow
+            });
+            await _db.SaveChangesAsync(ct);
+        }
 
         await _db.Entry(opp).Reference(o => o.AssignedAgent).LoadAsync(ct);
         await _db.Entry(opp).Reference(o => o.Investor).LoadAsync(ct);
@@ -184,7 +221,7 @@ public class GhlOpportunitiesController : ControllerBase
 
     // ── DELETE /api/ghl/investment-opportunities/{id} ─────────────────────────
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "company_admin,super_admin,irm")]
+    [Authorize(Roles = "company_admin,super_admin")]
     public async Task<ActionResult<ApiResponse<bool>>> DeleteOpportunity(int id, CancellationToken ct)
     {
         if (User.IsGhlAdmin())
@@ -221,5 +258,9 @@ public class GhlOpportunitiesController : ControllerBase
         Notes = o.Notes,
         CreatedAt = o.CreatedAt,
         UpdatedAt = o.UpdatedAt,
+        HandoverId = o.HandoverId,
+        HandedOverFromName = o.OriginalOwner?.Name,
+        HandoverPlannedEnd = o.Handover?.PlannedEndAt,
+        OriginalOwnerId = o.OriginalOwnerId
     };
 }

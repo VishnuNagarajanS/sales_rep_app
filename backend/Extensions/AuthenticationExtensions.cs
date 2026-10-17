@@ -2,6 +2,7 @@ using System.Text;
 using backend.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
 
 namespace backend.Extensions;
@@ -13,7 +14,15 @@ public static class AuthenticationExtensions
         var jwtSettings = configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>() 
                           ?? throw new InvalidOperationException("JwtSettings section is missing in configuration.");
 
+        if (string.IsNullOrWhiteSpace(jwtSettings.SecretKey) || jwtSettings.SecretKey.Length < 32)
+        {
+            throw new InvalidOperationException("JwtSettings:SecretKey must be at least 32 characters long. Set it via the JwtSettings__SecretKey environment variable or a backend/.env file.");
+        }
+
         var key = Encoding.UTF8.GetBytes(jwtSettings.SecretKey);
+
+        var issuer = !string.IsNullOrWhiteSpace(jwtSettings.Issuer) ? jwtSettings.Issuer : "NexusSalesApi";
+        var audience = !string.IsNullOrWhiteSpace(jwtSettings.Audience) ? jwtSettings.Audience : "NexusSalesClient";
 
         services.AddAuthentication(options =>
         {
@@ -29,11 +38,11 @@ public static class AuthenticationExtensions
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = new SymmetricSecurityKey(key),
                 ValidateIssuer = true,
-                ValidIssuer = jwtSettings.Issuer,
+                ValidIssuer = issuer,
                 ValidateAudience = true,
-                ValidAudience = jwtSettings.Audience,
+                ValidAudience = audience,
                 ValidateLifetime = true,
-                ClockSkew = TimeSpan.Zero
+                ClockSkew = TimeSpan.FromMinutes(5)
             };
             options.Events = new JwtBearerEvents
             {
@@ -55,15 +64,28 @@ public static class AuthenticationExtensions
 
                     if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out var userId))
                     {
-                        var dbContext = context.HttpContext.RequestServices.GetRequiredService<backend.Data.ApplicationDbContext>();
-                        var user = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
-                            dbContext.Users.AsNoTracking()
-                                .Include(u => u.Role)
-                                .Include(u => u.Company),
-                            u => u.Id == userId);
+                        var cache = context.HttpContext.RequestServices.GetService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
+                        string userCacheKey = $"user_validated_{userId}";
+                        backend.Models.Entities.User? user = null;
+
+                        if (cache == null || !cache.TryGetValue(userCacheKey, out user) || user == null)
+                        {
+                            var dbContext = context.HttpContext.RequestServices.GetRequiredService<backend.Data.ApplicationDbContext>();
+                            user = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
+                                dbContext.Users.AsNoTracking()
+                                    .Include(u => u.Role)
+                                    .Include(u => u.Company),
+                                u => u.Id == userId);
+
+                            if (user != null && cache != null)
+                            {
+                                cache.Set(userCacheKey, user, TimeSpan.FromSeconds(20));
+                            }
+                        }
 
                         if (user == null || user.Status != backend.Models.Enums.UserStatus.Active)
                         {
+                            cache?.Remove(userCacheKey);
                             context.Fail("Your account has been suspended or is inactive.");
                             return;
                         }
@@ -73,23 +95,31 @@ public static class AuthenticationExtensions
                         if (user.CompanyId.HasValue && roleCode != "super_admin")
                         {
                             var tenant = user.Company;
-                            if (tenant == null || !tenant.IsActive || tenant.Status == "Suspended")
+                            if (tenant != null && tenant.Status == "Suspended")
                             {
                                 context.Fail("Your organization account has been suspended or is inactive.");
                                 return;
                             }
                         }
 
-                        // Enforce Session Revocation: Check if this specific JWT Jti token was revoked (lean projection)
+                        // Enforce Session Revocation: Check if this specific JWT Jti token was revoked (lean projection + cache)
                         var jti = context.Principal?.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Jti)?.Value;
                         if (!string.IsNullOrEmpty(jti))
                         {
-                            var session = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
-                                dbContext.UserSessions.AsNoTracking()
-                                    .Where(s => s.TokenId == jti)
-                                    .Select(s => new { s.IsActive, s.RevokedAt }));
+                            string jtiKey = $"session_revoked_{jti}";
+                            if (cache == null || !cache.TryGetValue(jtiKey, out bool isRevoked))
+                            {
+                                var dbContext = context.HttpContext.RequestServices.GetRequiredService<backend.Data.ApplicationDbContext>();
+                                var session = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
+                                    dbContext.UserSessions.AsNoTracking()
+                                        .Where(s => s.TokenId == jti)
+                                        .Select(s => new { s.IsActive, s.RevokedAt }));
 
-                            if (session != null && (!session.IsActive || session.RevokedAt.HasValue))
+                                isRevoked = session != null && (!session.IsActive || session.RevokedAt.HasValue);
+                                cache?.Set(jtiKey, isRevoked, TimeSpan.FromSeconds(20));
+                            }
+
+                            if (isRevoked)
                             {
                                 context.Fail("This session has been revoked. Please sign in again.");
                                 return;

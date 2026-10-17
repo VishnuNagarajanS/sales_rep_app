@@ -99,3 +99,13 @@ public class TenantResponseDto
     public string? StorageUsage { get; set; } = "1.2 GB / 50 GB";
     public bool IsProtected { get; set; }
 }
+
+public class ImpersonateTenantResponseDto
+{
+    public string Token { get; set; } = string.Empty;
+    public backend.DTOs.Auth.UserDto User { get; set; } = null!;
+    public backend.DTOs.Auth.TenantDto Tenant { get; set; } = null!;
+    public string OriginalAdminEmail { get; set; } = string.Empty;
+    public bool IsImpersonated { get; set; } = true;
+    public string TargetRoute { get; set; } = "/dashboard";
+}

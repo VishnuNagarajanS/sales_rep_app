@@ -31,6 +31,8 @@ import { DataTable, Column, RowAction } from '../../components/common/DataTable'
 import { StatusChip } from '../../components/common/StatusChip';
 import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
+import { apiUrl } from '../../utils/apiUrl';
+import { getAuthHeaders } from '../../utils/authHeaders';
 import './OpportunitiesPage.css';
 
 // ─── Stage enum (full ordered list) ─────────────────────────────────────────
@@ -79,13 +81,20 @@ export const OpportunitiesPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
 
-  const roleCode = user?.role?.code;
+  const roleCode = (user?.role?.code || '').toLowerCase();
   const isExec = roleCode === 'sales_executive';
   const isIrm = roleCode === 'irm';
-  const isGhlIrm = isIrm && tenant?.slug === 'ghl';
+  const isGhl =
+    tenant?.slug === 'ghl' ||
+    tenant?.id === 't-ghl-01' ||
+    tenant?.id === '1' ||
+    tenant?.name === 'GHL India Ventures' ||
+    user?.companySlug === 'ghl' ||
+    user?.companyName === 'GHL India Ventures';
+  const isGhlIrm = isIrm && isGhl;
   const isGhlAdmin =
-    (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01' || tenant?.id === '1') &&
-    ['company_admin', 'admin', 'super_admin', 'ghl_admin'].includes(roleCode as string);
+    isGhl &&
+    ['company_admin', 'admin', 'super_admin', 'ghl_admin'].includes(roleCode);
 
   // ── Core data ─────────────────────────────────────────────────────────────
   const [opps, setOpps] = useState<InvestmentOpportunity[]>([]);
@@ -114,6 +123,8 @@ export const OpportunitiesPage: React.FC = () => {
 
   // ── IRM Customer Detail Modal state ───────────────────────────────────────
   const [detailDeal, setDetailDeal] = useState<Deal | null>(null);
+  const [liveKycData, setLiveKycData] = useState<any>(null);
+  const [isKycLoading, setIsKycLoading] = useState<boolean>(false);
   const [amountInput, setAmountInput] = useState<string>('');
   const [isEditingAmount, setIsEditingAmount] = useState<boolean>(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState<boolean>(false);
@@ -210,7 +221,7 @@ export const OpportunitiesPage: React.FC = () => {
       stage: o.stage,
       targetAmount: String(o.targetAmount),
       committedAmount: String(o.committedAmount),
-      assignedAgentId: o.assignedAgentId,
+      assignedAgentId: o.assignedAgentId?.toString() || '',
       assignedAgentName: o.assignedAgentName,
       expectedCloseDate: o.expectedCloseDate,
       notes: o.notes,
@@ -334,7 +345,7 @@ export const OpportunitiesPage: React.FC = () => {
       icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
       onClick: o => {
         const inv = investors.find(i => i.id === o.investorId);
-        if (inv) initiateCall(inv.name, inv.phone, 'customer', inv.id);
+        if (inv) initiateCall(inv.name, inv.phone, 'customer', inv.id, undefined, 'opportunities');
       },
     },
     {
@@ -353,49 +364,26 @@ export const OpportunitiesPage: React.FC = () => {
       label: 'Delete',
       icon: <Trash2 size={14} color="#dc2626" style={{ marginRight: 6 }} />,
       onClick: o => handleDeleteOpp(o),
-      hidden: () => isGhlAdmin,
+      hidden: () => isIrm || isGhlAdmin,
     },
   ];
 
   // ── IRM Stage & Investor Type Handlers ─────────────────────────────────────
   const isScopedAgent = isIrm || isExec;
+  const myNameLower = (user?.name || '').toLowerCase().trim();
+  const myIdStr = user?.id ? String(user.id) : '';
   const scopedOpportunitiesDeals = isScopedAgent
-    ? deals.filter(d =>
-        (d.assignedAgentId && String(d.assignedAgentId) === String(user?.id)) ||
-        (d.assignedAgentName && d.assignedAgentName === user?.name)
-      )
+    ? deals.filter(d => {
+        const agentId = d.assignedAgentId ? String(d.assignedAgentId) : '';
+        const agentName = (d.assignedAgentName || '').toLowerCase().trim();
+        if (myIdStr && agentId === myIdStr) return true;
+        if (myNameLower && (agentName === myNameLower || agentName.includes(myNameLower) || myNameLower.includes(agentName))) return true;
+        if (!agentId && !agentName) return true;
+        return false;
+      })
     : deals;
   const irmDeals = scopedOpportunitiesDeals.filter(d => d.stage === 'investment_opportunity');
 
-  const handleSetInvestorType = async (deal: Deal, type: 'AIF' | 'Co-AIF') => {
-    const updatedDeal: Deal = {
-      ...deal,
-      investorType: type,
-    };
-    try {
-      await persistDeal(updatedDeal);
-    } catch (e) {
-      console.error("Error saving deal:", e);
-      showToast("Failed to update investor structure");
-      return;
-    }
-
-    const activity: DealActivity = {
-      id: `act-${Date.now()}`,
-      dealId: deal.id,
-      companyId: tenant?.id || '',
-      type: 'note',
-      text: `Investor structure set to: ${type}`,
-      loggedByName: user?.name || 'IRM User',
-      loggedByRole: 'IRM',
-      timestamp: new Date().toISOString(),
-    };
-    storageService.addDealActivity(activity);
-    await apiAddDealActivity(activity).catch(console.error);
-
-    loadData();
-    showToast(`Investor structure for "${deal.customerName}" set to ${type}`);
-  };
 
   const handleAdvanceToConverted = async (deal: Deal) => {
     // 1. Create or link Investor record in DB with stable ID
@@ -411,8 +399,11 @@ export const OpportunitiesPage: React.FC = () => {
       return false;
     });
 
+    const isKnownInvestorId = Boolean(linkedInvestorId && investors.some(inv => String(inv.id) === String(linkedInvestorId)));
+    const targetInvestorId = existingInv ? existingInv.id : (isKnownInvestorId ? linkedInvestorId : '');
+
     const investorPayload: Investor = {
-      id: existingInv ? existingInv.id : linkedInvestorId,
+      id: targetInvestorId,
       companyId: tenant?.id || '',
       name: deal.customerName,
       phone: deal.phone || '',
@@ -545,78 +536,184 @@ export const OpportunitiesPage: React.FC = () => {
     showToast(`✓ Investment amount ₹${numericAmount.toLocaleString('en-IN')} confirmed for "${detailDeal.customerName}"`);
   };
 
-  const getDealKycStatus = (deal: Deal): 'Pending' | 'Partially Completed' | 'Completed' => {
-    // 1. Prefer DB-sourced status (persists across refresh)
-    if (deal.kycStatus === 'Completed') return 'Completed';
-    if (deal.kycStatus === 'Partially Completed') return 'Partially Completed';
-    if (deal.kycStatus === 'Pending') return 'Pending';
+  const getDealKycStatus = (deal: Deal, liveKyc?: any): 'Pending' | 'Partially Completed' | 'Submitted' | 'Verified' | 'Wrong' => {
+    // 1. Prefer DB-sourced status from deal or live KYC record
+    const raw = (deal.kycStatus || liveKyc?.status || '').toString().toLowerCase();
+    if (raw === 'verified' || raw === 'completed' || raw === 'approved' || raw === '3') return 'Verified';
+    if (raw === 'wrong' || raw === 'rejected' || raw === '4') return 'Wrong';
+    if (raw === 'submitted' || raw === 'pending_review' || raw === 'under_review' || raw === '2') return 'Submitted';
+    if (raw === 'partially completed' || raw === 'in_progress' || raw === '1') return 'Partially Completed';
 
-    // 2. Fallback: check localStorage (set when customer submits KYC form)
-    const rawStatus = localStorage.getItem(`nexus_kyc_status_${deal.id}`);
-    if (rawStatus === 'Completed' || rawStatus === 'Submitted for Review' || rawStatus === 'SEBI KYC Validated') {
-      return 'Completed';
-    }
-    if (rawStatus === 'Partially Completed') return 'Partially Completed';
-    if (rawStatus === 'Pending') return 'Pending';
-
-    // 3. Fallback: check localStorage KYC form data completeness
-    const savedDataStr = localStorage.getItem(`nexus_kyc_data_${deal.id}`);
-    if (savedDataStr) {
-      try {
-        const data = JSON.parse(savedDataStr);
-        if (data && typeof data === 'object') {
-          const isAllFilled =
-            Boolean(data.investorName?.trim()) &&
-            Boolean(data.panNumber?.trim()) &&
-            Boolean(data.bankAccountNumber?.trim() || data.accountNumber?.trim()) &&
-            Boolean(data.bankIfsc?.trim() || data.ifscCode?.trim()) &&
-            (Boolean(data.dematDoc) || data.hasNoDemat) &&
-            Boolean(data.nominees && data.nominees.length > 0 && data.nominees[0]?.name?.trim());
-
-          if (isAllFilled) return 'Completed';
-
-          const isPartiallyFilled =
-            Boolean(data.panNumber?.trim()) ||
-            Boolean(data.aadhaarNumber?.trim()) ||
-            Boolean(data.bankAccountNumber?.trim() || data.accountNumber?.trim()) ||
-            Boolean(data.aadhaarDoc) ||
-            Boolean(data.panDoc);
-
-          if (isPartiallyFilled) return 'Partially Completed';
-        }
-      } catch { }
-    }
-
-    // 4. Fallback: kycValidated flag on deal object
-    if ((deal as any).kycValidated === true) return 'Completed';
+    // 2. kycValidated flag
+    if ((deal as any).kycValidated === true) return 'Verified';
 
     return 'Pending';
   };
 
-  const getKycFormData = (dealId: string) => {
-    const raw = localStorage.getItem(`nexus_kyc_data_${dealId}`);
-    if (!raw) return null;
-    try {
-      const data = JSON.parse(raw);
-      if (!data || typeof data !== 'object') return null;
-      const hasContent = Object.entries(data).some(([k, val]) => {
-        if (k === 'hasNoDemat' && val === true) return true;
-        if (Array.isArray(val)) {
-          return val.length > 0 && val.some((item: any) => item && (item.name?.trim() || item.relationship));
-        }
-        if (typeof val === 'object' && val !== null) {
-          return Boolean((val as any).name);
-        }
-        if (typeof val === 'string') {
-          return val.trim() !== '' && val.trim() !== '+91';
-        }
-        return Boolean(val);
-      });
-      return hasContent ? data : null;
-    } catch {
-      return null;
+  const mapKycDtoToFormData = (dto: any) => {
+    if (!dto) return null;
+    let parsedNominees: any[] = [];
+    if (dto.nomineesJson) {
+      try {
+        parsedNominees = typeof dto.nomineesJson === 'string' ? JSON.parse(dto.nomineesJson) : dto.nomineesJson;
+      } catch {
+        parsedNominees = [];
+      }
+    } else if (Array.isArray(dto.nominees)) {
+      parsedNominees = dto.nominees;
     }
+
+    return {
+      investorName: dto.investorName || '',
+      phone: dto.phone || '',
+      email: dto.email || '',
+      gender: dto.gender || '',
+      investorType: dto.investorType || '',
+      residentType: dto.residentType || dto.residentialStatus || '',
+      occupation: dto.occupation || '',
+      panNumber: dto.panNumber || '',
+      nameAsPerPan: dto.nameAsPerPan || '',
+      aadhaarNumber: dto.aadhaarNumber || '',
+      fatherName: dto.fatherName || '',
+      dob: dto.dateOfBirth || dto.dob || '',
+      city: dto.city || '',
+      state: dto.state || '',
+      pincode: dto.pincode || '',
+      address: [dto.addressLine1, dto.addressLine2].filter(Boolean).join(', ') || dto.address || '',
+      bankName: dto.bankName || '',
+      branchName: dto.branchName || '',
+      accountNumber: dto.accountNumber || '',
+      ifscCode: dto.ifscCode || '',
+      accountType: dto.accountType || 'Savings',
+      accountHolderName: dto.accountHolderName || dto.investorName || '',
+      dematAccountNumber: dto.dematAccountNumber || '',
+      dpId: dto.dpId || dto.dematDpId || '',
+      dematDpId: dto.dpId || dto.dematDpId || '',
+      dematClientId: dto.dematClientId || '',
+      dematDepository: dto.dematDepository || '',
+      hasNoDemat: dto.hasNoDemat === true || (!dto.dematAccountNumber && !dto.dpId),
+      nominees: Array.isArray(parsedNominees) ? parsedNominees : [],
+      panDoc: dto.panDocumentUrl ? { name: 'PAN Card Copy', url: dto.panDocumentUrl } : null,
+      aadhaarDoc: dto.aadhaarDocumentUrl ? { name: 'Aadhaar Card Copy', url: dto.aadhaarDocumentUrl } : null,
+      bankProofDoc: dto.bankChequeUrl ? { name: 'Bank Cheque / Statement', url: dto.bankChequeUrl } : null,
+      dematDoc: dto.dematDocumentUrl ? { name: 'Demat Statement Proof', url: dto.dematDocumentUrl } : null,
+      status: dto.status || '',
+    };
   };
+
+  // ── Fetch live KYC details directly from PostgreSQL database ──────────────────
+  useEffect(() => {
+    if (!detailDeal) {
+      setLiveKycData(null);
+      setIsKycLoading(false);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const fetchLiveKyc = async () => {
+      setIsKycLoading(true);
+      try {
+        let kycRecord: any = null;
+
+        // 1. Direct KYC ID on deal if present
+        const kycId = (detailDeal as any).kycId || (detailDeal as any).kycRecordId;
+        if (kycId) {
+          try {
+            const res = await fetch(apiUrl(`/irm/kyc/${kycId}`), { headers: getAuthHeaders() });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && json.data) kycRecord = json.data;
+            }
+          } catch {}
+        }
+
+        // 2. Fetch by numeric customer ID / investor ID
+        if (!kycRecord && detailDeal.customerId) {
+          const numId = parseInt(String(detailDeal.customerId).replace(/\D/g, ''), 10);
+          if (numId > 0) {
+            try {
+              const res = await fetch(apiUrl(`/irm/kyc/${numId}`), { headers: getAuthHeaders() });
+              if (res.ok) {
+                const json = await res.json();
+                if (json.success && json.data) kycRecord = json.data;
+              }
+            } catch {}
+          }
+        }
+
+        // 3. Fetch by email
+        if (!kycRecord && detailDeal.email && detailDeal.email.trim()) {
+          try {
+            const res = await fetch(apiUrl(`/irm/kyc/by-email?email=${encodeURIComponent(detailDeal.email.trim())}`), { headers: getAuthHeaders() });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && json.data) kycRecord = json.data;
+            }
+          } catch {}
+        }
+
+        // 4. Fetch by phone
+        if (!kycRecord && detailDeal.phone && detailDeal.phone.trim()) {
+          try {
+            const res = await fetch(apiUrl(`/irm/kyc/by-phone?phone=${encodeURIComponent(detailDeal.phone.trim())}`), { headers: getAuthHeaders() });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && json.data) kycRecord = json.data;
+            }
+          } catch {}
+        }
+
+        // 5. Fallback: match from all KYCs in DB
+        if (!kycRecord) {
+          try {
+            const res = await fetch(apiUrl('/irm/kyc/all'), { headers: getAuthHeaders() });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && Array.isArray(json.data)) {
+                const pDigits = (detailDeal.phone || '').replace(/\D/g, '').slice(-10);
+                const cleanMail = (detailDeal.email || '').trim().toLowerCase();
+                const cleanName = (detailDeal.customerName || '').trim().toLowerCase();
+
+                const matchedSummary = json.data.find((k: any) => {
+                  const kp = (k.phone || '').replace(/\D/g, '').slice(-10);
+                  if (pDigits && kp && pDigits === kp) return true;
+                  const km = (k.email || '').trim().toLowerCase();
+                  if (cleanMail && km && cleanMail === km) return true;
+                  const kn = (k.investorName || '').trim().toLowerCase();
+                  if (cleanName && kn && cleanName === kn) return true;
+                  return false;
+                });
+
+                if (matchedSummary?.id) {
+                  const detailRes = await fetch(apiUrl(`/irm/kyc/${matchedSummary.id}`), { headers: getAuthHeaders() });
+                  if (detailRes.ok) {
+                    const detailJson = await detailRes.json();
+                    if (detailJson.success && detailJson.data) kycRecord = detailJson.data;
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
+
+        if (!isCancelled) {
+          setLiveKycData(kycRecord ? mapKycDtoToFormData(kycRecord) : null);
+        }
+      } catch (err) {
+        console.error('Failed to load live KYC form details:', err);
+      } finally {
+        if (!isCancelled) {
+          setIsKycLoading(false);
+        }
+      }
+    };
+
+    fetchLiveKyc();
+    return () => {
+      isCancelled = true;
+    };
+  }, [detailDeal?.id, detailDeal?.phone, detailDeal?.email, detailDeal?.customerName]);
 
   const irmColumns: Column<Deal>[] = [
     {
@@ -651,11 +748,19 @@ export const OpportunitiesPage: React.FC = () => {
       key: 'investmentRange',
       header: 'Investment Capacity',
       sortable: true,
-      render: deal => (
-        <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
-          {deal.investmentRange || '—'}
-        </span>
-      ),
+      render: deal => {
+        const cap = deal.investmentRange;
+        const hasCap = cap && cap !== '—' && cap.trim() !== '' && cap.toLowerCase() !== 'not specified';
+        return hasCap ? (
+          <span style={{ color: '#10b981', fontWeight: 800, fontSize: 13 }}>
+            {cap}
+          </span>
+        ) : (
+          <span className="not-specified-badge">
+            Not Specified
+          </span>
+        );
+      },
     },
     {
       key: 'value',
@@ -668,8 +773,8 @@ export const OpportunitiesPage: React.FC = () => {
             {formatCurrency(Number(val))}
           </span>
         ) : (
-          <span style={{ color: 'var(--text-muted, #94a3b8)', fontWeight: 600, fontSize: 13 }}>
-            —
+          <span className="not-specified-badge">
+            Not Specified
           </span>
         );
       },
@@ -677,36 +782,17 @@ export const OpportunitiesPage: React.FC = () => {
     {
       key: 'preferredAssetClass',
       header: 'Preferred Asset Class',
-      render: deal => (
-        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {deal.preferredAssetClass || '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'investorType',
-      header: 'Investor Structure (AIF / Co-AIF)',
       render: deal => {
-        const currentType = deal.investorType || '';
-        return (
-          <div className="irm-investor-type-toggle" onClick={e => e.stopPropagation()}>
-            <button
-              type="button"
-              className={`irm-type-btn ${currentType === 'AIF' ? 'active' : ''}`}
-              title="Classify as Direct AIF Investor"
-              onClick={() => handleSetInvestorType(deal, 'AIF')}
-            >
-              AIF
-            </button>
-            <button
-              type="button"
-              className={`irm-type-btn ${currentType === 'Co-AIF' ? 'active' : ''}`}
-              title="Classify as Co-Investment AIF Investor"
-              onClick={() => handleSetInvestorType(deal, 'Co-AIF')}
-            >
-              Co-AIF
-            </button>
-          </div>
+        const pref = deal.preferredAssetClass;
+        const hasPref = pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified';
+        return hasPref ? (
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            {pref}
+          </span>
+        ) : (
+          <span className="not-specified-badge">
+            Not Specified
+          </span>
         );
       },
     },
@@ -731,33 +817,35 @@ export const OpportunitiesPage: React.FC = () => {
                 type="button"
                 className="btn btn-sm btn-ghost btn-icon"
                 title={`Call ${deal.customerName}`}
-                onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.id)}
+                onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'opportunities')}
               >
                 <Phone size={14} color="#059669" />
               </button>
             )}
-            <button
-              type="button"
-              className="irm-convert-btn"
-              title={
-                isConfirmed
-                  ? 'Convert deal (Mandate executed & funds committed)'
-                  : 'Set the investment amount before converting.'
-              }
-              disabled={!isConfirmed}
-              onClick={e => {
-                e.stopPropagation();
-                if (isConfirmed) {
-                  handleAdvanceToConverted(deal);
+            {!isGhlAdmin && (
+              <button
+                type="button"
+                className="irm-convert-btn"
+                title={
+                  isConfirmed
+                    ? 'Convert deal (Mandate executed & funds committed)'
+                    : 'Set the investment amount before converting.'
                 }
-              }}
-              style={{
-                opacity: isConfirmed ? 1 : 0.45,
-                cursor: isConfirmed ? 'pointer' : 'not-allowed',
-              }}
-            >
-              <CheckCircle size={13} /> Convert
-            </button>
+                disabled={!isConfirmed}
+                onClick={e => {
+                  e.stopPropagation();
+                  if (isConfirmed) {
+                    handleAdvanceToConverted(deal);
+                  }
+                }}
+                style={{
+                  opacity: isConfirmed ? 1 : 0.45,
+                  cursor: isConfirmed ? 'pointer' : 'not-allowed',
+                }}
+              >
+                <CheckCircle size={13} /> Convert
+              </button>
+            )}
           </div>
         );
       },
@@ -794,12 +882,14 @@ export const OpportunitiesPage: React.FC = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            <Briefcase size={24} color={isGhlIrm ? '#ec4899' : '#0284c7'} />{' '}
-            {isGhlIrm ? 'Investment Opportunities & Term Sheets' : 'Investment Opportunities Syndicate'}
+            <Briefcase size={24} color={(isGhlIrm || isGhlAdmin) ? '#ec4899' : '#0284c7'} />{' '}
+            {(isGhlIrm || isGhlAdmin) ? 'Investment Opportunities & Term Sheets' : 'Investment Opportunities Syndicate'}
           </h1>
           <p className="page-subtitle">
-            {isGhlIrm
-              ? 'Pitch deck shared, term sheet under review, legal team active. Classify investor structure (AIF vs Co-AIF).'
+            {isGhlAdmin
+              ? 'Company-wide oversight of active investment opportunities across all IRMs before mandate execution and investor conversion.'
+              : isGhlIrm
+              ? 'Pitch deck shared, term sheet under review, legal team active.'
               : `Commercial real-estate fractional tranches, warehousing yields, and capital commitments for ${tenant?.name}.`}
           </p>
         </div>
@@ -836,7 +926,7 @@ export const OpportunitiesPage: React.FC = () => {
       )}
 
       {/* ── Data table ───────────────────────────────────────────────────── */}
-      {isGhlIrm ? (
+      {(isGhlIrm || isGhlAdmin) ? (
         <DataTable
           columns={irmColumns}
           data={irmDeals}
@@ -1149,13 +1239,15 @@ export const OpportunitiesPage: React.FC = () => {
           }
         >
           {(() => {
-            const kycStatus = getDealKycStatus(detailDeal);
+            const kycStatus = getDealKycStatus(detailDeal, liveKycData);
             const kycBadgeStyles = {
-              Completed: { bg: '#ecfdf5', color: '#059669', border: '#a7f3d0' },
+              Verified: { bg: '#ecfdf5', color: '#059669', border: '#a7f3d0' },
+              Submitted: { bg: '#eff6ff', color: '#2563eb', border: '#bfdbfe' },
               'Partially Completed': { bg: '#fffbeb', color: '#d97706', border: '#fde68a' },
+              Wrong: { bg: '#fef2f2', color: '#dc2626', border: '#fecaca' },
               Pending: { bg: '#f8fafc', color: '#64748b', border: '#cbd5e1' },
             }[kycStatus];
-            const kycData = getKycFormData(detailDeal.id);
+            const kycData = liveKycData;
             const isConfirmed = Boolean(detailDeal.investmentAmountConfirmed) && !isEditingAmount;
 
             return (
@@ -1197,7 +1289,11 @@ export const OpportunitiesPage: React.FC = () => {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ color: 'var(--text-muted)' }}>Preferred Asset Class:</span>
-                        <strong style={{ color: 'var(--text-primary)' }}>{detailDeal.preferredAssetClass || '—'}</strong>
+                        {detailDeal.preferredAssetClass && detailDeal.preferredAssetClass !== '—' ? (
+                          <strong style={{ color: 'var(--text-primary)' }}>{detailDeal.preferredAssetClass}</strong>
+                        ) : (
+                          <span className="not-specified-badge">Not Specified</span>
+                        )}
                       </div>
                       {detailDeal.customerId && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1290,7 +1386,30 @@ export const OpportunitiesPage: React.FC = () => {
                       )}
                     </div>
 
-                    {isConfirmed ? (
+                    {isGhlAdmin ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ flex: 1, position: 'relative' }}>
+                          <input
+                            id="opp-admin-amount"
+                            name="adminAmount"
+                            aria-label="Investment Amount"
+                            type="text"
+                            readOnly
+                            className="form-input"
+                            value={detailDeal.value && Number(detailDeal.value) > 0 ? formatCurrency(detailDeal.value) : 'Not Specified'}
+                            style={{
+                              width: '100%',
+                              fontSize: 14,
+                              fontWeight: 700,
+                              color: detailDeal.value && Number(detailDeal.value) > 0 ? '#10b981' : 'var(--text-muted)',
+                              height: 38,
+                              backgroundColor: 'var(--bg-surface-hover, #f8fafc)',
+                              cursor: 'default',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : isConfirmed ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{ flex: 1, position: 'relative' }}>
                           <input
@@ -1364,11 +1483,44 @@ export const OpportunitiesPage: React.FC = () => {
 
                 {/* Form Details Section */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
-                    Form Details
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>Form Details</span>
+                    {liveKycData && (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <CheckCircle size={12} /> Database Verified
+                      </span>
+                    )}
                   </div>
 
-                  {!kycData ? (
+                  {isKycLoading ? (
+                    <div
+                      style={{
+                        padding: '32px',
+                        borderRadius: 8,
+                        background: 'var(--bg-surface-hover, #f8fafc)',
+                        border: '1px dashed var(--border-color, #cbd5e1)',
+                        color: 'var(--text-secondary, #64748b)',
+                        fontSize: 13,
+                        textAlign: 'center',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: 10,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: '50%',
+                          border: '2px solid var(--border-color, #cbd5e1)',
+                          borderTopColor: '#3b82f6',
+                          animation: 'spin 1s linear infinite',
+                        }}
+                      />
+                      <span>Loading KYC details from database...</span>
+                    </div>
+                  ) : !kycData ? (
                     <div
                       style={{
                         padding: '24px',

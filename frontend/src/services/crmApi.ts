@@ -223,6 +223,9 @@ export interface LogCallPayload {
   notes: string;
   leadId?: number | string;
   customerId?: number | string;
+  module?: string;
+  reason?: string;
+  twilioCallSid?: string;
 }
 
 // ==========================================
@@ -362,6 +365,9 @@ export const callsApi = {
       ...payload,
       leadId: payload.leadId ? Number(payload.leadId) : undefined,
       customerId: payload.customerId ? Number(payload.customerId) : undefined,
+      module: payload.module,
+      reason: payload.reason,
+      twilioCallSid: payload.twilioCallSid,
     };
     const res = await apiClient.post<ApiResponse<CallRecordDto>>('/sales-executive/calls', formatted);
     return res.data;
@@ -378,9 +384,47 @@ export const callsApi = {
     followupAt?: string;
     leadId?: number;
     customerId?: number;
+    module?: string;
+    reason?: string;
   }): Promise<CallRecordDto> {
     const res = await apiClient.post<ApiResponse<CallRecordDto>>('/sales-executive/calls/disposition', payload);
     return res.data;
+  },
+
+  async getIrmOtherRecords(params?: { module?: string; search?: string }): Promise<any[]> {
+    try {
+      const res = await apiClient.get<ApiResponse<any[]>>('/irm/other', params);
+      return res.data || [];
+    } catch {
+      const fallbackRes = await apiClient.get<ApiResponse<any[]>>('/sales-executive/calls/other', params);
+      return fallbackRes.data || [];
+    }
+  },
+
+  async getSalesExecutiveCallOutcomes(): Promise<string[]> {
+    try {
+      const res = await apiClient.get<ApiResponse<string[]>>('/sales-executive/calls/outcomes');
+      return res.data || [];
+    } catch {
+      return ['Interested', 'Follow-up Required', 'Call Back', 'Not Interested', 'Wrong Number', 'No Response'];
+    }
+  },
+
+  async getIrmCallOutcomes(module?: string): Promise<Record<string, string[]>> {
+    try {
+      const res = await apiClient.get<ApiResponse<Record<string, string[]>>>('/irm/call-outcomes', module ? { module } : undefined);
+      return res.data || {};
+    } catch {
+      return {
+        my_leads: ['Follow-up Required', 'No Response', 'Call Back'],
+        follow_up: ['Follow-up Required', 'Other', 'No Response', 'Call Back', 'Ready for KYC'],
+        kyc: ['Contacted', 'Other', 'No Response', 'Call Back'],
+        opportunities: ['Contacted', 'Other', 'No Response', 'Call Back'],
+        investor_360: ['Contacted', 'Other', 'No Response', 'Call Back'],
+        all_leads: ['Follow-up Required', 'Call Back', 'Ready for KYC', 'Other', 'No Response'],
+        other: ['Call Back', 'Other', 'No Response', 'Follow-up Required', 'Ready for KYC'],
+      };
+    }
   },
 };
 

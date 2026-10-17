@@ -24,6 +24,13 @@ public class ExceptionHandlingMiddleware
         catch (Exception ex)
         {
             _logger.LogError(ex, "An unhandled exception occurred: {Message}", ex.Message);
+            try
+            {
+                var innerMsg = ex.InnerException != null ? $" | Inner: {ex.InnerException.Message}" : "";
+                var logLine = $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {context.Request.Method} {context.Request.Path}: {ex.Message}{innerMsg}\n{ex.StackTrace}\n\n";
+                File.AppendAllText("error.log", logLine);
+            }
+            catch { }
             await HandleExceptionAsync(context, ex);
         }
     }
@@ -33,9 +40,17 @@ public class ExceptionHandlingMiddleware
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
 
+        var errors = new List<string> { exception.Message };
+        var inner = exception.InnerException;
+        while (inner != null)
+        {
+            errors.Add(inner.Message);
+            inner = inner.InnerException;
+        }
+
         var response = ApiResponse<object>.FailureResult(
-            "An unexpected error occurred. Please try again later.",
-            new List<string> { "Internal server error." }
+            exception.Message,
+            errors
         );
 
         var json = JsonSerializer.Serialize(response, new JsonSerializerOptions

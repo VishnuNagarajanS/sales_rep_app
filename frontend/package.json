@@ -1,7 +1,7 @@
 {
-  "name": "temp_app",
+  "name": "nexussales-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --mode dev",
@@ -19,7 +19,8 @@
     "ogl": "^1.0.11",
     "papaparse": "^5.7.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
@@ -27,7 +28,10 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "node-fetch": "^3.3.2",
     "oxlint": "^1.79.0",
+    "pg": "^8.23.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.2",
     "vitest": "^5.0.2"

@@ -50,6 +50,8 @@ public class ApplicationDbContext : DbContext
     public DbSet<UserMfaSetting> UserMfaSettings => Set<UserMfaSetting>();
     public DbSet<MfaRecoveryCode> MfaRecoveryCodes => Set<MfaRecoveryCode>();
     public DbSet<MfaChallenge> MfaChallenges => Set<MfaChallenge>();
+    public DbSet<PlatformTicket> PlatformTickets => Set<PlatformTicket>();
+    public DbSet<PlatformTicketEvent> PlatformTicketEvents => Set<PlatformTicketEvent>();
 
     // IRM Entities
     public DbSet<Investor> Investors => Set<Investor>();
@@ -57,6 +59,19 @@ public class ApplicationDbContext : DbContext
     public DbSet<InvestmentOpportunity> InvestmentOpportunities => Set<InvestmentOpportunity>();
     public DbSet<KycOtpVerification> KycOtpVerifications => Set<KycOtpVerification>();
     public DbSet<IrmCoverageAssignment> IrmCoverageAssignments => Set<IrmCoverageAssignment>();
+    public DbSet<IrmPipelineCard> IrmPipelineCards => Set<IrmPipelineCard>();
+    public DbSet<WorkHandover> WorkHandovers => Set<WorkHandover>();
+    public DbSet<WorkHandoverItem> WorkHandoverItems => Set<WorkHandoverItem>();
+    public DbSet<LeaveRequest> LeaveRequests => Set<LeaveRequest>();
+    public DbSet<LeavePolicy> LeavePolicies => Set<LeavePolicy>();
+    public DbSet<LeaveRequestEvent> LeaveRequestEvents => Set<LeaveRequestEvent>();
+    public DbSet<AiChatLog> AiChatLogs => Set<AiChatLog>();
+
+    // Team Chat Entities
+    public DbSet<ChatConversation> ChatConversations => Set<ChatConversation>();
+    public DbSet<ChatParticipant> ChatParticipants => Set<ChatParticipant>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
 
     public override int SaveChanges()
     {
@@ -95,8 +110,100 @@ public class ApplicationDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<AiChatLog>()
+            .HasIndex(a => new { a.CompanyId, a.AskedAt });
+        modelBuilder.Entity<AiChatLog>()
+            .Property(a => a.Question)
+            .HasMaxLength(500);
+
         // Apply entity configurations
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
+
+        // Handover relationships on entities
+        modelBuilder.Entity<Lead>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Customer>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Followup>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GhlDeal>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GhlInvestmentOpportunity>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Consultation>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Investor>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<InvestorKyc>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<IrmPipelineCard>(b =>
+        {
+            b.HasOne(x => x.Handover).WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(x => x.OriginalOwner).WithMany().HasForeignKey(x => x.OriginalOwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<WorkHandover>(b =>
+        {
+            b.HasOne(x => x.LeaveRequest)
+             .WithMany()
+             .HasForeignKey(x => x.LeaveRequestId)
+             .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<LeaveRequest>(b =>
+        {
+            b.HasOne(x => x.WorkHandover)
+             .WithMany()
+             .HasForeignKey(x => x.WorkHandoverId)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasOne(x => x.DecidedBy)
+             .WithMany()
+             .HasForeignKey(x => x.DecidedById)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasOne(x => x.CancelledBy)
+             .WithMany()
+             .HasForeignKey(x => x.CancelledById)
+             .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasMany(x => x.Events)
+             .WithOne(e => e.LeaveRequest)
+             .HasForeignKey(e => e.LeaveRequestId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LeaveRequestEvent>(b =>
+        {
+            b.HasOne(e => e.Actor)
+             .WithMany()
+             .HasForeignKey(e => e.ActorId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
 
         // Seed initial roles, tenants, and demo users
         SeedData(modelBuilder);
@@ -105,12 +212,11 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Ignore<GhlInvestor>();
         modelBuilder.Ignore<InvestorCall>();
         modelBuilder.Ignore<OpportunityPitch>();
-        modelBuilder.Ignore<IrmPipelineCard>();
     }
 
     private static void SeedData(ModelBuilder modelBuilder)
     {
-        // 1. Roles (Integer IDs 1, 2, 3, 4)
+        // 1. Roles (Integer IDs 1, 2, 3, 4 - Strictly 4 Roles)
         var superAdminRoleId = 1;
         var companyAdminRoleId = 2;
         var salesExecutiveRoleId = 3;
@@ -391,75 +497,6 @@ public class ApplicationDbContext : DbContext
             }
         );
 
-        modelBuilder.Entity<CarrierSettings>().HasData(
-            new CarrierSettings
-            {
-                Id = 1,
-                PrimaryCarrier = "Twilio Elastic SIP Trunking (Mumbai AP-South)",
-                SecondaryCarrier = "Exotel Cloud Gateway (Failover Redundant)",
-                SipRealm = "sip.trunk.nexusplatform.io:5060",
-                WebrtcGatewayUrl = "wss://webrtc.nexusplatform.io/gateway",
-                RecordingRetentionDays = 180,
-                MaxConcurrentChannels = 100,
-                EmergencyRoutingEnabled = true,
-                WhisperAiModel = "OpenAI Whisper-Large-v3 (Self-Hosted on GPU cluster)",
-                PrimaryGatewayHost = "sip.trunk.nexusplatform.io",
-                FailoverGatewayHost = "gateway.exotel.com",
-                Status = "Active",
-                TestStatus = "Success",
-                LastTestedAt = new DateTime(2026, 9, 26, 10, 0, 0, DateTimeKind.Utc),
-                UpdatedAt = new DateTime(2026, 9, 26, 10, 0, 0, DateTimeKind.Utc)
-            }
-        );
-
-        modelBuilder.Entity<TenantDidMapping>().HasData(
-            new TenantDidMapping
-            {
-                Id = 1,
-                PhoneNumber = "+91 80 4700 8001",
-                TenantId = 1,
-                RoutingStrategy = "Skill/Priority",
-                QueueName = "HNW Wealth Advisory Queue",
-                EnableRecording = true,
-                EnableAiWhisper = true,
-                Status = "Online",
-                ChannelsCount = 8,
-                Notes = "Primary inbound trunk for HNW wealth consultations",
-                AllocatedAt = new DateTime(2026, 1, 10, 10, 0, 0, DateTimeKind.Utc),
-                CreatedAt = new DateTime(2026, 1, 10, 10, 0, 0, DateTimeKind.Utc)
-            },
-            new TenantDidMapping
-            {
-                Id = 2,
-                PhoneNumber = "+91 80 4700 8002",
-                TenantId = 2,
-                RoutingStrategy = "Round-Robin",
-                QueueName = "Plotted Enclaves Telecallers",
-                EnableRecording = true,
-                EnableAiWhisper = true,
-                Status = "Online",
-                ChannelsCount = 12,
-                Notes = "Buyer inquiry hotline for gated community layouts",
-                AllocatedAt = new DateTime(2026, 1, 15, 14, 30, 0, DateTimeKind.Utc),
-                CreatedAt = new DateTime(2026, 1, 15, 14, 30, 0, DateTimeKind.Utc)
-            },
-            new TenantDidMapping
-            {
-                Id = 3,
-                PhoneNumber = "+91 80 4700 8003",
-                TenantId = null,
-                RoutingStrategy = "Round-Robin",
-                QueueName = "Available DID Reserve",
-                EnableRecording = false,
-                EnableAiWhisper = false,
-                Status = "Reserved",
-                ChannelsCount = 4,
-                Notes = "Spare DID number for next enterprise onboarding",
-                AllocatedAt = new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc),
-                CreatedAt = new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc)
-            }
-        );
-
         modelBuilder.Entity<BroadcastAnnouncement>().HasData(
             new BroadcastAnnouncement
             {
@@ -487,5 +524,67 @@ public class ApplicationDbContext : DbContext
                 UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
         );
+
+        // ── Team Chat Relationships & Indices ──────────────────────────────────
+        modelBuilder.Entity<ChatConversation>(b =>
+        {
+            b.HasKey(c => c.Id);
+            b.HasIndex(c => new { c.CompanyId, c.Type });
+        });
+
+        modelBuilder.Entity<ChatParticipant>(b =>
+        {
+            b.HasKey(p => p.Id);
+            b.HasIndex(p => new { p.ConversationId, p.UserId }).IsUnique();
+            b.HasOne(p => p.Conversation)
+             .WithMany(c => c.Participants)
+             .HasForeignKey(p => p.ConversationId)
+             .OnDelete(DeleteBehavior.Cascade);
+            b.HasOne(p => p.User)
+             .WithMany()
+             .HasForeignKey(p => p.UserId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ChatMessage>(b =>
+        {
+            b.HasKey(m => m.Id);
+            b.HasIndex(m => new { m.ConversationId, m.CreatedAt });
+            b.HasOne(m => m.Conversation)
+             .WithMany(c => c.Messages)
+             .HasForeignKey(m => m.ConversationId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ChatAttachment>(b =>
+        {
+            b.HasKey(a => a.Id);
+            b.HasIndex(a => a.MessageId);
+            b.HasOne(a => a.Message)
+             .WithMany(m => m.Attachments)
+             .HasForeignKey(a => a.MessageId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PlatformTicket>(b =>
+        {
+            b.ToTable("platform_tickets");
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => x.TicketNumber).IsUnique();
+            b.HasIndex(x => x.Status);
+            b.HasIndex(x => x.Priority);
+            b.HasIndex(x => x.TenantId);
+            b.HasIndex(x => x.CreatedAt);
+            b.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.SetNull);
+            b.HasMany(x => x.Timeline).WithOne(x => x.Ticket).HasForeignKey(x => x.TicketId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PlatformTicketEvent>(b =>
+        {
+            b.ToTable("platform_ticket_events");
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => x.TicketId);
+            b.HasIndex(x => x.CreatedAt);
+        });
     }
 }

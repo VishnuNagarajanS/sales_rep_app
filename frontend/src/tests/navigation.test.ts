@@ -39,6 +39,7 @@ describe('Navigation and Route Helper Logic', () => {
       expect(routeToPath('company-users', false)).toBe('/users');
       expect(routeToPath('company-settings', false)).toBe('/settings');
       expect(routeToPath('company-audit', false)).toBe('/audit');
+      expect(routeToPath('irm-other', false)).toBe('/other');
     });
 
     it('correctly resolves URL paths to company user routes', () => {
@@ -48,6 +49,7 @@ describe('Navigation and Route Helper Logic', () => {
       expect(pathToRoute('/users', false)).toBe('company-users');
       expect(pathToRoute('/settings', false)).toBe('company-settings');
       expect(pathToRoute('/audit', false)).toBe('company-audit');
+      expect(pathToRoute('/other', false)).toBe('irm-other');
     });
   });
 

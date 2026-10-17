@@ -14,6 +14,10 @@ namespace backend.DTOs.Documents
         public string EntityType { get; set; } = null!;
         public string EntityId { get; set; } = null!;
         public string? FileUrl { get; set; }
+        public string TargetAudience { get; set; } = "all_users";
+        public bool IsPlatformShared { get; set; } = false;
+        public string? Description { get; set; }
+        public string? TargetTenantName { get; set; }
     }
 
     public class CreateDocumentDto
@@ -24,6 +28,9 @@ namespace backend.DTOs.Documents
         public string? Category { get; set; }
         public string? EntityType { get; set; }
         public string? EntityId { get; set; }
+        public string? TargetAudience { get; set; }
+        public bool? IsPlatformShared { get; set; }
+        public string? Description { get; set; }
         public Microsoft.AspNetCore.Http.IFormFile? File { get; set; }
     }
 }

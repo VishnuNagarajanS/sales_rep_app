@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -32,6 +32,24 @@ namespace backend.Data.Migrations
                 {
                     table.PrimaryKey("PK_Documents", x => x.Id);
                 });
+
+            migrationBuilder.Sql(@"
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'roles') THEN
+                        UPDATE roles SET ""Code"" = 'temp_' || ""Id"" WHERE ""Id"" IN (1, 2, 3, 4, 5);
+
+                        INSERT INTO roles (""Id"", ""Code"", ""Name"", ""CreatedAt"", ""Permissions"")
+                        VALUES
+                            (1, 'temp_1', 'Super Admin', NOW(), '{}'),
+                            (2, 'temp_2', 'Company Admin', NOW(), '{}'),
+                            (3, 'temp_3', 'Sales Executive', NOW(), '{}'),
+                            (4, 'temp_4', 'IRM', NOW(), '{}'),
+                            (5, 'temp_5', 'Sales Manager', NOW(), '{}')
+                        ON CONFLICT (""Id"") DO NOTHING;
+                    END IF;
+                END $$;
+            ");
 
             migrationBuilder.UpdateData(
                 table: "roles",

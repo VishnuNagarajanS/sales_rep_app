@@ -397,13 +397,6 @@ export const CallCenterPage: React.FC = () => {
                   Today's pending follow-ups and high-priority leads awaiting outreach
                 </p>
               </div>
-              <button
-                className="btn btn-ghost btn-sm"
-                style={{ color: 'var(--primary-600)' }}
-                onClick={() => simulateIncomingCall('Pravin Godbole', '+91 97410 88223')}
-              >
-                Simulate Call Event
-              </button>
             </div>
 
             {pipelineItems.length === 0 ? (

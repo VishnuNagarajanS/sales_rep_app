@@ -19,9 +19,9 @@ const getPopupPosition = (): PopupPosition => {
         if (['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(parsed)) {
           return parsed as PopupPosition;
         }
-      } catch {}
+      } catch { }
     }
-  } catch {}
+  } catch { }
   return 'top-right';
 };
 
@@ -174,7 +174,7 @@ export const IncomingCallPopup: React.FC = () => {
     };
   }, []);
 
-  if (!activeCall || activeCall.status !== 'ringing') return null;
+  if (!activeCall || activeCall.status !== 'ringing' || activeCall.direction !== 'inbound') return null;
 
   const getPositionStyles = (): React.CSSProperties => {
     switch (popupPosition) {
@@ -278,16 +278,18 @@ export const InCallBar: React.FC = () => {
   const matchedLead = activeCall?.matchedRecord?.type === 'lead'
     ? storageService.getLeads(tenant?.id).find((l: Lead) => l.id === activeCall.matchedRecord?.id)
     : (activeCall?.contactPhone ? storageService.findLeadByPhone(activeCall.contactPhone, tenant?.id) : undefined);
-  const previousAgentName = matchedLead?.assignedAgentName;
+  const previousAgentName = isIrm
+    ? (matchedLead?.assignedByName && matchedLead.assignedByName !== 'Created by IRM' ? matchedLead.assignedByName : (matchedLead?.customFields?.qualifiedByAgentName || matchedLead?.customFields?.assignedByAgentName || undefined))
+    : matchedLead?.assignedAgentName;
 
   const connectOptions = isIrm
     ? (() => {
-        const base = storageService.getAgents(tenant?.id).map((a: { id: string | number; name: string }) => ({ name: a.name, status: 'Available' as const }));
-        if (!previousAgentName) return base;
-        // Move the previously-assigned agent to the top of the list as the default
-        const rest = base.filter((a: { name: string }) => a.name !== previousAgentName);
-        return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
-      })()
+      const base = storageService.getAgents(tenant?.id).map((a: { id: string | number; name: string }) => ({ name: a.name, status: 'Available' as const }));
+      if (!previousAgentName) return base;
+      // Move the previously-assigned agent to the top of the list as the default
+      const rest = base.filter((a: { name: string }) => a.name !== previousAgentName);
+      return [{ name: previousAgentName, status: 'Available' as const, isPrevious: true }, ...rest];
+    })()
     : storageService.getIrms(tenant?.id);
 
   const filteredConnectOptions = connectOptions.filter((o: any) =>
@@ -336,7 +338,10 @@ export const InCallBar: React.FC = () => {
       consultantId: irm.name,
       consultantName: irm.name,
       status: 'Scheduled',
-      agenda: isIrm ? `Connected to Agent: ${reason}` : reason,
+      agenda: isIrm
+        ? `Connected to Agent: ${reason}`
+        : (reason.toLowerCase().includes('connected to irm') ? reason : `Connected to IRM: ${irm.name}. Reason: ${reason}`),
+      referredByAgentName: user.name,
     };
 
     if (tenant.slug === 'ghl' || tenant.id === 't-ghl-01') {
@@ -492,7 +497,14 @@ export const InCallBar: React.FC = () => {
     }
   }, [activeCall]);
 
-  if (!activeCall || activeCall.status !== 'connected') return null;
+  if (
+    !activeCall ||
+    activeCall.status === 'idle' ||
+    activeCall.status === 'ended' ||
+    (activeCall.direction === 'inbound' && activeCall.status === 'ringing')
+  ) {
+    return null;
+  }
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -535,14 +547,27 @@ export const InCallBar: React.FC = () => {
           {/* Pulse dot */}
           <div
             className="incall-minimized-dot"
-            style={activeCall.isSimulated ? { background: '#f59e0b', animation: 'none' } : undefined}
+            style={activeCall.status === 'ringing' ? { background: '#38bdf8' } : (activeCall.isSimulated ? { background: '#f59e0b', animation: 'none' } : undefined)}
           />
 
           {/* Name + timer */}
           <div className="incall-minimized-info">
             <div className="incall-minimized-name">{activeCall.contactName}</div>
-            <div className="incall-minimized-timer" style={activeCall.isSimulated ? { color: '#f59e0b', fontSize: 11 } : undefined}>
-              {activeCall.isSimulated ? 'Simulated (Not Connected)' : formatDuration(activeCall.duration)}
+            <div
+              className="incall-minimized-timer"
+              style={
+                activeCall.status === 'ringing'
+                  ? { color: '#38bdf8', fontSize: 11, fontWeight: 600 }
+                  : activeCall.isSimulated
+                    ? { color: '#f59e0b', fontSize: 11 }
+                    : undefined
+              }
+            >
+              {activeCall.status === 'ringing'
+                ? 'Dialing...'
+                : activeCall.isSimulated
+                  ? `Simulated (${formatDuration(activeCall.duration)})`
+                  : formatDuration(activeCall.duration)}
             </div>
           </div>
 
@@ -599,11 +624,18 @@ export const InCallBar: React.FC = () => {
               <div className="incall-caller-sub">
                 {activeCall.contactPhone}
                 <span>•</span>
-                {activeCall.isSimulated ? (
+                {activeCall.status === 'ringing' ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <span className="incall-live-dot" style={{ background: '#38bdf8' }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Dialing Outbound...
+                    </span>
+                  </span>
+                ) : activeCall.isSimulated ? (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
                     <span style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      Simulated (Not Connected)
+                      Simulated Call ({formatDuration(activeCall.duration)})
                     </span>
                   </span>
                 ) : (
@@ -646,10 +678,21 @@ export const InCallBar: React.FC = () => {
             </div>
 
             {/* Simulated-call disclaimer */}
-            <span className="incall-simulated-tag" style={activeCall.isSimulated ? { color: '#f59e0b', fontWeight: 600 } : undefined}>
-              {activeCall.isSimulated
-                ? 'Actual provider results: Carrier trunk offline • Call not connected'
-                : 'Live audio call in progress'}
+            <span
+              className="incall-simulated-tag"
+              style={
+                activeCall.status === 'ringing'
+                  ? { color: '#38bdf8', fontWeight: 600 }
+                  : activeCall.isSimulated
+                    ? { color: '#f59e0b', fontWeight: 600 }
+                    : undefined
+              }
+            >
+              {activeCall.status === 'ringing'
+                ? 'Outbound call initiating • Ringing softphone carrier...'
+                : activeCall.isSimulated
+                  ? (activeCall.providerStatus || 'Carrier trunk offline • Simulated Sandbox Mode')
+                  : 'Live audio call in progress'}
             </span>
           </div>
 
@@ -1084,7 +1127,7 @@ export const InCallBar: React.FC = () => {
 
 // --- Mandatory Post-Call Disposition Modal ---
 export const DispositionModal: React.FC = () => {
-  const { showDispositionModal, lastCallRecord, saveDisposition, skipDispositionWithReason } = useCall();
+  const { showDispositionModal, lastCallRecord, saveDisposition } = useCall();
   const { tenant, user } = useAuth();
 
   const [disposition, setDisposition] = useState<CallDisposition>('Interested');
@@ -1094,13 +1137,14 @@ export const DispositionModal: React.FC = () => {
   const [followupDate, setFollowupDate] = useState('');
   const [followupTime, setFollowupTime] = useState('');
   const [followupPriority, setFollowupPriority] = useState<'Low' | 'Medium' | 'High'>('High');
-
-  // Skip outcome workflow state
-  const [isSkipping, setIsSkipping] = useState(false);
-  const [skipReason, setSkipReason] = useState('');
-  const [skipError, setSkipError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  const [slotConflictData, setSlotConflictData] = useState<{
+    conflictTime: string;
+    contactName: string;
+    suggestedTime?: string;
+    suggestedTimeValue?: string;
+  } | null>(null);
 
   // No Response customized customer message state
   const [customerMessage, setCustomerMessage] = useState('');
@@ -1114,32 +1158,59 @@ export const DispositionModal: React.FC = () => {
   ]);
   const [sendDeliveryNotice, setSendDeliveryNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
-  const QUICK_SKIP_REASONS = [
-    'Customer disconnected abruptly',
-    'Customer requested callback later',
-    'Customer busy / in a meeting',
-    'Wrong contact / invalid number',
-    'Requires manager consultation',
-    'Handled via WhatsApp / offline',
-  ];
+  const normalizeModule = (m?: string) => {
+    if (!m) return undefined;
+    const clean = m.trim().toLowerCase().replace(/-/g, '_').replace(/ /g, '_');
+    if (clean === 'myleads' || clean === 'leads') return 'my_leads';
+    if (clean === 'allleads' || clean === 'all_leads') return 'all_leads';
+    if (clean === 'followup' || clean === 'followups') return 'follow_up';
+    if (clean === 'investor360' || clean === 'investors' || clean === 'investor') return 'investor_360';
+    if (clean === 'opportunity' || clean === 'opps') return 'opportunities';
+    if (clean === 'other' || clean === 'others' || clean === 'other_follow_up' || clean === 'other_followup') return 'other';
+    return clean;
+  };
 
-  // Reset all form state fresh for every new call — keyed on lastCallRecord.id so
-  // it fires once per finished call, before the modal renders to the agent.
-  // tomorrowDate and defaultFollowupTime are recomputed here (not at module scope)
-  // so midnight rollovers and mid-session Call Settings changes both take effect.
+  const IRM_MODULE_OUTCOMES: Record<string, CallDisposition[]> = {
+    all_leads: ['Follow-up Required', 'Call Back', 'Ready for KYC', 'Other', 'No Response'],
+    my_leads: ['Follow-up Required', 'No Response', 'Call Back'],
+    follow_up: ['Follow-up Required', 'Other', 'No Response', 'Call Back', 'Ready for KYC'],
+    kyc: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    opportunities: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    investor_360: ['Contacted', 'Other', 'No Response', 'Call Back'],
+    other: ['Call Back', 'Other', 'No Response', 'Follow-up Required', 'Ready for KYC'],
+  };
+
+  // Reset all form state fresh for every new call
   useEffect(() => {
     if (!lastCallRecord) return;
     const d = new Date();
     d.setDate(d.getDate() + 1);
     const freshTomorrow = d.toISOString().slice(0, 10);
     const isFollowup = !!lastCallRecord.sourceFollowupId;
-    const isIrmLead = user?.role?.code === 'irm' && lastCallRecord.matchedRecord?.type === 'lead';
+    const isIrm = user?.role?.code === 'irm' || (user as any)?.roleCode === 'irm';
+    const isIrmLead = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
     const isSimulated = !!lastCallRecord.isSimulated;
     const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
-    // Use actual provider results; do not mark simulated calls as connected or successful
-    const defaultDispo: CallDisposition = (isSimulated || isNotConnected)
-      ? 'No Response'
-      : (isIrmLead && !isFollowup ? 'Follow-up Required' : 'Interested');
+
+    const currentModule = isIrm
+      ? (normalizeModule(lastCallRecord.callModule) ||
+        (lastCallRecord.sourceFollowupId ? 'follow_up' : (lastCallRecord.matchedRecord?.type === 'lead' ? 'my_leads' : 'investor_360')))
+      : undefined;
+    const isFromOther = isIrm && (!!(lastCallRecord as any)?.isFromOther || currentModule === 'other' || (typeof window !== 'undefined' && window.location?.pathname?.includes('/other')));
+
+    let defaultDispo: CallDisposition;
+    if (isIrm && currentModule) {
+      const rawAllowed = IRM_MODULE_OUTCOMES[currentModule] || ['Call Back', 'Other', 'No Response'];
+      const allowed = isFromOther ? rawAllowed.filter(d => d !== 'Contacted') : rawAllowed;
+      if (isSimulated || isNotConnected) {
+        defaultDispo = allowed.includes('No Response') ? 'No Response' : allowed[0];
+      } else {
+        defaultDispo = allowed.includes('Follow-up Required') ? 'Follow-up Required' : (allowed.includes('Contacted') ? 'Contacted' : allowed[0]);
+      }
+    } else {
+      defaultDispo = (isSimulated || isNotConnected) ? 'No Response' : 'Interested';
+    }
+
     setDisposition(defaultDispo);
     setNotes(isSimulated ? '[Provider Result: Simulated - Call Not Connected (0s)]' : (isNotConnected ? '[Twilio Voice: Call Not Answered (0s)]' : ''));
     setReason('');
@@ -1147,9 +1218,6 @@ export const DispositionModal: React.FC = () => {
     setFollowupDate(freshTomorrow);
     setFollowupTime(getCallPreferences().defaultFollowupTime);
     setFollowupPriority('High');
-    setIsSkipping(false);
-    setSkipReason('');
-    setSkipError('');
     setFormError('');
     setIsSubmitting(false);
 
@@ -1175,67 +1243,49 @@ export const DispositionModal: React.FC = () => {
     getMessagingChannels().then(ch => {
       if (ch && ch.length) setChannelsStatus(ch);
     }).catch(console.error);
-  }, [lastCallRecord?.id, lastCallRecord?.matchedRecord?.type, lastCallRecord?.sourceFollowupId, user?.role?.code, tenant?.id]);
+  }, [lastCallRecord?.id, lastCallRecord?.matchedRecord?.type, lastCallRecord?.sourceFollowupId, lastCallRecord?.callModule, (lastCallRecord as any)?.isFromOther, user?.role?.code, tenant?.id]);
 
   if (!showDispositionModal || !lastCallRecord) return null;
 
-  const isGhlSalesExec = (tenant?.slug === 'ghl' || tenant?.id === 't-ghl-01') && user?.role?.code === 'sales_executive';
-  // This call was launched from the Follow-ups page (a previously scheduled follow-up task).
+  const roleCode = user?.role?.code || (user as any)?.roleCode;
+  const isIrm = roleCode === 'irm';
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
-  const isIrm = user?.role?.code === 'irm';
-  const isIrmLeadCall = isIrm && lastCallRecord.matchedRecord?.type === 'lead';
   const isSimulated = !!lastCallRecord.isSimulated;
   const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
 
-  const allDispositions: CallDisposition[] = [
+  const currentModule = isIrm
+    ? (normalizeModule(lastCallRecord.callModule) ||
+      (lastCallRecord.sourceFollowupId ? 'follow_up' : (lastCallRecord.matchedRecord?.type === 'lead' ? 'my_leads' : 'investor_360')))
+    : undefined;
+  const isFromOther = isIrm && (!!(lastCallRecord as any)?.isFromOther || currentModule === 'other' || (typeof window !== 'undefined' && window.location?.pathname?.includes('/other')));
+
+  const SALES_EXEC_DISPOSITIONS: CallDisposition[] = [
     'Interested',
     'Follow-up Required',
     'Call Back',
-    'Converted',
     'Not Interested',
     'Wrong Number',
     'No Response',
   ];
 
-  const SIMULATED_OUTCOMES: CallDisposition[] = [
-    'No Response',
-    'Follow-up Required',
-    'Call Back',
-    'Not Interested',
-    'Wrong Number',
-  ];
+  const FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'Call Back', 'Not Interested', 'No Response'];
 
-  // For follow-up calls, "Call Back" and "Wrong Number" are not valid outcomes.
-  // IRM follow-up calls support Interested, Follow-up Required, and No Response.
-  const FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'Not Interested'];
+  const rawAllowed: CallDisposition[] = (currentModule && IRM_MODULE_OUTCOMES[currentModule]) || ['Call Back', 'Other', 'No Response'];
+  const irmDispositions: CallDisposition[] = isFromOther
+    ? rawAllowed.filter(d => d !== 'Contacted')
+    : rawAllowed;
 
-  // For IRM follow-up calls, outcomes include Interested, Follow-up Required, and No Response.
-  const IRM_FOLLOWUP_CALL_OUTCOMES: CallDisposition[] = ['Interested', 'Follow-up Required', 'No Response'];
-
-  // For IRM calls against Lead records, restrict to Follow-up Required, Converted, and No Response beside Converted
-  const IRM_LEAD_OUTCOMES: CallDisposition[] = ['Follow-up Required', 'Converted', 'No Response'];
-
-  const dispositions: CallDisposition[] = isSimulated
-    ? (isFollowupCall
-        ? ['No Response', 'Follow-up Required', 'Not Interested']
-        : (isIrmLeadCall
-            ? ['No Response', 'Follow-up Required']
-            : SIMULATED_OUTCOMES))
-    : isNotConnected
-      ? ['No Response', 'Follow-up Required', 'Call Back', 'Not Interested', 'Wrong Number']
-      : (isFollowupCall
-          ? (isIrm ? IRM_FOLLOWUP_CALL_OUTCOMES : FOLLOWUP_CALL_OUTCOMES)
-          : isIrmLeadCall
-            ? IRM_LEAD_OUTCOMES
-            : isGhlSalesExec
-              ? allDispositions.filter(d => d !== 'Converted')
-              : allDispositions);
+  const dispositions: CallDisposition[] = isIrm
+    ? irmDispositions
+    : (isFollowupCall
+      ? FOLLOWUP_CALL_OUTCOMES
+      : SALES_EXEC_DISPOSITIONS);
 
   const handleSave = async () => {
     if (isSubmitting) return;
 
-    if (isSimulated && (disposition === 'Interested' || disposition === 'Converted')) {
-      alert('Simulated calls without an active carrier connection cannot be marked as connected or successful.');
+    if (disposition === 'Other' && !reason.trim()) {
+      alert('Reason is required when disposition is Other.');
       return;
     }
 
@@ -1244,36 +1294,40 @@ export const DispositionModal: React.FC = () => {
       return;
     }
 
+    const isKycOrIrmModule = isIrm || currentModule === 'kyc' || currentModule === 'opportunities' || currentModule === 'investor_360';
+
     if (disposition === 'No Response') {
-      if (!customerMessage.trim()) {
+      if (!isKycOrIrmModule && !customerMessage.trim()) {
         alert('Please provide a message for the customer before saving wrap-up.');
         return;
       }
 
-      // Validate contact for selected channel
-      if (selectedChannel === 'email') {
-        if (!recipientEmail.trim()) {
-          setSendDeliveryNotice({
-            type: 'error',
-            text: 'Message delivery unavailable: No email address on file. Please enter a valid recipient email address above.',
-          });
-          return;
-        }
-        if (!recipientEmail.includes('@') || !recipientEmail.includes('.')) {
-          setSendDeliveryNotice({
-            type: 'error',
-            text: `Message delivery failed: "${recipientEmail}" is not a valid email address.`,
-          });
-          return;
-        }
-      } else {
-        const phone = recipientPhone.trim() || (lastCallRecord.contactPhone || '').trim();
-        if (!phone) {
-          setSendDeliveryNotice({
-            type: 'error',
-            text: `Message delivery unavailable: No phone number provided for ${selectedChannel.toUpperCase()}.`,
-          });
-          return;
+      // Validate contact for selected channel if message is provided
+      if (customerMessage.trim()) {
+        if (selectedChannel === 'email') {
+          if (!recipientEmail.trim() && !isKycOrIrmModule) {
+            setSendDeliveryNotice({
+              type: 'error',
+              text: 'Message delivery unavailable: No email address on file. Please enter a valid recipient email address above.',
+            });
+            return;
+          }
+          if (recipientEmail.trim() && (!recipientEmail.includes('@') || !recipientEmail.includes('.'))) {
+            setSendDeliveryNotice({
+              type: 'error',
+              text: `Message delivery failed: "${recipientEmail}" is not a valid email address.`,
+            });
+            return;
+          }
+        } else {
+          const phone = recipientPhone.trim() || (lastCallRecord.contactPhone || '').trim();
+          if (!phone && !isKycOrIrmModule) {
+            setSendDeliveryNotice({
+              type: 'error',
+              text: `Message delivery unavailable: No phone number provided for ${selectedChannel.toUpperCase()}.`,
+            });
+            return;
+          }
         }
       }
     }
@@ -1284,15 +1338,57 @@ export const DispositionModal: React.FC = () => {
       d.setDate(d.getDate() + 1);
       return d.toISOString().slice(0, 10);
     })();
+    const targetTime = followupTime || '11:00';
     const combinedDateTime = (scheduleFollowup || disposition === 'Follow-up Required' || disposition === 'No Response')
-      ? new Date(`${targetDate}T${followupTime || '11:00'}:00`).toISOString()
+      ? new Date(`${targetDate}T${targetTime}:00`).toISOString()
       : '';
+
+    // Check time slot conflict for the active agent before submitting
+    if (combinedDateTime) {
+      const allFollowups = storageService.getFollowups(tenant?.id) || [];
+      const targetMs = new Date(combinedDateTime).getTime();
+      const currentUserId = user?.id ? String(user.id) : '';
+      const currentContactId = String(lastCallRecord?.matchedRecord?.id || lastCallRecord?.sourceFollowupId || '');
+      const currentPhone10 = (lastCallRecord?.contactPhone || '').replace(/\D/g, '').slice(-10);
+
+      const conflict = allFollowups.find(f => {
+        if (f.status !== 'Pending') return false;
+        // Don't conflict with the exact same contact if updating their follow-up
+        if (f.contactId && currentContactId && (f.contactId === currentContactId || f.contactId === `lead-${currentContactId}`)) return false;
+        if (currentPhone10 && f.contactPhone && f.contactPhone.replace(/\D/g, '').includes(currentPhone10)) return false;
+
+        // Same agent check: Sales Executive 1 only conflicts with Sales Executive 1; IRM only conflicts with that same IRM!
+        const fAgentId = f.assignedAgentId ? String(f.assignedAgentId) : '';
+        if (currentUserId && fAgentId && fAgentId !== currentUserId) return false;
+
+        const fTime = new Date(f.scheduledAt).getTime();
+        if (isNaN(fTime)) return false;
+        return Math.abs(targetMs - fTime) / (60 * 1000) < 20;
+      });
+
+      if (conflict) {
+        const conflictDateObj = new Date(conflict.scheduledAt);
+        const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+        const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const suggestedTimeValue = `${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+
+        setSlotConflictData({
+          conflictTime: formattedConflictTime,
+          contactName: conflict.contactName || 'Another Contact',
+          suggestedTime: formattedSuggestedTime,
+          suggestedTimeValue,
+        });
+        return;
+      }
+    }
 
     setIsSubmitting(true);
     try {
       let finalNotes = notes;
 
-      if (disposition === 'No Response') {
+      if (disposition === 'No Response' && customerMessage.trim()) {
         const leadIdNum = parseInt(String(lastCallRecord.matchedRecord?.type === 'lead' ? lastCallRecord.matchedRecord.id : '').replace(/\D/g, ''), 10) || undefined;
         const customerIdNum = parseInt(String(lastCallRecord.matchedRecord?.type === 'customer' ? lastCallRecord.matchedRecord.id : '').replace(/\D/g, ''), 10) || undefined;
         const effectivePhone = recipientPhone.trim() || (lastCallRecord.contactPhone || '').trim();
@@ -1308,21 +1404,22 @@ export const DispositionModal: React.FC = () => {
         });
 
         if (!sendResult.delivered) {
-          // Delivery failed or unavailable!
-          // Do not show as sent; preserve state so IRM can retry or switch channel
-          setSendDeliveryNotice({
-            type: 'error',
-            text: sendResult.deliveryResult || `Message delivery via ${selectedChannel.toUpperCase()} is unavailable or failed. State preserved for retry.`,
-          });
-          setIsSubmitting(false);
-          return;
+          if (!isKycOrIrmModule) {
+            setSendDeliveryNotice({
+              type: 'error',
+              text: sendResult.deliveryResult || `Message delivery via ${selectedChannel.toUpperCase()} is unavailable or failed. State preserved for retry.`,
+            });
+            setIsSubmitting(false);
+            return;
+          } else {
+            console.warn('[CallCenterComponents] Message dispatch unavailable for IRM/KYC:', sendResult.deliveryResult);
+          }
+        } else {
+          const channelLabel = selectedChannel.toUpperCase();
+          const contactTarget = selectedChannel === 'email' ? recipientEmail.trim() : effectivePhone;
+          const logSnippet = `[No Response Follow-up Message Sent via ${channelLabel} to ${contactTarget}]: ${customerMessage.trim()}`;
+          finalNotes = finalNotes ? `${finalNotes}\n\n${logSnippet}` : logSnippet;
         }
-
-        // Delivery succeeded!
-        const channelLabel = selectedChannel.toUpperCase();
-        const contactTarget = selectedChannel === 'email' ? recipientEmail.trim() : effectivePhone;
-        const logSnippet = `[No Response Follow-up Message Sent via ${channelLabel} to ${contactTarget}]: ${customerMessage.trim()}`;
-        finalNotes = finalNotes ? `${finalNotes}\n\n${logSnippet}` : logSnippet;
       }
 
       await saveDisposition(
@@ -1335,9 +1432,26 @@ export const DispositionModal: React.FC = () => {
             notes: finalNotes ? `Follow-up from call with ${lastCallRecord.contactName}: ${finalNotes}` : `Follow-up required from call with ${lastCallRecord.contactName}`,
           }
           : undefined,
-        (disposition === 'Not Interested' || disposition === 'Wrong Number') ? reason : undefined
+        reason.trim() ? reason.trim() : undefined
       );
     } catch (err: any) {
+      const errMsg = err?.message || '';
+      if (errMsg.includes('already booked') || errMsg.includes('time slot') || errMsg.includes('between calls')) {
+        const conflictDateObj = new Date(combinedDateTime);
+        const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+        const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const suggestedTimeValue = `${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+
+        setSlotConflictData({
+          conflictTime: formattedConflictTime,
+          contactName: 'Existing Appointment',
+          suggestedTime: formattedSuggestedTime,
+          suggestedTimeValue,
+        });
+        return;
+      }
       if (disposition === 'No Response') {
         setSendDeliveryNotice({
           type: 'error',
@@ -1350,72 +1464,21 @@ export const DispositionModal: React.FC = () => {
     }
   };
 
-  const handleConfirmSkip = async () => {
-    if (isSubmitting) return;
-
-    if (!skipReason.trim()) {
-      setSkipError('Please provide a reason before skipping wrap-up.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      await skipDispositionWithReason(skipReason.trim(), notes.trim());
-    } catch (err: any) {
-      setSkipError(err.message || 'Failed to save skip reason. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   return (
-    <Modal
-      isOpen={showDispositionModal}
-      onClose={() => {
-        // Prevent accidental closing; modal must not disappear until saved or skipped with reason
-      }}
-      closeOnBackdrop={false}
-      closeOnEscape={false}
-      hideCloseButton={true}
-      title={isSkipping ? "Skip Call Wrap-up" : "Call Wrap-up & Disposition"}
-      subtitle={`Call with ${lastCallRecord.contactName} (${lastCallRecord.contactPhone}) • Duration: ${isSimulated ? '0s (Not Connected)' : `${Math.floor(lastCallRecord.duration / 60)}m ${lastCallRecord.duration % 60}s`}`}
-      maxWidth={580}
-      footer={
-        isSkipping ? (
-          <>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setIsSkipping(false);
-                setSkipError('');
-              }}
-              disabled={isSubmitting}
-            >
-              Back to Wrap-up
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleConfirmSkip}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? 'Saving...' : 'Save Reason & Skip'}
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setIsSkipping(true);
-                setSkipError('');
-              }}
-              disabled={isSubmitting}
-            >
-              Skip for Now
-            </button>
+    <>
+      <Modal
+        isOpen={showDispositionModal}
+        onClose={() => {
+          // Modal must not close until disposition is saved
+        }}
+        closeOnBackdrop={false}
+        closeOnEscape={false}
+        hideCloseButton={true}
+        title="Call Wrap-up & Disposition"
+        subtitle={`Call with ${lastCallRecord.contactName} (${lastCallRecord.contactPhone}) • Duration: ${isSimulated ? '0s (Not Connected)' : `${Math.floor(lastCallRecord.duration / 60)}m ${lastCallRecord.duration % 60}s`}`}
+        maxWidth={580}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
             <button
               type="button"
               className="btn btn-primary"
@@ -1424,74 +1487,9 @@ export const DispositionModal: React.FC = () => {
             >
               {isSubmitting ? 'Saving...' : 'Save Disposition & Wrap Up'}
             </button>
-          </>
-        )
-      }
-    >
-      {isSkipping ? (
-        <div className="disposition-form-container">
-          <div className="disposition-skip-banner">
-            <AlertCircle size={18} className="disposition-skip-banner-icon" />
-            <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-              <strong>Reason Required to Skip Wrap-up</strong>
-              <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>
-                Please specify why this call wrap-up is being skipped. The reason will be permanently recorded in Call Details.
-              </div>
-            </div>
           </div>
-
-          <div className="form-group">
-            <label className="form-label">Select a Common Reason</label>
-            <div className="disposition-skip-chips">
-              {QUICK_SKIP_REASONS.map(r => (
-                <button
-                  key={r}
-                  type="button"
-                  className={`disposition-skip-chip ${skipReason === r ? 'disposition-skip-chip-active' : ''}`}
-                  onClick={() => {
-                    setSkipReason(r);
-                    setSkipError('');
-                  }}
-                >
-                  {skipReason === r && <CheckCircle2 size={12} style={{ marginRight: 4 }} />}
-                  {r}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">
-              Reason for Skipping <span style={{ color: '#ef4444' }}>*</span>
-            </label>
-            <textarea
-              className="form-textarea"
-              rows={3}
-              placeholder="Explain why wrap-up is skipped (e.g. customer dropped, will re-dial in 10 mins)..."
-              value={skipReason}
-              onChange={e => {
-                setSkipReason(e.target.value);
-                if (skipError) setSkipError('');
-              }}
-              autoFocus
-            />
-            {skipError && (
-              <p style={{ color: '#ef4444', fontSize: 12, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <AlertCircle size={13} /> {skipError}
-              </p>
-            )}
-          </div>
-
-          {notes && (
-            <div className="form-group" style={{ opacity: 0.85 }}>
-              <label className="form-label" style={{ fontSize: 12 }}>Notes from call</label>
-              <div style={{ fontSize: 12, padding: '8px 12px', background: 'var(--bg-surface-hover)', borderRadius: 'var(--radius-sm)', color: 'var(--text-secondary)' }}>
-                {notes}
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
+        }
+      >
         <div className="disposition-form-container">
           {isSimulated && (
             <div
@@ -1511,7 +1509,7 @@ export const DispositionModal: React.FC = () => {
             >
               <AlertCircle size={16} style={{ flexShrink: 0 }} />
               <span>
-                <strong>Simulation Notice:</strong> This was a simulated call event and cannot be marked as connected or successful. Call duration is recorded as 0s.
+                <strong>Simulation Mode:</strong> Simulated call completed (carrier offline in local development). Select an outcome below to log.
               </span>
             </div>
           )}
@@ -1745,8 +1743,39 @@ export const DispositionModal: React.FC = () => {
             </div>
           )}
 
-          {/* Reason Box for Not Interested / Wrong Number */}
-          {(disposition === 'Not Interested' || disposition === 'Wrong Number') && (
+          {/* Reason Box for Other (IRM only) */}
+          {isIrm && disposition === 'Other' && (
+            <div className="form-group">
+              <label className="form-label">
+                Reason <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <textarea
+                className="form-textarea"
+                rows={2}
+                placeholder="Reason is required when outcome is Other (e.g. exploring alternative products, pending family consultation)..."
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                required
+              />
+            </div>
+          )}
+
+          {/* Reason Box for Contacted (IRM only) */}
+          {isIrm && disposition === 'Contacted' && (
+            <div className="form-group">
+              <label className="form-label">Reason / Feedback (Optional)</label>
+              <textarea
+                className="form-textarea"
+                rows={2}
+                placeholder="Optional details or key discussion summary..."
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Reason Box for Not Interested / Wrong Number (Sales / Non-IRM) */}
+          {!isIrm && (disposition === 'Not Interested' || disposition === 'Wrong Number') && (
             <div className="form-group">
               <label className="form-label">Reason *</label>
               <textarea
@@ -1834,7 +1863,123 @@ export const DispositionModal: React.FC = () => {
             </div>
           )}
         </div>
-      )}
-    </Modal>
+      </Modal>
+
+      {/* Time Slot Conflict Alert Popup Modal */}
+      <Modal
+        isOpen={!!slotConflictData}
+        onClose={() => setSlotConflictData(null)}
+        title="Time Slot Already Booked"
+        subtitle="Schedule Spacing & Conflict Warning"
+        maxWidth={490}
+        footer={
+          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setSlotConflictData(null)}
+              style={{ flex: 1 }}
+            >
+              Choose Another Time
+            </button>
+            {slotConflictData?.suggestedTimeValue && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  if (slotConflictData.suggestedTimeValue) {
+                    setFollowupTime(slotConflictData.suggestedTimeValue);
+                  }
+                  setSlotConflictData(null);
+                }}
+                style={{ flex: 1.2 }}
+              >
+                Use Suggested (+20m)
+              </button>
+            )}
+          </div>
+        }
+      >
+        <div style={{ textAlign: 'center', padding: '10px 4px' }}>
+          <div style={{
+            width: 52,
+            height: 52,
+            borderRadius: '50%',
+            background: 'rgba(239, 68, 68, 0.1)',
+            color: '#dc2626',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 26,
+            margin: '0 auto 14px'
+          }}>
+            <AlertCircle size={28} color="#dc2626" />
+          </div>
+          <h4 style={{ margin: '0 0 8px', fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary, #0f172a)' }}>
+            This Time Slot is Already Booked
+          </h4>
+          <p style={{ margin: '0 0 14px', color: 'var(--text-secondary, #64748b)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+            You already have a scheduled follow-up near this time:
+          </p>
+          <div style={{
+            background: 'var(--bg-surface-hover, #f8fafc)',
+            border: '1px solid var(--border-base, #e2e8f0)',
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 14,
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #64748b)' }}>Contact:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary, #1e293b)' }}>
+                {slotConflictData?.contactName}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary, #64748b)' }}>Scheduled Time:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ef4444' }}>
+                {slotConflictData?.conflictTime}
+              </span>
+            </div>
+          </div>
+
+          {/* Meaningful scheduling advice box */}
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '1px solid rgba(59, 130, 246, 0.25)',
+            borderRadius: 8,
+            padding: '12px 14px',
+            marginBottom: 14,
+            textAlign: 'left'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, color: '#2563eb', fontWeight: 600, fontSize: '0.85rem' }}>
+              <Clock size={15} />
+              Scheduling Buffer Advice
+            </div>
+            <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-primary, #334155)', lineHeight: 1.5 }}>
+              To avoid overlapping appointments and ensure sufficient time for each call, <strong>please schedule your follow-up at least 15–20 minutes after your existing appointment.</strong>
+            </p>
+          </div>
+
+          {slotConflictData?.suggestedTime && (
+            <div style={{
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              borderRadius: 8,
+              padding: '10px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 4
+            }}>
+              <span style={{ fontSize: '0.82rem', color: '#059669', fontWeight: 600 }}>Suggested Next Slot:</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#059669' }}>
+                {slotConflictData.suggestedTime}
+              </span>
+            </div>
+          )}
+        </div>
+      </Modal>
+    </>
   );
 };

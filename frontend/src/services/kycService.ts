@@ -1,4 +1,5 @@
 import { getAuthHeaders } from '../utils/authHeaders';
+import { apiUrl } from '../utils/apiUrl';
 
 export interface KycReviewData {
   refId: string;
@@ -149,7 +150,7 @@ export async function patchKycStatus(
     checklist?: KycChecklist;
   }
 ): Promise<any> {
-  const response = await fetch(`/api/irm/kyc/${kycId}/status`, {
+  const response = await fetch(apiUrl(`/irm/kyc/${kycId}/status`), {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -157,9 +158,10 @@ export async function patchKycStatus(
     },
     body: JSON.stringify(payload)
   });
-  const data = await response.json();
+  // Error responses (502/429/HTML) are not always JSON: never let a parse error hide the real status.
+  const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.message || 'Failed to update KYC status');
+    throw new Error(data?.message || `Failed to update KYC status (${response.status})`);
   }
   return data;
 }

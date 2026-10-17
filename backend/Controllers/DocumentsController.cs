@@ -48,8 +48,21 @@ namespace backend.Controllers
 
             if (string.Equals(entityType, "company", StringComparison.OrdinalIgnoreCase))
             {
+                var userRole = User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "";
+                var isCompanyOrSuperAdmin = userRole.Equals("company_admin", StringComparison.OrdinalIgnoreCase) 
+                                         || userRole.Equals("super_admin", StringComparison.OrdinalIgnoreCase)
+                                         || userRole.Equals("admin", StringComparison.OrdinalIgnoreCase);
+
                 var aliases = GetCompanyAliases(entityId);
-                query = query.Where(d => d.EntityType.ToLower() == "company" && aliases.Contains(d.EntityId.ToLower()));
+                query = query.Where(d => 
+                    (d.EntityType.ToLower() == "company" && aliases.Contains(d.EntityId.ToLower())) ||
+                    (d.IsPlatformShared && (d.EntityId.ToLower() == "all" || aliases.Contains(d.EntityId.ToLower())))
+                );
+
+                if (!isCompanyOrSuperAdmin)
+                {
+                    query = query.Where(d => d.TargetAudience == "all_users");
+                }
             }
             else
             {
@@ -71,7 +84,11 @@ namespace backend.Controllers
                 Category = d.Category,
                 EntityType = d.EntityType,
                 EntityId = d.EntityId,
-                FileUrl = d.FileUrl
+                FileUrl = d.FileUrl,
+                TargetAudience = d.TargetAudience,
+                IsPlatformShared = d.IsPlatformShared,
+                Description = d.Description,
+                TargetTenantName = d.IsPlatformShared ? (d.EntityId == "all" ? "All Companies (Global)" : "Shared from Super Admin") : null
             });
 
             return Ok(new { success = true, data = dtos, message = "" });
@@ -140,7 +157,10 @@ namespace backend.Controllers
                 EntityId = entityIdNormalized,
                 UploadedBy = userName,
                 UploadedAt = DateTime.UtcNow,
-                FileUrl = fileUrl
+                FileUrl = fileUrl,
+                TargetAudience = !string.IsNullOrWhiteSpace(dto.TargetAudience) ? dto.TargetAudience : "all_users",
+                IsPlatformShared = dto.IsPlatformShared ?? false,
+                Description = dto.Description
             };
 
             _context.Documents.Add(doc);
@@ -157,7 +177,11 @@ namespace backend.Controllers
                 Category = doc.Category,
                 EntityType = doc.EntityType,
                 EntityId = doc.EntityId,
-                FileUrl = doc.FileUrl
+                FileUrl = doc.FileUrl,
+                TargetAudience = doc.TargetAudience,
+                IsPlatformShared = doc.IsPlatformShared,
+                Description = doc.Description,
+                TargetTenantName = doc.IsPlatformShared ? (doc.EntityId == "all" ? "All Companies (Global)" : "Shared from Super Admin") : null
             };
 
             return Ok(new { success = true, data = resultDto, message = "Document uploaded successfully." });

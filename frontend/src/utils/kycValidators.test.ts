@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { kycValidators, validateKycStep } from './kycValidators';
+import { kycValidators, validateKycStep, getDobValidationError, sanitizeDobString } from './kycValidators';
 
 describe('kycValidators', () => {
   describe('pan', () => {
@@ -44,6 +44,9 @@ describe('kycValidators', () => {
     it('validates allocation sums to 100', () => {
       expect(kycValidators.nomineeAllocation([{ allocationPercentage: 50 }, { allocationPercentage: 50 }])).toBe(true);
       expect(kycValidators.nomineeAllocation([{ allocationPercentage: 100 }])).toBe(true);
+      expect(
+        kycValidators.nomineeAllocation([{ allocationPercentage: 33.3 }, { allocationPercentage: 33.3 }, { allocationPercentage: 33.4 }])
+      ).toBe(true);
       expect(kycValidators.nomineeAllocation([{ allocationPercentage: 40 }, { allocationPercentage: 50 }])).toBe(false);
     });
   });
@@ -70,6 +73,8 @@ describe('kycValidators', () => {
       expect(kycValidators.phone('6543210987')).toBe(true);
       expect(kycValidators.phone('+919876543210')).toBe(true);
       expect(kycValidators.phone('09876543210')).toBe(true);
+      expect(kycValidators.phone('9123456789')).toBe(true); // genuine mobile that starts with 91
+      expect(kycValidators.phone('+91 91234 56789')).toBe(true);
     });
     it('rejects invalid numbers', () => {
       expect(kycValidators.phone('1234567890')).toBe(false);
@@ -103,9 +108,33 @@ describe('kycValidators', () => {
     });
     it('rejects empty or invalid dates', () => {
       expect(kycValidators.dob('')).toBe(false);
+      expect(kycValidators.dob('1800-01-01')).toBe(false); // implausible age
+      expect(kycValidators.dob('2999-01-01')).toBe(false); // future
       expect(kycValidators.dob('not-a-date')).toBe(false);
+      expect(kycValidators.dob('30-02-1999')).toBe(false); // February 30 does not exist
+      expect(kycValidators.dob('1999-02-30')).toBe(false); // February 30 does not exist
+    });
+    it('accepts valid DD-MM-YYYY dates for >= 18', () => {
+      expect(kycValidators.dob('15-08-1995')).toBe(true);
+      expect(kycValidators.dob('28-02-1999')).toBe(true);
+    });
+    it('returns specific explanation for impossible dates like 30-02-1999', () => {
+      expect(getDobValidationError('30-02-1999')).toContain('February 1999 has only 28 days');
+      expect(getDobValidationError('')).toBe('Date of birth is required.');
+    });
+    it('rejects years with more than 4 digits', () => {
+      expect(getDobValidationError('20000-02-03')).toBe('Year must be 4 digits.');
+      expect(getDobValidationError('03-02-20000')).toBe('Year must be 4 digits.');
+    });
+    it('clamps 5+ digit years correctly using sanitizeDobString', () => {
+      expect(sanitizeDobString('20000-02-03')).toBe('2000-02-03');
+      expect(sanitizeDobString('03-02-20000')).toBe('03-02-2000');
+      expect(sanitizeDobString('1995-12-15')).toBe('1995-12-15');
+      expect(sanitizeDobString('')).toBe('');
     });
   });
+
+
 
   describe('bankAccount', () => {
     it('validates 9-18 digit account numbers', () => {
@@ -128,6 +157,12 @@ describe('kycValidators', () => {
       expect(kycValidators.dematBoid('12345678901234567')).toBe(false);
       expect(kycValidators.dematBoid('123456789A123456')).toBe(false);
     });
+
+    it('accepts NSDL style IDs (IN + 6 alphanumeric + 8 digits)', () => {
+      expect(kycValidators.dematBoid('IN30123412345678')).toBe(true);
+      expect(kycValidators.dematBoid('in30123412345678')).toBe(true);
+      expect(kycValidators.dematBoid('IN3012341234567')).toBe(false);
+    });
   });
 
   describe('nomineeDob', () => {
@@ -137,6 +172,8 @@ describe('kycValidators', () => {
     });
     it('rejects empty or invalid dates', () => {
       expect(kycValidators.nomineeDob('')).toBe(false);
+      expect(kycValidators.nomineeDob('2999-01-01')).toBe(false); // future date
+      expect(kycValidators.nomineeDob('2020-02-31')).toBe(false); // impossible date
       expect(kycValidators.nomineeDob('not-a-date')).toBe(false);
     });
   });

@@ -325,9 +325,14 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
           </div>
         </div>
 
-        <div className="card platform-telemetry-card">
+        <div 
+          className="card platform-telemetry-card" 
+          onClick={() => onNavigate('admin-converted-customers')}
+          style={{ cursor: 'pointer' }}
+          title="Click to view all Converted Customers"
+        >
           <div className="telemetry-card-top">
-            <span className="platform-telemetry-label">AGGREGATE PIPELINE</span>
+            <span className="platform-telemetry-label">TOTAL COMMITTED AMOUNT</span>
             <div className="telemetry-icon-box bg-amber-glow">
               <Layers size={18} color="#fbbf24" />
             </div>
@@ -336,7 +341,17 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
             {formatCurrency(metrics.totalPipelineValue)}
           </div>
           <div className="platform-telemetry-sub">
-            <span className="text-muted-xs">{metrics.totalCustomers} Converted Customers</span>
+            <span 
+              className="text-muted-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigate('admin-converted-customers');
+              }}
+              style={{ cursor: 'pointer' }}
+              title="Click to view all Converted Customers"
+            >
+              {metrics.totalCustomers} Converted Customers
+            </span>
           </div>
         </div>
 
