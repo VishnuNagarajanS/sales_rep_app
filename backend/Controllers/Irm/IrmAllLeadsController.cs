@@ -314,9 +314,9 @@ public class IrmAllLeadsController : ControllerBase
             {
                 Id = l.Id,
                 CompanyId = l.CompanyId,
-                Name = l.Name,
+                Name = l.Name ?? string.Empty,
                 Phone = l.Phone,
-                Email = l.Email,
+                Email = l.Email ?? string.Empty,
                 Location = l.Location,
                 Source = l.Source,
                 Status = l.Status,

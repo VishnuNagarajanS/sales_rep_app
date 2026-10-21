@@ -92,7 +92,7 @@ public class FollowupService : IFollowupService
 
         var query = _context.Followups
             .Include(f => f.AssignedAgent)
-            .ThenInclude(a => a.Role)
+            .ThenInclude(a => a!.Role)
             .Include(f => f.OriginalOwner)
             .Include(f => f.Handover)
             .Where(f => f.Id == id);
@@ -383,7 +383,7 @@ public class FollowupService : IFollowupService
 
         var existingPending = await _context.Followups
             .Include(f => f.AssignedAgent)
-            .ThenInclude(a => a.Role)
+            .ThenInclude(a => a!.Role)
             .Where(f =>
                 f.CompanyId == companyId.Value &&
                 f.Status == FollowupStatus.Pending &&
@@ -399,13 +399,13 @@ public class FollowupService : IFollowupService
         {
             if (int.TryParse(dto.ContactId, out var parsedLeadId))
             {
-                targetLead = await _context.Leads.Include(l => l.AssignedAgent).ThenInclude(a => a.Role).Include(l => l.AssignedBy)
+                targetLead = await _context.Leads.Include(l => l.AssignedAgent).ThenInclude(a => a!.Role).Include(l => l.AssignedBy)
                     .FirstOrDefaultAsync(l => l.Id == parsedLeadId && l.CompanyId == companyId.Value, ct);
             }
             if (targetLead == null && !string.IsNullOrWhiteSpace(dto.ContactPhone))
             {
                 var p10 = dto.ContactPhone.Length >= 10 ? dto.ContactPhone[^10..] : dto.ContactPhone;
-                targetLead = await _context.Leads.Include(l => l.AssignedAgent).ThenInclude(a => a.Role).Include(l => l.AssignedBy)
+                targetLead = await _context.Leads.Include(l => l.AssignedAgent).ThenInclude(a => a!.Role).Include(l => l.AssignedBy)
                     .FirstOrDefaultAsync(l => l.CompanyId == companyId.Value && l.Phone.Contains(p10), ct);
             }
         }

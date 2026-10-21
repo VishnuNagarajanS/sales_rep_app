@@ -267,7 +267,7 @@ namespace backend.Controllers.SuperAdmin
             _context.Documents.Remove(doc);
             await _context.SaveChangesAsync(ct);
 
-            return Ok(ApiResponse<object>.SuccessResponse(null, "Document deleted successfully."));
+            return Ok(ApiResponse<object?>.SuccessResponse(null, "Document deleted successfully."));
         }
 
         private static string FormatFileSize(long bytes)

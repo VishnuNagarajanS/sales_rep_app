@@ -94,7 +94,9 @@ namespace backend.Services.Ai
                 throw new Exception($"LLM API Error: {response.StatusCode} - {errStr}");
             }
 
-            
+            if (response?.Content == null)
+                throw new InvalidOperationException("No response received from LLM API.");
+
             var responseData = await response.Content.ReadFromJsonAsync<OpenAiResponse>(jsonOptions, ct);
             var choice = responseData?.Choices?.FirstOrDefault()?.Message;
             

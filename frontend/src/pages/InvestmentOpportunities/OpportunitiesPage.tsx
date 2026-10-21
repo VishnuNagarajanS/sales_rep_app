@@ -399,13 +399,13 @@ export const OpportunitiesPage: React.FC = () => {
   const myIdStr = user?.id ? String(user.id) : '';
   const scopedOpportunitiesDeals = isScopedAgent
     ? deals.filter(d => {
-        const agentId = d.assignedAgentId ? String(d.assignedAgentId) : '';
-        const agentName = (d.assignedAgentName || '').toLowerCase().trim();
-        if (myIdStr && agentId === myIdStr) return true;
-        if (myNameLower && (agentName === myNameLower || agentName.includes(myNameLower) || myNameLower.includes(agentName))) return true;
-        if (!agentId && !agentName) return true;
-        return false;
-      })
+      const agentId = d.assignedAgentId ? String(d.assignedAgentId) : '';
+      const agentName = (d.assignedAgentName || '').toLowerCase().trim();
+      if (myIdStr && agentId === myIdStr) return true;
+      if (myNameLower && (agentName === myNameLower || agentName.includes(myNameLower) || myNameLower.includes(agentName))) return true;
+      if (!agentId && !agentName) return true;
+      return false;
+    })
     : deals;
   const irmDeals = scopedOpportunitiesDeals.filter(d => d.stage === 'investment_opportunity');
 
@@ -667,7 +667,7 @@ export const OpportunitiesPage: React.FC = () => {
               const json = await res.json();
               if (json.success && json.data) kycRecord = json.data;
             }
-          } catch {}
+          } catch { }
         }
 
         // 2. Fetch by numeric customer ID / investor ID
@@ -680,7 +680,7 @@ export const OpportunitiesPage: React.FC = () => {
                 const json = await res.json();
                 if (json.success && json.data) kycRecord = json.data;
               }
-            } catch {}
+            } catch { }
           }
         }
 
@@ -692,7 +692,7 @@ export const OpportunitiesPage: React.FC = () => {
               const json = await res.json();
               if (json.success && json.data) kycRecord = json.data;
             }
-          } catch {}
+          } catch { }
         }
 
         // 4. Fetch by phone
@@ -703,7 +703,7 @@ export const OpportunitiesPage: React.FC = () => {
               const json = await res.json();
               if (json.success && json.data) kycRecord = json.data;
             }
-          } catch {}
+          } catch { }
         }
 
         // 5. Fallback: match from all KYCs in DB
@@ -736,7 +736,7 @@ export const OpportunitiesPage: React.FC = () => {
                 }
               }
             }
-          } catch {}
+          } catch { }
         }
 
         if (!isCancelled) {
@@ -931,8 +931,8 @@ export const OpportunitiesPage: React.FC = () => {
             {isGhlAdmin
               ? 'Company-wide oversight of active investment opportunities across all IRMs before mandate execution and investor conversion.'
               : isGhlIrm
-              ? 'Pitch deck shared, term sheet under review, legal team active.'
-              : `Commercial real-estate fractional tranches, warehousing yields, and capital commitments for ${tenant?.name}.`}
+                ? 'Pitch deck shared, term sheet under review, legal team active.'
+                : `Commercial real-estate fractional tranches, warehousing yields, and capital commitments for ${tenant?.name}.`}
           </p>
         </div>
 

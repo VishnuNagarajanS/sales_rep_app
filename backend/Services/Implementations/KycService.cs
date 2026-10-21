@@ -20,7 +20,7 @@ public class KycService : IKycService
     private readonly ApplicationDbContext _db;
     private readonly ILogger<KycService> _logger;
     private readonly IIrmOtherService _otherService;
-    private readonly IConfiguration _config;
+    private readonly IConfiguration? _config;
 
     public KycService(
         IKycRepository kycRepo,
@@ -201,7 +201,7 @@ public class KycService : IKycService
             }
         }
 
-        var defaultBaseUrl = _config["SmtpSettings:ClientBaseUrl"] ?? "http://localhost:5173";
+        var defaultBaseUrl = _config?["SmtpSettings:ClientBaseUrl"] ?? "http://localhost:5173";
         string baseUrl = defaultBaseUrl;
         if (!string.IsNullOrWhiteSpace(dto.BaseUrl))
         {

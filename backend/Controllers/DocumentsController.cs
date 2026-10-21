@@ -41,9 +41,43 @@ namespace backend.Controllers
             return new List<string> { target, target.ToLowerInvariant() };
         }
 
+        private async Task<bool> CheckPermissionAsync(string permission)
+        {
+            var userRole = User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "";
+            if (userRole.Equals("super_admin", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (User.Claims.Any(c => c.Type == "permission" && c.Value == permission))
+            {
+                return true;
+            }
+
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("userId");
+            if (int.TryParse(userIdClaim, out var uId))
+            {
+                var perms = await _context.Users
+                    .Where(u => u.Id == uId)
+                    .Select(u => u.Role.Permissions)
+                    .FirstOrDefaultAsync();
+
+                if (perms != null && perms.Contains(permission))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetDocuments([FromQuery] string entityType, [FromQuery] string? entityId)
         {
+            if (!await CheckPermissionAsync("documents.view"))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Access denied. Missing documents.view permission." });
+            }
             IQueryable<Document> query = _context.Documents;
 
             if (string.Equals(entityType, "company", StringComparison.OrdinalIgnoreCase))
@@ -97,6 +131,10 @@ namespace backend.Controllers
         [HttpPost]
         public async Task<IActionResult> UploadDocument([FromForm] CreateDocumentDto dto)
         {
+            if (!await CheckPermissionAsync("documents.manage") && !await CheckPermissionAsync("documents.view"))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Access denied. Missing documents upload permission." });
+            }
             var userName = User.FindFirstValue(ClaimTypes.Name) ?? "Unknown User";
             string? fileUrl = null;
 
@@ -199,6 +237,10 @@ namespace backend.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteDocument(string id)
         {
+            if (!await CheckPermissionAsync("documents.manage") && !await CheckPermissionAsync("documents.view"))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Access denied. Missing documents delete permission." });
+            }
             if (!int.TryParse(id, out var docId))
             {
                 return Ok(new { success = true, message = "Document removed successfully" });

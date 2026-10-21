@@ -1413,5 +1413,55 @@ public class LeadService : ILeadService
 
         return ApiResponse<object>.SuccessResult(new object(), "Lead deleted successfully.");
     }
+
+    public async Task<ApiResponse<BulkImportLeadsResultDto>> BulkImportLeadsAsync(BulkImportLeadsDto dto, CancellationToken ct = default)
+    {
+        var result = new BulkImportLeadsResultDto
+        {
+            Total = dto.Leads.Count
+        };
+
+        foreach (var item in dto.Leads)
+        {
+            if (string.IsNullOrWhiteSpace(item.Name) || string.IsNullOrWhiteSpace(item.Phone))
+            {
+                result.Skipped++;
+                result.SkipReasons.Add($"Skipped row: missing name or phone (name='{item.Name}', phone='{item.Phone}')");
+                continue;
+            }
+
+            var createDto = new CreateLeadDto
+            {
+                Name        = item.Name.Trim(),
+                Phone       = item.Phone.Trim(),
+                Email       = item.Email?.Trim(),
+                Location    = item.Location?.Trim(),
+                Source      = string.IsNullOrWhiteSpace(item.Source) ? "CSV Import" : item.Source.Trim(),
+                Status      = item.Status ?? "New",
+                Priority    = "Medium",   // priority not collected from CSV – default to Medium
+                AssignedAgentId = item.AssignedAgentId,
+            };
+
+            var createResult = await CreateLeadAsync(createDto, ct);
+            if (createResult.Success)
+            {
+                result.Created++;
+            }
+            else
+            {
+                result.Skipped++;
+                // Suppress verbose duplicate messages in the skip-reason list
+                var reason = createResult.Message?.Contains("already exists", StringComparison.OrdinalIgnoreCase) == true
+                    ? $"Duplicate skipped: {item.Name} ({item.Phone})"
+                    : $"Skipped '{item.Name}': {createResult.Message}";
+                result.SkipReasons.Add(reason);
+            }
+        }
+
+        return ApiResponse<BulkImportLeadsResultDto>.SuccessResult(result,
+            $"Bulk import complete: {result.Created} created, {result.Skipped} skipped.");
+    }
 }
+
+
 

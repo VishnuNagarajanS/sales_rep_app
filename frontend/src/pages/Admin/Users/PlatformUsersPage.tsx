@@ -21,13 +21,16 @@ import {
 } from 'lucide-react';
 import { User, Tenant, Role } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
-import { StatusChip } from '../../../components/common/StatusChip';
 import { Modal } from '../../../components/common/Modal';
 import { Drawer } from '../../../components/common/Drawer';
 import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
+import { useAuth } from '../../../context/AuthContext';
 import './PlatformUsersPage.css';
 
 export const PlatformUsersPage: React.FC = () => {
+  const { user, isSuperAdmin } = useAuth();
+  const isSuperAdminRole = isSuperAdmin || user?.role?.code === 'super_admin';
+
   const [users, setUsers] = useState<User[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [roles, setRoles] = useState<Record<string, Role>>({});
@@ -610,20 +613,32 @@ export const PlatformUsersPage: React.FC = () => {
 
                       <td style={{ textAlign: 'right' }}>
                         <div className="user-row-actions">
-                          <button
-                            className="action-icon-btn text-cyan"
-                            title={`Log in as ${u.name} (Direct User Impersonation)`}
-                            onClick={() => openUserImpersonateModal(u)}
-                          >
-                            <LogIn size={14} />
-                          </button>
-                          <button
-                            className="action-icon-btn"
-                            title="Reset Password"
-                            onClick={() => openResetModal(u)}
-                          >
-                            <KeyRound size={14} />
-                          </button>
+                          {!isSuperAdminUser && (
+                            <>
+                              <button
+                                className="action-icon-btn text-cyan"
+                                title={`Log in as ${u.name} (Direct User Impersonation)`}
+                                onClick={() => openUserImpersonateModal(u)}
+                              >
+                                <LogIn size={14} />
+                              </button>
+                              <button
+                                className="action-icon-btn"
+                                title="Reset Password"
+                                onClick={() => openResetModal(u)}
+                              >
+                                <KeyRound size={14} />
+                              </button>
+
+                              <button
+                                className={`action-icon-btn ${u.status === 'Active' ? 'text-amber' : 'text-green'}`}
+                                title={u.status === 'Active' ? 'Suspend Account' : 'Activate Account'}
+                                onClick={() => handleToggleStatus(u)}
+                              >
+                                {u.status === 'Active' ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+                              </button>
+                            </>
+                          )}
                           <button
                             className="action-icon-btn"
                             title="Edit Profile"
@@ -632,21 +647,12 @@ export const PlatformUsersPage: React.FC = () => {
                             <Edit2 size={14} />
                           </button>
                           <button
-                            className={`action-icon-btn ${u.status === 'Active' ? 'text-amber' : 'text-green'}`}
-                            title={u.status === 'Active' ? 'Suspend Account' : 'Activate Account'}
-                            onClick={() => handleToggleStatus(u)}
+                            className="action-icon-btn text-danger"
+                            title="Delete User"
+                            onClick={() => handleDeleteUser(u)}
                           >
-                            {u.status === 'Active' ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+                            <Trash2 size={14} />
                           </button>
-                          {!isSuperAdminUser && (
-                            <button
-                              className="action-icon-btn text-danger"
-                              title="Delete User"
-                              onClick={() => handleDeleteUser(u)}
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>

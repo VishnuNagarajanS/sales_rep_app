@@ -179,6 +179,27 @@ public class SalesExecutiveLeadsController : ControllerBase
         if (!result.Success) return BadRequest(result);
         return Ok(result);
     }
+
+    /// <summary>
+    /// Bulk import leads from a CSV mapping.
+    /// Only company admins and super-admins can call this endpoint.
+    /// Duplicate detection and all standard business rules apply per-row via CreateLeadAsync.
+    /// </summary>
+    [HttpPost("bulk-import")]
+    [Authorize(Roles = "company_admin,super_admin,admin,ghl_admin")]
+    public async Task<ActionResult<ApiResponse<BulkImportLeadsResultDto>>> BulkImportLeads(
+        [FromBody] BulkImportLeadsDto dto,
+        CancellationToken ct)
+    {
+        if (dto.Leads == null || dto.Leads.Count == 0)
+            return BadRequest(ApiResponse<BulkImportLeadsResultDto>.FailureResult("No leads provided in the import payload."));
+
+        var result = await _leadService.BulkImportLeadsAsync(dto, ct);
+        return Ok(result);
+    }
 }
+
+
+
 
 

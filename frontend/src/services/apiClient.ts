@@ -21,6 +21,10 @@ const API_BASE_URL = rawBase
   : '/api';
 
 class ApiClient {
+  getBaseUrl(): string {
+    return API_BASE_URL;
+  }
+
   isMockMode(): boolean {
     return envIsMockMode();
   }

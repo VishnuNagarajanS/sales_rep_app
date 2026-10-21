@@ -43,7 +43,7 @@ public class VoiceTokenController : ControllerBase
     /// The browser uses this token to register a Twilio Device for real calls.
     /// </summary>
     [HttpGet("token")]
-    public async Task<ActionResult<ApiResponse<VoiceTokenResponseDto>>> GetToken(CancellationToken ct = default)
+    public ActionResult<ApiResponse<VoiceTokenResponseDto>> GetToken(CancellationToken ct = default)
     {
         var settings = _twilioOptions.Value;
 

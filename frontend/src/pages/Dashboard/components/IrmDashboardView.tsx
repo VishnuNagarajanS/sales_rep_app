@@ -380,8 +380,6 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
         return false;
       }
 
-      // If next follow-up date is set, it belongs in Follow-ups
-      if (l.nextFollowupDate) return false;
 
       const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
       const lId = String(l.id || '');

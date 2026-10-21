@@ -751,635 +751,655 @@ export const App: React.FC = () => {
         onNavigate={navigate}
         onOpenQuickCreate={handleOpenQuickCreate}
       >
-      {currentRoute === 'dashboard' ? (
-        <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-      ) : currentRoute === 'all-leads' ? (
-        user?.role?.code !== 'irm' && !isGhlAdmin && !isSuperAdmin ? (
-          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-        ) : (
+        {currentRoute === 'dashboard' ? (
+          <ProtectedRoute permission={PERMISSIONS.DASHBOARD_VIEW}>
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          </ProtectedRoute>
+        ) : currentRoute === 'all-leads' ? (
+          user?.role?.code !== 'irm' && !isGhlAdmin && !isSuperAdmin ? (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          ) : (
+            <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+              <AllLeadsPage onNavigate={navigate} />
+            </ProtectedRoute>
+          )
+        ) : currentRoute === 'leads' ? (
           <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-            <AllLeadsPage onNavigate={navigate} />
+            <LeadsPage onNavigate={navigate} />
           </ProtectedRoute>
-        )
-      ) : currentRoute === 'leads' ? (
-        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          <LeadsPage onNavigate={navigate} />
-        </ProtectedRoute>
-      ) : currentRoute === 'assigned-leads' ? (
-        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          {isGhlAdmin ? (
-            <AssignedLeadsPage onNavigate={navigate} />
-          ) : (
+        ) : currentRoute === 'assigned-leads' ? (
+          <ProtectedRoute permission={PERMISSIONS.LEADS_ASSIGNED_VIEW}>
+            {isGhlAdmin ? (
+              <AssignedLeadsPage onNavigate={navigate} />
+            ) : (
+              <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+            )}
+          </ProtectedRoute>
+        ) : currentRoute === 'pending-leads' ? (
+          <ProtectedRoute permission={PERMISSIONS.LEADS_PENDING_VIEW}>
+            {isGhlAdmin ? (
+              <PendingLeadsPage />
+            ) : (
+              <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+            )}
+          </ProtectedRoute>
+        ) : currentRoute === 'archived-leads' ? (
+          <ProtectedRoute permission={PERMISSIONS.LEADS_ARCHIVED_VIEW}>
+            {isGhlAdmin ? (
+              <ArchivedLeadsPage />
+            ) : (
+              <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+            )}
+          </ProtectedRoute>
+        ) : currentRoute === 'customers' ? (
+          <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_VIEW}>
+            <CustomersPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'converted-customers' ? (
+          <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_CONVERTED_VIEW}>
+            <ConvertedCustomersPage onNavigate={navigate} />
+          </ProtectedRoute>
+        ) : currentRoute === 'pipeline' ? (
+          <ProtectedRoute permission={PERMISSIONS.DEALS_VIEW}>
+            <PipelinePage onOpenQuickCreate={handleOpenQuickCreate} />
+          </ProtectedRoute>
+        ) : currentRoute === 'deals' ? (
+          <ProtectedRoute permission={PERMISSIONS.DEALS_VIEW}>
+            <DealsPage onNavigate={navigate} />
+          </ProtectedRoute>
+        ) : currentRoute === 'followups' ? (
+          <ProtectedRoute permission={PERMISSIONS.FOLLOWUPS_VIEW}>
+            <FollowupsPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'call-center' ? (
+          <ProtectedRoute permission={PERMISSIONS.CALLS_MAKE}>
+            <CallCenterPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'call-history' ? (
+          <ProtectedRoute permission={PERMISSIONS.CALLS_VIEW}>
+            <CallHistoryPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'call-settings' ? (
+          <ProtectedRoute permission={PERMISSIONS.CALL_SETTINGS_VIEW}>
+            <CallSettingsPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'projects' ? (
+          <ProtectedRoute permission={PERMISSIONS.PROPERTIES_VIEW}>
+            <ProjectsPage onNavigate={navigate} />
+          </ProtectedRoute>
+        ) : currentRoute === 'plots' ? (
+          <ProtectedRoute permission={PERMISSIONS.PROPERTIES_VIEW}>
+            <PlotsPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'site-visits' ? (
+          <ProtectedRoute permission={PERMISSIONS.SITE_VISITS_VIEW}>
+            <SiteVisitsPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'bookings' ? (
+          <ProtectedRoute permission={PERMISSIONS.BOOKINGS_VIEW}>
+            <BookingsPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'kyc' ? (
+          user?.role?.code === 'sales_executive' ? (
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-          )}
-        </ProtectedRoute>
-      ) : currentRoute === 'pending-leads' ? (
-        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          {isGhlAdmin ? (
-            <PendingLeadsPage />
           ) : (
+            <ProtectedRoute permission={PERMISSIONS.KYC_VERIFY}>
+              <KYCPage />
+            </ProtectedRoute>
+          )
+        ) : currentRoute === 'investors' ? (
+          user?.role?.code === 'sales_executive' ? (
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-          )}
-        </ProtectedRoute>
-      ) : currentRoute === 'archived-leads' ? (
-        <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-          {isGhlAdmin ? (
-            <ArchivedLeadsPage />
           ) : (
+            <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
+              <InvestorsPage />
+            </ProtectedRoute>
+          )
+        ) : currentRoute === 'consultations' ? (
+          <ProtectedRoute permission={PERMISSIONS.CONSULTATIONS_VIEW}>
+            <ConsultationsPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'opportunities' ? (
+          user?.role?.code === 'sales_executive' ? (
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-          )}
-        </ProtectedRoute>
-      ) : currentRoute === 'customers' ? (
-        <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_VIEW}>
-          <CustomersPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'converted-customers' ? (
-        <ProtectedRoute permission={PERMISSIONS.CUSTOMERS_VIEW}>
-          <ConvertedCustomersPage onNavigate={navigate} />
-        </ProtectedRoute>
-      ) : currentRoute === 'pipeline' ? (
-        <ProtectedRoute permission={PERMISSIONS.DEALS_VIEW}>
-          <PipelinePage onOpenQuickCreate={handleOpenQuickCreate} />
-        </ProtectedRoute>
-      ) : currentRoute === 'deals' ? (
-        <ProtectedRoute permission={PERMISSIONS.DEALS_VIEW}>
-          <DealsPage onNavigate={navigate} />
-        </ProtectedRoute>
-      ) : currentRoute === 'followups' ? (
-        <ProtectedRoute permission={PERMISSIONS.FOLLOWUPS_VIEW}>
-          <FollowupsPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'call-center' ? (
-        <ProtectedRoute permission={PERMISSIONS.CALLS_MAKE}>
-          <CallCenterPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'call-history' ? (
-        <ProtectedRoute permission={PERMISSIONS.CALLS_VIEW}>
-          <CallHistoryPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'call-settings' ? (
-        <CallSettingsPage />
-      ) : currentRoute === 'projects' ? (
-        <ProtectedRoute permission={PERMISSIONS.PROPERTIES_VIEW}>
-          <ProjectsPage onNavigate={navigate} />
-        </ProtectedRoute>
-      ) : currentRoute === 'plots' ? (
-        <ProtectedRoute permission={PERMISSIONS.PROPERTIES_VIEW}>
-          <PlotsPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'site-visits' ? (
-        <ProtectedRoute permission={PERMISSIONS.SITE_VISITS_VIEW}>
-          <SiteVisitsPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'bookings' ? (
-        <ProtectedRoute permission={PERMISSIONS.BOOKINGS_VIEW}>
-          <BookingsPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'kyc' ? (
-        user?.role?.code === 'sales_executive' ? (
-          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-        ) : (
-          <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
-            <KYCPage />
-          </ProtectedRoute>
-        )
-      ) : currentRoute === 'investors' ? (
-        user?.role?.code === 'sales_executive' ? (
-          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-        ) : (
-          <ProtectedRoute permission={PERMISSIONS.INVESTORS_VIEW}>
-            <InvestorsPage />
-          </ProtectedRoute>
-        )
-      ) : currentRoute === 'consultations' ? (
-        <ProtectedRoute permission={PERMISSIONS.CONSULTATIONS_VIEW}>
-          <ConsultationsPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'opportunities' ? (
-        user?.role?.code === 'sales_executive' ? (
-          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-        ) : (
-          <ProtectedRoute permission={PERMISSIONS.OPPORTUNITIES_VIEW}>
-            <OpportunitiesPage />
-          </ProtectedRoute>
-        )
-      ) : currentRoute === 'not-interested' ? (
-        user?.role?.code === 'irm' ? (
-          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-        ) : (
-          <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-            <NotInterestedPage />
-          </ProtectedRoute>
-        )
-      ) : currentRoute === 'junk' ? (
-        user?.role?.code === 'irm' ? (
-          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-        ) : (
-          <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
-            <JunkPage />
-          </ProtectedRoute>
-        )
-      ) : currentRoute === 'chat' ? (
-        <ChatPage onNavigate={navigate} />
-      ) : currentRoute === 'smarty-ai' ? (
-        <SmartyAIPage />
-      ) : currentRoute === 'support' ? (
-        <TenantSupportPage />
-      ) : currentRoute === 'profile' ? (
-        <ProfilePage />
-      ) : currentRoute === 'reports' ? (
-        <ProtectedRoute permission={PERMISSIONS.REPORTS_VIEW}>
-          <ReportsPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'notifications' ? (
-        <NotificationsPage onNavigate={navigate} />
-      ) : currentRoute === 'company-users' ? (
-        <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
-          <CompanyUsersPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'leave-requests' ? (
-        <LeaveRequestsPage onNavigate={navigate} />
-      ) : currentRoute === 'work-handover' ? (
-        <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
-          {isGhlAdmin ? (
-            <WorkHandoverPage initialParams={navExtraState} onNavigate={navigate} />
           ) : (
+            <ProtectedRoute permission={PERMISSIONS.OPPORTUNITIES_VIEW}>
+              <OpportunitiesPage />
+            </ProtectedRoute>
+          )
+        ) : currentRoute === 'not-interested' ? (
+          user?.role?.code === 'irm' ? (
             <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-          )}
-        </ProtectedRoute>
-      ) : currentRoute === 'company-documents' ? (
-        <CompanyDocumentsPage />
-      ) : currentRoute === 'company-settings' ? (
-        <ProtectedRoute permission={PERMISSIONS.SETTINGS_VIEW}>
-          <CompanySettingsPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'company-audit' ? (
-        <ProtectedRoute permission={PERMISSIONS.AUDIT_VIEW}>
-          <CompanyAuditPage />
-        </ProtectedRoute>
-      ) : currentRoute === 'irm-other' || currentRoute === 'other' ? (
-        user?.role?.code !== 'irm' && !isGhlAdmin && !isSuperAdmin ? (
-          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          ) : (
+            <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+              <NotInterestedPage />
+            </ProtectedRoute>
+          )
+        ) : currentRoute === 'junk' ? (
+          user?.role?.code === 'irm' ? (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          ) : (
+            <ProtectedRoute permission={PERMISSIONS.LEADS_VIEW}>
+              <JunkPage />
+            </ProtectedRoute>
+          )
+        ) : currentRoute === 'chat' ? (
+          <ProtectedRoute permission={PERMISSIONS.CHAT_VIEW}>
+            <ChatPage onNavigate={navigate} />
+          </ProtectedRoute>
+        ) : currentRoute === 'smarty-ai' ? (
+          <ProtectedRoute permission={PERMISSIONS.SMARTY_AI}>
+            <SmartyAIPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'support' ? (
+          <ProtectedRoute permission={PERMISSIONS.SUPPORT_VIEW}>
+            <TenantSupportPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'profile' ? (
+          <ProtectedRoute permission={PERMISSIONS.PROFILE}>
+            <ProfilePage />
+          </ProtectedRoute>
+        ) : currentRoute === 'reports' ? (
+          <ProtectedRoute permission={PERMISSIONS.REPORTS_VIEW}>
+            <ReportsPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'notifications' ? (
+          <ProtectedRoute permission={PERMISSIONS.NOTIFICATIONS_VIEW}>
+            <NotificationsPage onNavigate={navigate} />
+          </ProtectedRoute>
+        ) : currentRoute === 'company-users' ? (
+          <ProtectedRoute permission={PERMISSIONS.USERS_VIEW}>
+            <CompanyUsersPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'leave-requests' ? (
+          <ProtectedRoute permission={PERMISSIONS.LEAVE_REQUESTS_VIEW}>
+            <LeaveRequestsPage onNavigate={navigate} />
+          </ProtectedRoute>
+        ) : currentRoute === 'work-handover' ? (
+          <ProtectedRoute permission={PERMISSIONS.WORK_HANDOVER_VIEW}>
+            {isGhlAdmin ? (
+              <WorkHandoverPage initialParams={navExtraState} onNavigate={navigate} />
+            ) : (
+              <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+            )}
+          </ProtectedRoute>
+        ) : currentRoute === 'company-documents' ? (
+          <ProtectedRoute permission={PERMISSIONS.DOCUMENTS_VIEW}>
+            <CompanyDocumentsPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'company-settings' ? (
+          <ProtectedRoute permission={PERMISSIONS.SETTINGS_VIEW}>
+            <CompanySettingsPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'company-audit' ? (
+          <ProtectedRoute permission={PERMISSIONS.AUDIT_VIEW}>
+            <CompanyAuditPage />
+          </ProtectedRoute>
+        ) : currentRoute === 'irm-other' || currentRoute === 'other' ? (
+          user?.role?.code !== 'irm' && !isGhlAdmin && !isSuperAdmin ? (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          ) : (
+            <ProtectedRoute permission={PERMISSIONS.DOCUMENTS_VIEW}>
+              <IrmOtherPage onNavigate={navigate} />
+            </ProtectedRoute>
+          )
         ) : (
-          <IrmOtherPage onNavigate={navigate} />
-        )
-      ) : (
-        <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
-      )}
+          <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+        )}
 
-      {/* Global Quick Action Modal */}
-      <Modal
-        isOpen={!!quickCreateType}
-        onClose={() => setQuickCreateType(null)}
-        title={`Quick Create: ${quickCreateType?.toUpperCase()}`}
-        subtitle={`Instant creation into ${tenant?.name}`}
-      >
-        <form onSubmit={handleSaveQuickCreate} className="app-quickcreate-form">
+        {/* Global Quick Action Modal */}
+        <Modal
+          isOpen={!!quickCreateType}
+          onClose={() => setQuickCreateType(null)}
+          title={`Quick Create: ${quickCreateType?.toUpperCase()}`}
+          subtitle={`Instant creation into ${tenant?.name}`}
+        >
+          <form onSubmit={handleSaveQuickCreate} className="app-quickcreate-form">
 
-          {/* ── LEAD: Full form matching Add New Prospect Lead ── */}
-          {quickCreateType === 'lead' ? (
-            <>
-              {/* Full Name */}
-              <div className="form-group">
-                <label htmlFor="quick-lead-name" className="form-label">Full Name *</label>
-                <input
-                  id="quick-lead-name"
-                  name="fullName"
-                  type="text"
-                  className="form-input"
-                  required
-                  value={quickName}
-                  onChange={e => setQuickName(e.target.value)}
-                  placeholder="e.g. Agent One"
-                />
-              </div>
-
-              {/* Phone + Email */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {/* ── LEAD: Full form matching Add New Prospect Lead ── */}
+            {quickCreateType === 'lead' ? (
+              <>
+                {/* Full Name */}
                 <div className="form-group">
-                  <label htmlFor="quick-lead-phone" className="form-label">Phone Number *</label>
+                  <label htmlFor="quick-lead-name" className="form-label">Full Name *</label>
                   <input
-                    id="quick-lead-phone"
-                    name="phone"
+                    id="quick-lead-name"
+                    name="fullName"
                     type="text"
                     className="form-input"
                     required
-                    value={quickPhone}
-                    onChange={e => setQuickPhone(e.target.value)}
-                    placeholder="+91 98800 00000"
+                    value={quickName}
+                    onChange={e => setQuickName(e.target.value)}
+                    placeholder="e.g. Agent One"
                   />
                 </div>
-                <div className="form-group">
-                  <label htmlFor="quick-lead-email" className="form-label">Email Address</label>
-                  <input
-                    id="quick-lead-email"
-                    name="email"
-                    type="email"
-                    autoComplete="email"
-                    className="form-input"
-                    value={quickEmail}
-                    onChange={e => setQuickEmail(e.target.value)}
-                    placeholder="agent1@example.com"
-                  />
-                </div>
-              </div>
 
-              {/* Location + Source */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="form-group">
-                  <label htmlFor="quick-lead-location" className="form-label">Location / City</label>
-                  <input
-                    id="quick-lead-location"
-                    name="location"
-                    type="text"
-                    className="form-input"
-                    value={quickLocation}
-                    onChange={e => setQuickLocation(e.target.value)}
-                    placeholder="e.g. Bengaluru, Indiranagar"
-                  />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="quick-lead-source" className="form-label">Source</label>
-                  <select
-                    id="quick-lead-source"
-                    name="source"
-                    className="form-select"
-                    value={quickSource}
-                    onChange={e => setQuickSource(e.target.value)}
-                  >
-                    <option value="Website Inbound">Website Inbound</option>
-                    <option value="Google Search">Google Search</option>
-                    <option value="Facebook / Instagram">Facebook / Instagram</option>
-                    <option value="Referral - HNW">Referral - HNW</option>
-                    <option value="Walk-in Site Office">Walk-in Site Office</option>
-                    <option value="LinkedIn Executive Campaign">LinkedIn Executive Campaign</option>
-                    <option value="Inbound Call">Inbound Call</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* GHL India Ventures Asset Terms */}
-              <div className="lead-custom-schema-box">
-                <div className="lead-custom-schema-title">GHL India Ventures Asset Terms</div>
+                {/* Phone + Email */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  {user?.role?.code !== 'sales_executive' && (
-                    <div className="form-group">
-                      <label htmlFor="quick-lead-asset-class" className="form-label">Asset Class</label>
-                      <select
-                        id="quick-lead-asset-class"
-                        name="assetClass"
-                        className="form-select"
-                        value={quickAssetClass}
-                        onChange={e => setQuickAssetClass(e.target.value)}
-                      >
-                        <option value="">--</option>
-                        <option value="AIF">AIF</option>
-                        <option value="CO-AIF">CO-AIF</option>
-                      </select>
-                    </div>
-                  )}
                   <div className="form-group">
-                    <label htmlFor="quick-lead-capacity" className="form-label">Investment Capacity</label>
+                    <label htmlFor="quick-lead-phone" className="form-label">Phone Number *</label>
+                    <input
+                      id="quick-lead-phone"
+                      name="phone"
+                      type="text"
+                      className="form-input"
+                      required
+                      value={quickPhone}
+                      onChange={e => setQuickPhone(e.target.value)}
+                      placeholder="+91 98800 00000"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="quick-lead-email" className="form-label">Email Address</label>
+                    <input
+                      id="quick-lead-email"
+                      name="email"
+                      type="email"
+                      autoComplete="email"
+                      className="form-input"
+                      value={quickEmail}
+                      onChange={e => setQuickEmail(e.target.value)}
+                      placeholder="agent1@example.com"
+                    />
+                  </div>
+                </div>
+
+                {/* Location + Source */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="form-group">
+                    <label htmlFor="quick-lead-location" className="form-label">Location / City</label>
+                    <input
+                      id="quick-lead-location"
+                      name="location"
+                      type="text"
+                      className="form-input"
+                      value={quickLocation}
+                      onChange={e => setQuickLocation(e.target.value)}
+                      placeholder="e.g. Bengaluru, Indiranagar"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="quick-lead-source" className="form-label">Source</label>
                     <select
-                      id="quick-lead-capacity"
-                      name="investmentCapacity"
+                      id="quick-lead-source"
+                      name="source"
                       className="form-select"
-                      value={quickInvestmentCapacity}
-                      onChange={e => setQuickInvestmentCapacity(e.target.value)}
+                      value={quickSource}
+                      onChange={e => setQuickSource(e.target.value)}
                     >
-                      <option value="" disabled>Select a range</option>
-                      {[
-                        'Contact for Co-Invest Details',
-                        '₹1 Cr – ₹5 Cr',
-                        '₹5 Cr – ₹10 Cr',
-                        '₹10 Cr – ₹25 Cr',
-                        '₹25 Cr+'
-                      ].map(o => (
-                        <option key={o} value={o}>{o}</option>
-                      ))}
+                      <option value="Website Inbound">Website Inbound</option>
+                      <option value="Google Search">Google Search</option>
+                      <option value="Facebook / Instagram">Facebook / Instagram</option>
+                      <option value="Referral - HNW">Referral - HNW</option>
+                      <option value="Walk-in Site Office">Walk-in Site Office</option>
+                      <option value="LinkedIn Executive Campaign">LinkedIn Executive Campaign</option>
+                      <option value="Inbound Call">Inbound Call</option>
                     </select>
                   </div>
                 </div>
-              </div>
 
-              {/* Notes & Requirements */}
-              <div className="form-group">
-                <label htmlFor="quick-lead-notes" className="form-label">Notes & Requirements</label>
-                <textarea
-                  id="quick-lead-notes"
-                  name="notes"
-                  className="form-textarea"
-                  rows={3}
-                  value={quickNotes}
-                  onChange={e => setQuickNotes(e.target.value)}
-                  placeholder="Client background, key objections, time horizon..."
-                />
-              </div>
-            </>
-          ) : quickCreateType === 'consultation' ? (
-            <>
-              {/* ── CONSULTATION: Full form matching Schedule Consultation ── */}
-              {(() => {
-                const investors = storageService.getInvestors(tenant?.id);
-                return (
-                  <>
+                {/* GHL India Ventures Asset Terms */}
+                <div className="lead-custom-schema-box">
+                  <div className="lead-custom-schema-title">GHL India Ventures Asset Terms</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    {user?.role?.code !== 'sales_executive' && (
+                      <div className="form-group">
+                        <label htmlFor="quick-lead-asset-class" className="form-label">Asset Class</label>
+                        <select
+                          id="quick-lead-asset-class"
+                          name="assetClass"
+                          className="form-select"
+                          value={quickAssetClass}
+                          onChange={e => setQuickAssetClass(e.target.value)}
+                        >
+                          <option value="">--</option>
+                          <option value="AIF">AIF</option>
+                          <option value="CO-AIF">CO-AIF</option>
+                        </select>
+                      </div>
+                    )}
                     <div className="form-group">
-                      <label htmlFor="quick-cons-investor" className="form-label">Investor *</label>
+                      <label htmlFor="quick-lead-capacity" className="form-label">Investment Capacity</label>
                       <select
-                        id="quick-cons-investor"
-                        name="investorId"
+                        id="quick-lead-capacity"
+                        name="investmentCapacity"
                         className="form-select"
-                        value={consInvestorId}
-                        required
-                        onChange={e => {
-                          const inv = investors.find(i => i.id === e.target.value);
-                          setConsInvestorId(e.target.value);
-                          setConsInvestorName(inv?.name ?? '');
-                          setConsInvestorPhone(inv?.phone ?? '');
-                        }}
+                        value={quickInvestmentCapacity}
+                        onChange={e => setQuickInvestmentCapacity(e.target.value)}
                       >
-                        <option value="">— Select Investor —</option>
-                        {investors.map(inv => (
-                          <option key={inv.id} value={inv.id}>
-                            {inv.name} {inv.phone ? `(${inv.phone})` : ''}
-                          </option>
+                        <option value="" disabled>Select a range</option>
+                        {[
+                          'Contact for Co-Invest Details',
+                          '₹1 Cr – ₹5 Cr',
+                          '₹5 Cr – ₹10 Cr',
+                          '₹10 Cr – ₹25 Cr',
+                          '₹25 Cr+'
+                        ].map(o => (
+                          <option key={o} value={o}>{o}</option>
                         ))}
                       </select>
                     </div>
+                  </div>
+                </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                {/* Notes & Requirements */}
+                <div className="form-group">
+                  <label htmlFor="quick-lead-notes" className="form-label">Notes & Requirements</label>
+                  <textarea
+                    id="quick-lead-notes"
+                    name="notes"
+                    className="form-textarea"
+                    rows={3}
+                    value={quickNotes}
+                    onChange={e => setQuickNotes(e.target.value)}
+                    placeholder="Client background, key objections, time horizon..."
+                  />
+                </div>
+              </>
+            ) : quickCreateType === 'consultation' ? (
+              <>
+                {/* ── CONSULTATION: Full form matching Schedule Consultation ── */}
+                {(() => {
+                  const investors = storageService.getInvestors(tenant?.id);
+                  return (
+                    <>
                       <div className="form-group">
-                        <label htmlFor="quick-cons-phone" className="form-label">Investor Phone</label>
-                        <input
-                          id="quick-cons-phone"
-                          name="investorPhone"
-                          type="text"
-                          className="form-input"
-                          placeholder="+91 98800 00000"
-                          value={consInvestorPhone}
-                          onChange={e => setConsInvestorPhone(e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label htmlFor="quick-cons-slot" className="form-label">Consultation Slot *</label>
-                        <input
-                          id="quick-cons-slot"
-                          name="consultationSlot"
-                          type="text"
-                          className="form-input"
-                          required
-                          placeholder="e.g. Thursday, 04:00 PM"
-                          value={consSlot}
-                          onChange={e => setConsSlot(e.target.value)}
-                        />
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                      <div className="form-group">
-                        <label htmlFor="quick-cons-advisor" className="form-label">
-                          Private Wealth Advisor
-                          {user?.role?.code === 'sales_executive' && (
-                            <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)' }}>
-                              (auto-assigned to you)
-                            </span>
-                          )}
-                        </label>
-                        {user?.role?.code === 'sales_executive' ? (
-                          <input
-                            id="quick-cons-advisor"
-                            name="advisorName"
-                            className="form-input"
-                            value={consConsultantName}
-                            readOnly
-                            style={{ backgroundColor: 'var(--bg-surface-hover)', cursor: 'not-allowed', color: 'var(--text-secondary)' }}
-                          />
-                        ) : (
-                          <input
-                            id="quick-cons-advisor"
-                            name="advisorName"
-                            className="form-input"
-                            placeholder="e.g. Vikram Malhotra"
-                            value={consConsultantName}
-                            onChange={e => setConsConsultantName(e.target.value)}
-                          />
-                        )}
-                      </div>
-                      <div className="form-group">
-                        <label htmlFor="quick-cons-status" className="form-label">Status</label>
+                        <label htmlFor="quick-cons-investor" className="form-label">Investor *</label>
                         <select
-                          id="quick-cons-status"
-                          name="status"
+                          id="quick-cons-investor"
+                          name="investorId"
                           className="form-select"
-                          value={consStatus}
-                          onChange={e => setConsStatus(e.target.value as any)}
+                          value={consInvestorId}
+                          required
+                          onChange={e => {
+                            const inv = investors.find(i => i.id === e.target.value);
+                            setConsInvestorId(e.target.value);
+                            setConsInvestorName(inv?.name ?? '');
+                            setConsInvestorPhone(inv?.phone ?? '');
+                          }}
                         >
-                          {['Scheduled', 'Completed', 'Cancelled', 'No-show'].map(s => (
-                            <option key={s} value={s}>{s}</option>
+                          <option value="">— Select Investor —</option>
+                          {investors.map(inv => (
+                            <option key={inv.id} value={inv.id}>
+                              {inv.name} {inv.phone ? `(${inv.phone})` : ''}
+                            </option>
                           ))}
                         </select>
                       </div>
-                    </div>
 
-                    <div className="form-group">
-                      <label htmlFor="quick-cons-agenda" className="form-label">Discussion Agenda & Objectives</label>
-                      <textarea
-                        id="quick-cons-agenda"
-                        name="agenda"
-                        className="form-textarea"
-                        rows={3}
-                        placeholder="e.g. Commercial REIT yield analysis & pass-through taxation discussion."
-                        value={consAgenda}
-                        onChange={e => setConsAgenda(e.target.value)}
-                      />
-                    </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div className="form-group">
+                          <label htmlFor="quick-cons-phone" className="form-label">Investor Phone</label>
+                          <input
+                            id="quick-cons-phone"
+                            name="investorPhone"
+                            type="text"
+                            className="form-input"
+                            placeholder="+91 98800 00000"
+                            value={consInvestorPhone}
+                            onChange={e => setConsInvestorPhone(e.target.value)}
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label htmlFor="quick-cons-slot" className="form-label">Consultation Slot *</label>
+                          <input
+                            id="quick-cons-slot"
+                            name="consultationSlot"
+                            type="text"
+                            className="form-input"
+                            required
+                            placeholder="e.g. Thursday, 04:00 PM"
+                            value={consSlot}
+                            onChange={e => setConsSlot(e.target.value)}
+                          />
+                        </div>
+                      </div>
 
-                    <div className="form-group">
-                      <label htmlFor="quick-cons-outcome" className="form-label">Outcome Notes & Recommendations</label>
-                      <textarea
-                        id="quick-cons-outcome"
-                        name="outcome"
-                        className="form-textarea"
-                        rows={3}
-                        placeholder="Record key takeaways, investor interest level, follow-up requirements..."
-                        value={consOutcome}
-                        onChange={e => setConsOutcome(e.target.value)}
-                      />
-                    </div>
-                  </>
-                );
-              })()}
-            </>
-          ) : (
-            <>
-              {/* ── Deal: existing vs. new customer picker ── */}
-              {quickCreateType === 'deal' && (() => {
-                const tenantCustomers = storageService.getCustomers(tenant?.id);
-                const hasCustomers = tenantCustomers.length > 0;
-                return (
-                  <div className="form-group">
-                    <label htmlFor={dealCustomerMode === 'existing' && hasCustomers ? 'quick-deal-customer' : 'quick-deal-new-customer'} className="form-label">Link to Customer</label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div className="form-group">
+                          <label htmlFor="quick-cons-advisor" className="form-label">
+                            Private Wealth Advisor
+                            {user?.role?.code === 'sales_executive' && (
+                              <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+                                (auto-assigned to you)
+                              </span>
+                            )}
+                          </label>
+                          {user?.role?.code === 'sales_executive' ? (
+                            <input
+                              id="quick-cons-advisor"
+                              name="advisorName"
+                              className="form-input"
+                              value={consConsultantName}
+                              readOnly
+                              style={{ backgroundColor: 'var(--bg-surface-hover)', cursor: 'not-allowed', color: 'var(--text-secondary)' }}
+                            />
+                          ) : (
+                            <input
+                              id="quick-cons-advisor"
+                              name="advisorName"
+                              className="form-input"
+                              placeholder="e.g. Vikram Malhotra"
+                              value={consConsultantName}
+                              onChange={e => setConsConsultantName(e.target.value)}
+                            />
+                          )}
+                        </div>
+                        <div className="form-group">
+                          <label htmlFor="quick-cons-status" className="form-label">Status</label>
+                          <select
+                            id="quick-cons-status"
+                            name="status"
+                            className="form-select"
+                            value={consStatus}
+                            onChange={e => setConsStatus(e.target.value as any)}
+                          >
+                            {['Scheduled', 'Completed', 'Cancelled', 'No-show'].map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
 
-                    {/* Segmented toggle — same style as Reports page period toggle */}
-                    <div className="app-segmented-toggle">
-                      {(['existing', 'new'] as const).map(mode => (
-                        <button
-                          key={mode}
-                          type="button"
-                          className={`btn btn-sm app-segmented-btn ${dealCustomerMode === mode ? 'btn-primary' : 'btn-ghost'} ${mode === 'existing' && !hasCustomers ? 'disabled' : ''}`}
-                          disabled={mode === 'existing' && !hasCustomers}
-                          onClick={() => setDealCustomerMode(mode)}
-                        >
-                          {mode === 'existing' ? 'Existing customer' : 'New customer'}
-                        </button>
-                      ))}
-                    </div>
-
-                    {!hasCustomers && (
-                      <p className="app-no-customers-msg">
-                        No customers in this workspace yet — deal will create a new customer record.
-                      </p>
-                    )}
-
-                    {dealCustomerMode === 'existing' && hasCustomers ? (
-                      <select
-                        id="quick-deal-customer"
-                        name="customerId"
-                        aria-label="Link to existing customer"
-                        className="form-select"
-                        value={selectedCustomerId}
-                        onChange={e => setSelectedCustomerId(e.target.value)}
-                        required
-                      >
-                        {tenantCustomers.map((c: Customer) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}{c.phone ? ` · ${c.phone}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div>
-                        <label htmlFor="quick-deal-new-customer" className="form-label app-new-customer-label">
-                          New Customer Name * — a new Customer record will be created
-                        </label>
-                        <input
-                          id="quick-deal-new-customer"
-                          name="newCustomerName"
-                          type="text"
-                          className="form-input"
-                          required
-                          placeholder="Customer full name"
-                          value={newCustomerName}
-                          onChange={e => setNewCustomerName(e.target.value)}
+                      <div className="form-group">
+                        <label htmlFor="quick-cons-agenda" className="form-label">Discussion Agenda & Objectives</label>
+                        <textarea
+                          id="quick-cons-agenda"
+                          name="agenda"
+                          className="form-textarea"
+                          rows={3}
+                          placeholder="e.g. Commercial REIT yield analysis & pass-through taxation discussion."
+                          value={consAgenda}
+                          onChange={e => setConsAgenda(e.target.value)}
                         />
                       </div>
-                    )}
-                  </div>
-                );
-              })()}
 
-              {/* ── Phone (non-lead, non-deal-existing) ── */}
-              {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
+                      <div className="form-group">
+                        <label htmlFor="quick-cons-outcome" className="form-label">Outcome Notes & Recommendations</label>
+                        <textarea
+                          id="quick-cons-outcome"
+                          name="outcome"
+                          className="form-textarea"
+                          rows={3}
+                          placeholder="Record key takeaways, investor interest level, follow-up requirements..."
+                          value={consOutcome}
+                          onChange={e => setConsOutcome(e.target.value)}
+                        />
+                      </div>
+                    </>
+                  );
+                })()}
+              </>
+            ) : (
+              <>
+                {/* ── Deal: existing vs. new customer picker ── */}
+                {quickCreateType === 'deal' && (() => {
+                  const tenantCustomers = storageService.getCustomers(tenant?.id);
+                  const hasCustomers = tenantCustomers.length > 0;
+                  return (
+                    <div className="form-group">
+                      <label htmlFor={dealCustomerMode === 'existing' && hasCustomers ? 'quick-deal-customer' : 'quick-deal-new-customer'} className="form-label">Link to Customer</label>
+
+                      {/* Segmented toggle — same style as Reports page period toggle */}
+                      <div className="app-segmented-toggle">
+                        {(['existing', 'new'] as const).map(mode => (
+                          <button
+                            key={mode}
+                            type="button"
+                            className={`btn btn-sm app-segmented-btn ${dealCustomerMode === mode ? 'btn-primary' : 'btn-ghost'} ${mode === 'existing' && !hasCustomers ? 'disabled' : ''}`}
+                            disabled={mode === 'existing' && !hasCustomers}
+                            onClick={() => setDealCustomerMode(mode)}
+                          >
+                            {mode === 'existing' ? 'Existing customer' : 'New customer'}
+                          </button>
+                        ))}
+                      </div>
+
+                      {!hasCustomers && (
+                        <p className="app-no-customers-msg">
+                          No customers in this workspace yet — deal will create a new customer record.
+                        </p>
+                      )}
+
+                      {dealCustomerMode === 'existing' && hasCustomers ? (
+                        <select
+                          id="quick-deal-customer"
+                          name="customerId"
+                          aria-label="Link to existing customer"
+                          className="form-select"
+                          value={selectedCustomerId}
+                          onChange={e => setSelectedCustomerId(e.target.value)}
+                          required
+                        >
+                          {tenantCustomers.map((c: Customer) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}{c.phone ? ` · ${c.phone}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div>
+                          <label htmlFor="quick-deal-new-customer" className="form-label app-new-customer-label">
+                            New Customer Name * — a new Customer record will be created
+                          </label>
+                          <input
+                            id="quick-deal-new-customer"
+                            name="newCustomerName"
+                            type="text"
+                            className="form-input"
+                            required
+                            placeholder="Customer full name"
+                            value={newCustomerName}
+                            onChange={e => setNewCustomerName(e.target.value)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* ── Phone (non-lead, non-deal-existing) ── */}
+                {!(quickCreateType === 'deal' && dealCustomerMode === 'existing') && (
+                  <div className="form-group">
+                    <label htmlFor="quick-generic-phone" className="form-label">Phone Number</label>
+                    <input
+                      id="quick-generic-phone"
+                      name="phone"
+                      type="text"
+                      className="form-input"
+                      value={quickPhone}
+                      onChange={e => setQuickPhone(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {/* ── Scheduled Date + Time (followup, visit) ── */}
+                {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
+                  <div className="app-schedule-grid">
+                    <div className="form-group">
+                      <label htmlFor="quick-schedule-date" className="form-label">Scheduled Date *</label>
+                      <input
+                        id="quick-schedule-date"
+                        name="scheduledDate"
+                        type="date"
+                        className="form-input"
+                        required
+                        value={scheduledDate}
+                        onChange={e => setScheduledDate(e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="quick-schedule-time" className="form-label">Scheduled Time *</label>
+                      <input
+                        id="quick-schedule-time"
+                        name="scheduledTime"
+                        type="time"
+                        className="form-input"
+                        required
+                        value={scheduledTime}
+                        onChange={e => setScheduledTime(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Notes/Agenda (non-lead types) ── */}
                 <div className="form-group">
-                  <label htmlFor="quick-generic-phone" className="form-label">Phone Number</label>
-                  <input
-                    id="quick-generic-phone"
-                    name="phone"
-                    type="text"
-                    className="form-input"
-                    value={quickPhone}
-                    onChange={e => setQuickPhone(e.target.value)}
+                  <label htmlFor="quick-generic-notes" className="form-label">Quick Notes</label>
+                  <textarea
+                    id="quick-generic-notes"
+                    name="notes"
+                    className="form-textarea"
+                    rows={2}
+                    value={quickNotes}
+                    onChange={e => setQuickNotes(e.target.value)}
+                    placeholder={
+                      quickCreateType === 'visit'
+                        ? 'Special requirements, preferred plots...'
+                        : 'Brief requirement summary...'
+                    }
                   />
                 </div>
-              )}
+              </>
+            )}
 
-              {/* ── Scheduled Date + Time (followup, visit) ── */}
-              {(quickCreateType === 'followup' || quickCreateType === 'visit') && (
-                <div className="app-schedule-grid">
-                  <div className="form-group">
-                    <label htmlFor="quick-schedule-date" className="form-label">Scheduled Date *</label>
-                    <input
-                      id="quick-schedule-date"
-                      name="scheduledDate"
-                      type="date"
-                      className="form-input"
-                      required
-                      value={scheduledDate}
-                      onChange={e => setScheduledDate(e.target.value)}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="quick-schedule-time" className="form-label">Scheduled Time *</label>
-                    <input
-                      id="quick-schedule-time"
-                      name="scheduledTime"
-                      type="time"
-                      className="form-input"
-                      required
-                      value={scheduledTime}
-                      onChange={e => setScheduledTime(e.target.value)}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* ── Notes/Agenda (non-lead types) ── */}
-              <div className="form-group">
-                <label htmlFor="quick-generic-notes" className="form-label">Quick Notes</label>
-                <textarea
-                  id="quick-generic-notes"
-                  name="notes"
-                  className="form-textarea"
-                  rows={2}
-                  value={quickNotes}
-                  onChange={e => setQuickNotes(e.target.value)}
-                  placeholder={
-                    quickCreateType === 'visit'
-                      ? 'Special requirements, preferred plots...'
-                      : 'Brief requirement summary...'
-                  }
-                />
+            {quickCreateError && (
+              <div
+                className="alert alert-danger"
+                style={{
+                  marginBottom: 12,
+                  padding: '8px 12px',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  color: '#ef4444',
+                  borderRadius: 6,
+                  fontSize: 13,
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                }}
+              >
+                {quickCreateError}
               </div>
-            </>
-          )}
+            )}
 
-          {quickCreateError && (
-            <div
-              className="alert alert-danger"
-              style={{
-                marginBottom: 12,
-                padding: '8px 12px',
-                background: 'rgba(239, 68, 68, 0.12)',
-                color: '#ef4444',
-                borderRadius: 6,
-                fontSize: 13,
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-              }}
-            >
-              {quickCreateError}
+            <div className="app-modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setQuickCreateType(null)}
+                disabled={isSavingQuickCreate}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={isSavingQuickCreate}
+              >
+                {isSavingQuickCreate ? 'Saving Entry...' : 'Save Entry'}
+              </button>
             </div>
-          )}
-
-          <div className="app-modal-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setQuickCreateType(null)}
-              disabled={isSavingQuickCreate}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={isSavingQuickCreate}
-            >
-              {isSavingQuickCreate ? 'Saving Entry...' : 'Save Entry'}
-            </button>
-          </div>
-        </form>
-      </Modal>
-    </SalesLayout>
+          </form>
+        </Modal>
+      </SalesLayout>
     </>
   );
 };

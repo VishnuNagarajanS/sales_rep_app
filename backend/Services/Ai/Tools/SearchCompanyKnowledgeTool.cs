@@ -30,6 +30,7 @@ namespace backend.Services.Ai.Tools
 
         public override async Task<string> ExecuteAsync(string arguments, AiDataScope scope, IServiceProvider services, CancellationToken ct)
         {
+            await Task.CompletedTask;
             var args = ParseArgs<Args>(arguments);
             if (args == null || string.IsNullOrWhiteSpace(args.Query))
             {

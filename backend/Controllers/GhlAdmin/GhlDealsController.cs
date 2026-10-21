@@ -188,7 +188,7 @@ public class GhlDealsController : ControllerBase
         {
             existingDeal = await _db.GhlDeals
                 .Include(d => d.AssignedAgent)
-                .ThenInclude(a => a.Role)
+                .ThenInclude(a => a!.Role)
                 .FirstOrDefaultAsync(d =>
                     d.CompanyId == companyId.Value &&
                     d.CustomerId == dto.CustomerId.Value, ct);
@@ -198,7 +198,7 @@ public class GhlDealsController : ControllerBase
             var custNameLower = dto.CustomerName.Trim().ToLower();
             existingDeal = await _db.GhlDeals
                 .Include(d => d.AssignedAgent)
-                .ThenInclude(a => a.Role)
+                .ThenInclude(a => a!.Role)
                 .FirstOrDefaultAsync(d =>
                     d.CompanyId == companyId.Value &&
                     d.CustomerName.ToLower() == custNameLower, ct);
@@ -312,7 +312,7 @@ public class GhlDealsController : ControllerBase
     {
         var deal = await _db.GhlDeals
             .Include(d => d.AssignedAgent)
-            .ThenInclude(a => a.Role)
+            .ThenInclude(a => a!.Role)
             .Include(d => d.Customer)
             .FirstOrDefaultAsync(d => d.Id == id && (!_currentUser.CompanyId.HasValue || d.CompanyId == _currentUser.CompanyId.Value), ct);
 
@@ -358,7 +358,7 @@ public class GhlDealsController : ControllerBase
         var isSuperAdmin = _currentUser.Role == "super_admin";
         var deal = await _db.GhlDeals
             .Include(d => d.AssignedAgent)
-            .ThenInclude(a => a.Role)
+            .ThenInclude(a => a!.Role)
             .FirstOrDefaultAsync(d => d.Id == id && (isSuperAdmin || !_currentUser.CompanyId.HasValue || d.CompanyId == _currentUser.CompanyId.Value), ct);
 
         if (deal == null)
@@ -416,7 +416,7 @@ public class GhlDealsController : ControllerBase
         // Verify deal belongs to this company
         var deal = await _db.GhlDeals
             .Include(d => d.AssignedAgent)
-            .ThenInclude(a => a.Role)
+            .ThenInclude(a => a!.Role)
             .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == companyId.Value, ct);
 
         if (deal == null)

@@ -372,7 +372,7 @@ public class SalesExecutiveCallsController : ControllerBase
         var effectiveDuration = isSimulated ? 0 : dto.Duration;
         var rawNotes = dto.Notes?.Trim() ?? string.Empty;
 
-        var effectiveDisposition = dto.Disposition.Trim();
+        var effectiveDisposition = dto.Disposition?.Trim() ?? string.Empty;
         if (isSimulated && (effectiveDisposition == "Interested" || effectiveDisposition == "Converted"))
         {
             effectiveDisposition = "No Response";
@@ -476,7 +476,7 @@ public class SalesExecutiveCallsController : ControllerBase
             var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == resolvedLeadId.Value && l.CompanyId == companyId.Value, ct);
             if (lead != null)
             {
-                var dispo = dto.Disposition.Trim();
+                var dispo = dto.Disposition?.Trim() ?? string.Empty;
                 if (string.Equals(dispo, "Follow-up Required", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(dispo, "Follow Up Required", StringComparison.OrdinalIgnoreCase))
                 {

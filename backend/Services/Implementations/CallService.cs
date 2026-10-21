@@ -193,7 +193,7 @@ public sealed class CallService(ApplicationDbContext context, ICurrentUserServic
                     ContactId = lead.Id.ToString(), 
                     ContactType = "lead", 
                     ContactName = lead.Name, 
-                    ContactPhone = lead.Phone, 
+                    ContactPhone = lead.Phone ?? string.Empty, 
                     ContactEmail = lead.Email,
                     ScheduledAt = request.FollowupAt ?? DateTime.UtcNow.AddDays(1), 
                     Notes = request.Notes ?? string.Empty,

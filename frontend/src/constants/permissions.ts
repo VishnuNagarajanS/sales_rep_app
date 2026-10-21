@@ -54,7 +54,19 @@ export const PERMISSIONS = {
   // Calling & Telephony aliases
   CALL_CENTER: 'calls.make',
   CALL_HISTORY: 'calls.view',
-  CALL_SETTINGS: 'calls.view',
+  CALL_SETTINGS: 'calls.settings.view',
+  CALL_SETTINGS_VIEW: 'calls.settings.view',
+
+  // Dashboard & Overview
+  DASHBOARD_VIEW: 'dashboard.view',
+
+  // Granular Leads
+  LEADS_ASSIGNED_VIEW: 'leads.assigned.view',
+  LEADS_PENDING_VIEW: 'leads.pending.view',
+  LEADS_ARCHIVED_VIEW: 'leads.archived.view',
+
+  // Granular Customers
+  CUSTOMERS_CONVERTED_VIEW: 'customers.converted.view',
 
   // Reports
   REPORTS_VIEW: 'reports.view',
@@ -65,6 +77,17 @@ export const PERMISSIONS = {
 
   // KYC
   KYC_VERIFY: 'kyc.verify',
+
+  // Documents
+  DOCUMENTS_VIEW: 'documents.view',
+  DOCUMENTS_MANAGE: 'documents.manage',
+
+  // Work Handover & Leaves
+  WORK_HANDOVER_VIEW: 'work_handover.view',
+  LEAVE_REQUESTS_VIEW: 'leave_requests.view',
+
+  // Support
+  SUPPORT_VIEW: 'support.view',
 
   // Admin & Settings
   USERS_VIEW: 'users.view',
