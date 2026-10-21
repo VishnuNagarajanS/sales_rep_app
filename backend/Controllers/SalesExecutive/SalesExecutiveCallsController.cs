@@ -504,6 +504,29 @@ public class SalesExecutiveCallsController : ControllerBase
                             : $"{lead.Notes}\n\n[{DateTime.UtcNow:yyyy-MM-dd}] Not Interested: {dto.Notes}";
                     }
                 }
+                else if (string.Equals(dispo, "Call Back", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(dispo, "Callback", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "Callback";
+                    lead.UpdatedAt = DateTime.UtcNow;
+                    if (!string.IsNullOrWhiteSpace(dto.Notes))
+                    {
+                        lead.Notes = string.IsNullOrWhiteSpace(lead.Notes)
+                            ? $"[{DateTime.UtcNow:yyyy-MM-dd}] Call Back: {dto.Notes}"
+                            : $"{lead.Notes}\n\n[{DateTime.UtcNow:yyyy-MM-dd}] Call Back: {dto.Notes}";
+                    }
+                }
+                else if (string.Equals(dispo, "No Response", StringComparison.OrdinalIgnoreCase))
+                {
+                    lead.Status = "No Response";
+                    lead.UpdatedAt = DateTime.UtcNow;
+                    if (!string.IsNullOrWhiteSpace(dto.Notes))
+                    {
+                        lead.Notes = string.IsNullOrWhiteSpace(lead.Notes)
+                            ? $"[{DateTime.UtcNow:yyyy-MM-dd}] No Response: {dto.Notes}"
+                            : $"{lead.Notes}\n\n[{DateTime.UtcNow:yyyy-MM-dd}] No Response: {dto.Notes}";
+                    }
+                }
                 else if (string.Equals(dispo, "Wrong Number", StringComparison.OrdinalIgnoreCase))
                 {
                     lead.Status = "Junk";

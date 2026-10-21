@@ -526,33 +526,6 @@ public class IrmKycController : ControllerBase
         return Ok(result);
     }
 
-    [HttpPost("{id:int}/resend-link")]
-    [Authorize]
-    public async Task<IActionResult> ResendLink(int id, [FromBody] ResendKycLinkDto? dto, CancellationToken ct)
-    {
-        if (User.IsGhlAdmin())
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<SendKycLinkResponseDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
-        }
-
-        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
-        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
-        var companyId = User.GetCompanyId(0);
-        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
-        if (companyId <= 0)
-            return Unauthorized();
-
-        var userId = User.GetUserId();
-        if (userId <= 0)
-            return Unauthorized();
-
-        var result = await _kycService.ResendKycLinkAsync(id, companyId, userId, dto, ct);
-        if (!result.Success)
-            return BadRequest(result);
-
-        return Ok(result);
-    }
-
     [HttpPost("otp/send")]
     [AllowAnonymous]
     public async Task<IActionResult> SendOtp([FromBody] SendKycOtpRequestDto dto, CancellationToken ct)

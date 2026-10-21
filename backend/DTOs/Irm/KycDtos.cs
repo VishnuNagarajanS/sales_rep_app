@@ -327,9 +327,3 @@ public class VerifyKycOtpResponseDto
     public string? Email { get; set; }
 }
 
-public class ResendKycLinkDto
-{
-    public string? BaseUrl { get; set; }
-    public int? ExpiryDays { get; set; }
-}
-

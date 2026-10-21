@@ -167,35 +167,54 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const agentsList = useMemo(() => storageService.getAgents(tenant?.id), [tenant?.id]);
 
-  const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
+  const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Callback', 'Not Interested', 'Junk'];
 
   const pendingFollowupContactIds = useMemo(() => {
+    const directLocalFus = storageService.getFollowups ? storageService.getFollowups() : [];
+    const merged = [...(allFollowups || []), ...(directLocalFus || [])];
     return new Set(
-      (allFollowups || [])
-        .filter((f: any) => f.status === 'Pending')
+      merged
+        .filter((f: any) => String(f.status || '').toLowerCase() === 'pending')
         .map((f: any) => String(f.contactId || ''))
         .filter(Boolean)
     );
   }, [allFollowups]);
 
   const pendingFollowupPhones = useMemo(() => {
+    const directLocalFus = storageService.getFollowups ? storageService.getFollowups() : [];
+    const merged = [...(allFollowups || []), ...(directLocalFus || [])];
     return new Set(
-      (allFollowups || [])
-        .filter((f: any) => f.status === 'Pending')
+      merged
+        .filter((f: any) => String(f.status || '').toLowerCase() === 'pending')
         .map((f: any) => (f.contactPhone || '').replace(/\D/g, '').slice(-10))
         .filter(Boolean)
     );
   }, [allFollowups]);
 
+  const pendingFollowupNames = useMemo(() => {
+    const directLocalFus = storageService.getFollowups ? storageService.getFollowups() : [];
+    const merged = [...(allFollowups || []), ...(directLocalFus || [])];
+    return new Set(
+      merged
+        .filter((f: any) => String(f.status || '').toLowerCase() === 'pending')
+        .map((f: any) => (f.contactName || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+  }, [allFollowups]);
+
   const isLeadInFollowupOrMoved = (l: Lead) => {
-    // Leads with status 'Callback', 'No Response', 'New', or 'Contacted' strictly belong in My Leads!
-    if (l.status === 'Callback' || l.status === 'No Response' || l.status === 'New' || l.status === 'Contacted') {
-      return false;
-    }
-    if (MOVED_LEAD_STATUSES.includes(l.status)) return true;
+    const sNorm = (l.status || '').trim().toLowerCase();
+    if (sNorm === 'callback' || sNorm === 'follow-up required') return true;
     if (pendingFollowupContactIds.has(String(l.id))) return true;
     const phoneDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
     if (phoneDigits && pendingFollowupPhones.has(phoneDigits)) return true;
+    const lName = (l.name || '').trim().toLowerCase();
+    if (lName && pendingFollowupNames.has(lName)) return true;
+
+    if (l.status === 'No Response' || l.status === 'New' || l.status === 'Contacted') {
+      return false;
+    }
+    if (MOVED_LEAD_STATUSES.includes(l.status)) return true;
     return false;
   };
 
@@ -237,22 +256,32 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       const uId = String(user?.id);
       const uName = (user?.name || '').trim().toLowerCase();
 
+      const directLocalFollowups = storageService.getFollowups ? storageService.getFollowups() : [];
+      const combinedAllFus = [...(allFollowups || []), ...(directLocalFollowups || [])];
+
       const pendingFollowupContactIds = new Set<string>(
-        (allFollowups || [])
-          .filter(f => f.status === 'Pending')
+        combinedAllFus
+          .filter(f => String(f.status || '').toLowerCase() === 'pending')
           .map(f => String(f.contactId || ''))
           .filter(Boolean)
       );
       const pendingFollowupPhones = new Set<string>(
-        (allFollowups || [])
-          .filter(f => f.status === 'Pending')
+        combinedAllFus
+          .filter(f => String(f.status || '').toLowerCase() === 'pending')
           .map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10))
+          .filter(Boolean)
+      );
+      const pendingFollowupNames = new Set<string>(
+        combinedAllFus
+          .filter(f => String(f.status || '').toLowerCase() === 'pending')
+          .map(f => (f.contactName || '').trim().toLowerCase())
           .filter(Boolean)
       );
 
       const raw = tenantLeads.filter(l => {
         const sNorm = (l.status || '').trim().toLowerCase();
-        const allowedIrmStatuses = ['interested', 'no response', 'callback', 'new', 'contacted'];
+        if (sNorm === 'callback' || sNorm === 'follow-up required') return false;
+        const allowedIrmStatuses = ['interested', 'no response', 'new', 'contacted'];
         if (!allowedIrmStatuses.includes(sNorm)) return false;
 
         const isAssignedToThisIrm =
@@ -269,6 +298,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         if (pendingFollowupContactIds.has(String(l.id))) return false;
         const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
         if (lPhone && pendingFollowupPhones.has(lPhone)) return false;
+        const lName = (l.name || '').trim().toLowerCase();
+        if (lName && pendingFollowupNames.has(lName)) return false;
         return true;
       });
 
@@ -483,12 +514,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     try {
       setLoadError(null);
       const [updatedFollowups, updatedCustomers, updatedDeals, irmsList] = await Promise.all([
-        getFollowups(tenant?.id).catch(() => []),
-        getCustomers(tenant?.id).catch(() => []),
-        getDeals(tenant?.id).catch(() => []),
+        getFollowups(tenant?.id).catch(() => storageService.getFollowups(tenant?.id) || []),
+        getCustomers(tenant?.id).catch(() => storageService.getCustomers(tenant?.id) || []),
+        getDeals(tenant?.id).catch(() => storageService.getDeals(tenant?.id) || []),
         getCompanyIrms(tenant?.id).catch(() => []),
       ]);
-      const pendingFus = (updatedFollowups || []).filter((f: any) => f.status === 'Pending');
+      const localFus = storageService.getFollowups(tenant?.id) || [];
+      const combinedFusMap = new Map<string, any>();
+      (updatedFollowups || []).forEach((f: any) => {
+        if (f && f.id) combinedFusMap.set(String(f.id), f);
+      });
+      (localFus || []).forEach((f: any) => {
+        if (f && f.id && !combinedFusMap.has(String(f.id))) combinedFusMap.set(String(f.id), f);
+      });
+      const pendingFus = Array.from(combinedFusMap.values()).filter((f: any) => f.status === 'Pending');
       setAllFollowups(pendingFus);
       setCustomers(updatedCustomers || []);
       setDeals(updatedDeals || []);
@@ -627,6 +666,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const filteredLeads = scopedLeads.filter(lead => {
     if (assignedLeadIds.has(lead.id)) return false;
+    const sNorm = (lead.status || '').trim().toLowerCase();
+    if (sNorm === 'callback' || sNorm === 'follow-up required') return false;
     if (isGhlSalesExec && lead.status !== 'Callback') {
       const leadPhoneDigits = (lead.phone || '').replace(/\D/g, '').slice(-10);
       const hasPendingFollowup = ghlPendingFollowups.some(f => {

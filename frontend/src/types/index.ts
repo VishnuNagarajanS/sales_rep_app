@@ -1118,3 +1118,71 @@ export interface PlatformTicket {
   timeline: TicketTimelineEvent[];
 }
 
+// ── Enterprise Super Admin Types ────────────────────────────────────────────
+export interface ServerLogEntry {
+  id: string;
+  timestamp: string;
+  level: string;
+  method: string;
+  path: string;
+  requestPath?: string;
+  message: string;
+  stackTrace?: string;
+  source?: string;
+  exceptionType?: string;
+  ipAddress?: string;
+  statusCode?: number;
+}
+
+export interface TableSize {
+  tableName: string;
+  recordCount: number;
+  rowCount?: number;
+  sizeFormatted: string;
+  totalSize?: string;
+  dataSize?: string;
+  indexSize?: string;
+  sizeBytes: number;
+}
+
+export interface DatabaseRadar {
+  activeConnections: number;
+  idleConnections: number;
+  totalConnections: number;
+  maxPoolSize: number;
+  poolUtilizationPercent: number;
+  databaseEngine: string;
+  databaseName: string;
+  status: string;
+  blockedQueriesCount: number;
+  idleInTransaction?: number;
+  totalDatabaseSize?: string;
+  tableSizes: TableSize[];
+  checkedAt: string;
+}
+
+export interface BackgroundJobStatus {
+  id: string;
+  name: string;
+  description: string;
+  schedule: string;
+  status: 'Running' | 'Idle' | 'Failed' | string;
+  lastRunAt?: string;
+  nextRunAt?: string;
+  lastDurationMs: number;
+  durationMs?: number;
+  totalRunsCount: number;
+  processedItemsCount: number;
+  itemsProcessedLastRun?: number;
+  lastError?: string;
+  canTriggerManually: boolean;
+}
+
+export interface EmergencyLockdownStatus {
+  isActive: boolean;
+  reason?: string;
+  initiatedBy?: string;
+  initiatedAt?: string;
+  revokedSessionsCount?: number;
+}
+

@@ -21,6 +21,10 @@ import {
   PlatformTicket,
   TicketTimelineEvent,
   DocumentItem,
+  ServerLogEntry,
+  DatabaseRadar,
+  BackgroundJobStatus,
+  EmergencyLockdownStatus,
 } from '../types';
 import { DEFAULT_TENANTS } from '../constants/defaultTenants';
 import { SYSTEM_ROLES } from '../constants/roles';
@@ -2712,6 +2716,91 @@ export class SuperAdminService {
     const res = await apiClient.delete<ApiResponse<any>>(`/super-admin/documents/${id}`);
     window.dispatchEvent(new Event('nexus_storage_updated'));
     return res.success;
+  }
+
+  // ── ENTERPRISE: USER IMPERSONATION ────────────────────────────────────────
+
+  async impersonateUser(userId: string | number): Promise<any> {
+    const res = await apiClient.post<ApiResponse<any>>(`/super-admin/users/${userId}/impersonate`);
+    if (res && res.data) {
+      return res.data;
+    }
+    throw new Error(res?.message || 'Failed to initialize user impersonation session.');
+  }
+
+  // ── ENTERPRISE: LIVE SERVER LOGS STREAM ───────────────────────────────────
+
+  async fetchServerLogs(params?: { search?: string; level?: string; limit?: number }): Promise<ServerLogEntry[]> {
+    const q = new URLSearchParams();
+    if (params?.search) q.set('search', params.search);
+    if (params?.level && params.level !== 'all') q.set('level', params.level);
+    if (params?.limit) q.set('limit', String(params.limit));
+
+    const res = await apiClient.get<ApiResponse<ServerLogEntry[]>>(`/super-admin/system/logs?${q.toString()}`);
+    return res?.data || [];
+  }
+
+  async clearServerLogs(): Promise<boolean> {
+    const res = await apiClient.delete<ApiResponse<boolean>>('/super-admin/system/logs');
+    return res?.success ?? false;
+  }
+
+  getDownloadServerLogsUrl(): string {
+    return `${apiClient.getBaseUrl()}/super-admin/system/logs/download`;
+  }
+
+  // ── ENTERPRISE: DATABASE RADAR & CONNECTION POOL ──────────────────────────
+
+  async fetchDatabaseRadar(): Promise<DatabaseRadar> {
+    const res = await apiClient.get<ApiResponse<DatabaseRadar>>('/super-admin/system/database/radar');
+    if (res && res.data) return res.data;
+    throw new Error(res?.message || 'Failed to read database connection radar.');
+  }
+
+  async terminateIdleConnections(): Promise<number> {
+    const res = await apiClient.post<ApiResponse<number>>('/super-admin/system/database/terminate-idle');
+    if (res && res.data !== undefined) return res.data;
+    throw new Error(res?.message || 'Failed to terminate idle database connections.');
+  }
+
+  // ── ENTERPRISE: BACKGROUND SERVICES & CRON SCHEDULER ──────────────────────
+
+  async fetchBackgroundJobs(): Promise<BackgroundJobStatus[]> {
+    const res = await apiClient.get<ApiResponse<BackgroundJobStatus[]>>('/super-admin/system/background-jobs');
+    return res?.data || [];
+  }
+
+  async triggerBackgroundJob(jobId: string): Promise<string> {
+    const res = await apiClient.post<ApiResponse<string>>(`/super-admin/system/background-jobs/${jobId}/trigger`);
+    if (res && res.data) return res.data;
+    throw new Error(res?.message || 'Failed to trigger background job.');
+  }
+
+  // ── ENTERPRISE: PLATFORM EMERGENCY LOCKDOWN ───────────────────────────────
+
+  async fetchLockdownStatus(): Promise<EmergencyLockdownStatus> {
+    const res = await apiClient.get<ApiResponse<EmergencyLockdownStatus>>('/super-admin/security/lockdown');
+    return res?.data || { isActive: false };
+  }
+
+  async activateEmergencyLockdown(reason?: string): Promise<EmergencyLockdownStatus> {
+    const res = await apiClient.post<ApiResponse<EmergencyLockdownStatus>>('/super-admin/security/lockdown', {
+      reason: reason || 'Emergency security mitigation initiated by Super Administrator.'
+    });
+    if (res && res.data) return res.data;
+    throw new Error(res?.message || 'Failed to engage emergency lockdown.');
+  }
+
+  async deactivateEmergencyLockdown(): Promise<EmergencyLockdownStatus> {
+    const res = await apiClient.post<ApiResponse<EmergencyLockdownStatus>>('/super-admin/security/unlock');
+    if (res && res.data) return res.data;
+    throw new Error(res?.message || 'Failed to disengage emergency lockdown.');
+  }
+
+  // ── ENTERPRISE: TENANT COMPLIANCE EXPORT ──────────────────────────────────
+
+  getComplianceExportUrl(tenantId: string): string {
+    return `${apiClient.getBaseUrl()}/super-admin/tenants/${tenantId}/compliance-export`;
   }
 }
 

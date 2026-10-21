@@ -2,12 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   MoreVertical,
-  RotateCw,
   Ban,
   Copy,
-  FileSearch,
-  Eye,
-  FileCheck,
   Phone,
   ArrowRight,
   UserCheck,
@@ -18,8 +14,8 @@ import './KycLinkComponents.css';
 
 interface KycRowActionsMenuProps {
   deal: Deal;
-  onOpenReview: (deal: Deal) => void;
   onShowToast: (msg: string) => void;
+  onOpenReview?: (deal: Deal) => void;
   onViewProfile?: (deal: Deal) => void;
   onEditKyc?: (deal: Deal) => void;
   onAssistedKyc?: (deal: Deal) => void;
@@ -30,10 +26,7 @@ interface KycRowActionsMenuProps {
 
 export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
   deal,
-  onOpenReview,
   onShowToast,
-  onViewProfile,
-  onEditKyc,
   onAssistedKyc,
   onCallInvestor,
   onAdvanceStage,
@@ -87,13 +80,6 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
     }
   };
 
-  const handleReview = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setIsOpen(false);
-    onOpenReview(deal);
-  };
-
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -141,56 +127,6 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
     }
   };
 
-  const handleResend = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setIsOpen(false);
-    try {
-      const kycId = (deal as any).kycId || (deal as any).kycRecordId;
-      if (kycId) {
-        const res = await fetch(`/api/irm/kyc/${kycId}/resend-link`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeaders(),
-          },
-          body: JSON.stringify({ baseUrl: window.location.origin }),
-        });
-        const json = await res.json();
-        if (res.ok && json?.success) {
-          onShowToast(`KYC Link resent to ${deal.customerName}`);
-          return;
-        }
-      }
-
-      // Fallback to send-link endpoint
-      const sendRes = await fetch('/api/irm/kyc/send-link', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify({
-          dealId: deal.id,
-          investorId: deal.customerId || deal.id,
-          customerName: deal.customerName,
-          email: deal.email || '',
-          phone: deal.phone || '',
-          forceNewToken: true,
-          baseUrl: window.location.origin,
-        }),
-      });
-      const sendJson = await sendRes.json();
-      if (sendRes.ok && sendJson?.success) {
-        onShowToast(`KYC Link resent to ${deal.customerName}`);
-      } else {
-        throw new Error(sendJson?.message || 'Could not resend KYC link');
-      }
-    } catch (err: any) {
-      onShowToast(err.message || `Failed to resend KYC link for ${deal.customerName}`);
-    }
-  };
-
   const handleRevoke = async (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -218,20 +154,6 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
     } catch (err: any) {
       onShowToast(err.message || `Failed to revoke KYC link for ${deal.customerName}`);
     }
-  };
-
-  const handleProfile = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setIsOpen(false);
-    if (onViewProfile) onViewProfile(deal);
-  };
-
-  const handleEditKyc = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setIsOpen(false);
-    if (onEditKyc) onEditKyc(deal);
   };
 
   const handleCall = (e: React.MouseEvent) => {
@@ -276,16 +198,6 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
           onClick={e => e.stopPropagation()}
           role="menu"
         >
-          <button
-            type="button"
-            className="kyc-link-menu-item"
-            role="menuitem"
-            onClick={handleReview}
-          >
-            <FileSearch size={14} color="#06b6d4" />
-            <span>Review Submission</span>
-          </button>
-
           {!isGhlAdmin && (
             <>
               <button
@@ -300,16 +212,6 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
 
               <button
                 type="button"
-                className="kyc-link-menu-item"
-                role="menuitem"
-                onClick={handleResend}
-              >
-                <RotateCw size={14} color="#3b82f6" />
-                <span>Resend Link</span>
-              </button>
-
-              <button
-                type="button"
                 className="kyc-link-menu-item kyc-link-menu-item-danger"
                 role="menuitem"
                 onClick={handleRevoke}
@@ -320,20 +222,8 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
             </>
           )}
 
-          {(onViewProfile || onEditKyc || onCallInvestor || onAdvanceStage) && (
+          {(onAssistedKyc || onCallInvestor || onAdvanceStage) && !isGhlAdmin && (
             <div className="kyc-link-menu-divider" />
-          )}
-
-          {onViewProfile && (
-            <button
-              type="button"
-              className="kyc-link-menu-item"
-              role="menuitem"
-              onClick={handleProfile}
-            >
-              <Eye size={14} color="#06b6d4" />
-              <span>View Full Profile</span>
-            </button>
           )}
 
           {onAssistedKyc && (() => {
@@ -367,18 +257,6 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
               </button>
             );
           })()}
-
-          {onEditKyc && (
-            <button
-              type="button"
-              className="kyc-link-menu-item"
-              role="menuitem"
-              onClick={handleEditKyc}
-            >
-              <FileCheck size={14} color="#10b981" />
-              <span>Complete / Edit KYC Flow</span>
-            </button>
-          )}
 
           {onCallInvestor && (
             <button

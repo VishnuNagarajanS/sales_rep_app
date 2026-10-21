@@ -18,6 +18,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
+  Lock,
+  Unlock,
+  Zap,
+  Radio,
 } from 'lucide-react';
 import {
   superAdminService,
@@ -27,11 +31,13 @@ import {
   MfaStatusDto,
   MfaSetupResponseDto,
 } from '../../../services/superAdminService';
+import { EmergencyLockdownStatus } from '../../../types';
+import { Modal } from '../../../components/common/Modal';
 import { signalRService } from '../../../services/signalRService';
 import './PlatformSecurityPage.css';
 
 export const PlatformSecurityPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'mfa' | 'events'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'mfa' | 'events' | 'lockdown'>('overview');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -67,21 +73,84 @@ export const PlatformSecurityPage: React.FC = () => {
     setTimeout(() => setSuccessMsg(null), 4000);
   };
 
+  // Emergency Lockdown State
+  const [lockdownStatus, setLockdownStatus] = useState<EmergencyLockdownStatus | null>(null);
+  const [isLoadingLockdown, setIsLoadingLockdown] = useState(false);
+  const [isLockdownModalOpen, setIsLockdownModalOpen] = useState(false);
+  const [lockdownReason, setLockdownReason] = useState('');
+  const [lockdownConfirmText, setLockdownConfirmText] = useState('');
+  const [isSubmittingLockdown, setIsSubmittingLockdown] = useState(false);
+
+  const loadLockdownStatus = async () => {
+    setIsLoadingLockdown(true);
+    try {
+      const status = await superAdminService.fetchLockdownStatus();
+      setLockdownStatus(status);
+    } catch (err: any) {
+      console.warn('Failed to load emergency lockdown status:', err);
+    } finally {
+      setIsLoadingLockdown(false);
+    }
+  };
+
+  const handleTriggerLockdown = async () => {
+    if (!lockdownReason.trim()) {
+      alert('A valid operational reason is required to initiate an Emergency Threat Lockdown.');
+      return;
+    }
+    if (lockdownConfirmText.trim().toUpperCase() !== 'LOCKDOWN') {
+      alert('Please type LOCKDOWN exactly to confirm activation.');
+      return;
+    }
+
+    setIsSubmittingLockdown(true);
+    try {
+      const result = await superAdminService.activateEmergencyLockdown(lockdownReason.trim());
+      setLockdownStatus(result);
+      setIsLockdownModalOpen(false);
+      setLockdownReason('');
+      setLockdownConfirmText('');
+      showSuccess('EMERGENCY THREAT LOCKDOWN ENGAGED. Platform is sealed.');
+      await loadData(false);
+    } catch (err: any) {
+      alert(err.message || 'Failed to engage emergency lockdown.');
+    } finally {
+      setIsSubmittingLockdown(false);
+    }
+  };
+
+  const handleLiftLockdown = async () => {
+    if (!window.confirm('Are you sure you want to disarm platform lockdown and resume normal operations?')) return;
+    setIsSubmittingLockdown(true);
+    try {
+      const result = await superAdminService.deactivateEmergencyLockdown();
+      setLockdownStatus(result);
+      showSuccess('Threat Lockdown disarmed. Normal platform operations restored.');
+      await loadData(false);
+    } catch (err: any) {
+      alert(err.message || 'Failed to disarm lockdown.');
+    } finally {
+      setIsSubmittingLockdown(false);
+    }
+  };
+
   const loadData = async (manual = false) => {
     if (manual) setIsRefreshing(true);
     else setIsLoading(true);
     setErrorMsg(null);
 
     try {
-      const [ovRes, sessRes, mfaRes] = await Promise.all([
+      const [ovRes, sessRes, mfaRes, lockRes] = await Promise.all([
         superAdminService.getSecurityOverview(),
         superAdminService.getUserSessions(),
         superAdminService.getMfaStatus(),
+        superAdminService.fetchLockdownStatus().catch(() => ({ isActive: false })),
       ]);
 
       setOverview(ovRes);
       setSessions(sessRes);
       setMfaStatus(mfaRes);
+      setLockdownStatus(lockRes);
 
       if (manual) showSuccess('Security telemetry & active sessions refreshed.');
     } catch (err: any) {
@@ -125,10 +194,20 @@ export const PlatformSecurityPage: React.FC = () => {
       loadEvents();
       loadData(false);
     });
+    const unsubLockdown = signalRService.on('PlatformLockdownEngaged', () => {
+      loadLockdownStatus();
+      loadData(false);
+    });
+    const unsubUnlock = signalRService.on('PlatformLockdownDisengaged', () => {
+      loadLockdownStatus();
+      loadData(false);
+    });
 
     return () => {
       unsubSession();
       unsubSecurity();
+      unsubLockdown();
+      unsubUnlock();
     };
   }, []);
 
@@ -297,6 +376,46 @@ export const PlatformSecurityPage: React.FC = () => {
         </div>
       )}
 
+      {/* Active Lockdown Banner */}
+      {lockdownStatus?.isActive && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.25) 0%, rgba(185, 28, 28, 0.35) 100%)',
+          border: '1px solid rgba(239, 68, 68, 0.6)',
+          borderRadius: '12px',
+          padding: '16px 20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
+          boxShadow: '0 0 25px rgba(239, 68, 68, 0.25)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div style={{ background: '#ef4444', borderRadius: '50%', padding: '8px', color: '#fff', display: 'flex' }}>
+              <ShieldAlert size={22} />
+            </div>
+            <div>
+              <div style={{ fontSize: '15px', fontWeight: 700, color: '#fef2f2', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🚨 PLATFORM EMERGENCY THREAT LOCKDOWN ENGAGED
+              </div>
+              <div style={{ fontSize: '13px', color: '#fca5a5', marginTop: '2px' }}>
+                Reason: <strong>{lockdownStatus.reason || 'Security threat mitigation'}</strong>
+                {lockdownStatus.initiatedBy ? ` • Engaged by: ${lockdownStatus.initiatedBy}` : ''}
+                {lockdownStatus.initiatedAt ? ` (${new Date(lockdownStatus.initiatedAt).toLocaleTimeString()})` : ''}
+              </div>
+            </div>
+          </div>
+          <button
+            className="btn btn-sm"
+            style={{ background: '#ffffff', color: '#b91c1c', fontWeight: 700, border: 'none' }}
+            onClick={handleLiftLockdown}
+            disabled={isSubmittingLockdown}
+          >
+            <Unlock size={14} /> Disarm Lockdown Now
+          </button>
+        </div>
+      )}
+
       {/* KPI Overview Grid */}
       <div className="security-kpi-grid">
         <div className="security-card">
@@ -310,21 +429,6 @@ export const PlatformSecurityPage: React.FC = () => {
           </div>
           <div style={{ fontSize: '12px', color: '#94a3b8' }}>Real-time verified via JWT session ledger</div>
         </div>
-
-        {/* <div className="security-card">
-          <div className="security-card-header">
-            <span className="diag-label">Super Admin MFA Status</span>
-            <ShieldCheck size={18} style={{ color: mfaStatus?.isTwoFactorEnabled ? '#10b981' : '#f59e0b' }} />
-          </div>
-          <div className="diag-val" style={{ color: mfaStatus?.isTwoFactorEnabled ? '#34d399' : '#fbbf24' }}>
-            {mfaStatus?.isTwoFactorEnabled ? 'ENFORCED' : 'OPTIONAL'}
-          </div>
-          <div style={{ fontSize: '12px', color: '#94a3b8' }}>
-            {mfaStatus?.isTwoFactorEnabled
-              ? `${mfaStatus.remainingRecoveryCodes} recovery codes remaining`
-              : 'TOTP enrollment recommended'}
-          </div>
-        </div> */}
 
         <div className="security-card">
           <div className="security-card-header">
@@ -375,6 +479,17 @@ export const PlatformSecurityPage: React.FC = () => {
           onClick={() => setActiveTab('events')}
         >
           <ShieldAlert size={15} /> Privileged Security Events ({totalEvents})
+        </button>
+
+        <button
+          className={`system-tab-btn ${activeTab === 'lockdown' ? 'active' : ''}`}
+          onClick={() => setActiveTab('lockdown')}
+          style={lockdownStatus?.isActive ? { borderColor: '#ef4444', color: '#f87171' } : {}}
+        >
+          <Lock size={15} /> Threat Lockdown
+          <span className={`tab-badge ${lockdownStatus?.isActive ? 'critical' : 'neutral'}`}>
+            {lockdownStatus?.isActive ? 'LOCKED' : 'Nominal'}
+          </span>
         </button>
       </div>
 
@@ -818,6 +933,194 @@ export const PlatformSecurityPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* TAB 4: EMERGENCY THREAT LOCKDOWN */}
+      {activeTab === 'lockdown' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Main Defense Card */}
+          <div className="security-card" style={{ padding: '28px', border: lockdownStatus?.isActive ? '1px solid #ef4444' : '1px solid #1e293b' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 700, color: lockdownStatus?.isActive ? '#ef4444' : '#10b981', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Radio size={14} /> DEFENSE POSTURE: {lockdownStatus?.isActive ? 'SEALED / CRITICAL MITIGATION' : 'NOMINAL ACTIVE'}
+                </div>
+                <h3 style={{ fontSize: 22, fontWeight: 800, color: '#f8fafc', margin: '8px 0 6px' }}>
+                  Platform Emergency Threat Lockdown (Panic Mode)
+                </h3>
+                <p style={{ fontSize: 13, color: '#94a3b8', margin: 0, maxWidth: 680 }}>
+                  Immediate perimeter circuit breaker. Engages full lockdown by rejecting all non-Super Administrator API requests, terminating tenant user sessions, and halting incoming telephony routing.
+                </p>
+              </div>
+
+              <div>
+                {lockdownStatus?.isActive ? (
+                  <button
+                    className="btn btn-sm"
+                    style={{ background: '#ffffff', color: '#b91c1c', fontWeight: 700, border: 'none', padding: '10px 18px', display: 'flex', alignItems: 'center', gap: 8 }}
+                    onClick={handleLiftLockdown}
+                    disabled={isSubmittingLockdown}
+                  >
+                    <Unlock size={16} /> Disarm Lockdown
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-danger btn-sm"
+                    style={{ padding: '10px 18px', display: 'flex', alignItems: 'center', gap: 8 }}
+                    onClick={() => {
+                      setLockdownReason('');
+                      setLockdownConfirmText('');
+                      setIsLockdownModalOpen(true);
+                    }}
+                  >
+                    <Lock size={16} /> Engage Threat Lockdown
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Status Summary Banner */}
+            <div style={{
+              marginTop: 24,
+              background: lockdownStatus?.isActive ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.08)',
+              border: lockdownStatus?.isActive ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.25)',
+              borderRadius: 10,
+              padding: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 16,
+            }}>
+              <div style={{
+                background: lockdownStatus?.isActive ? '#ef4444' : '#10b981',
+                borderRadius: '50%',
+                padding: '12px',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                {lockdownStatus?.isActive ? <ShieldAlert size={28} /> : <ShieldCheck size={28} />}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: lockdownStatus?.isActive ? '#fca5a5' : '#86efac' }}>
+                  {lockdownStatus?.isActive ? 'Platform is Currently Sealed Under Emergency Threat Lockdown' : 'All Platform Defensive Systems are Operating Normally'}
+                </div>
+                <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
+                  {lockdownStatus?.isActive ? (
+                    <span>
+                      Incident Reason: <strong style={{ color: '#fef2f2' }}>{lockdownStatus.reason}</strong>
+                      {lockdownStatus.initiatedBy ? ` • Engaged by Super Admin ${lockdownStatus.initiatedBy}` : ''}
+                      {lockdownStatus.initiatedAt ? ` on ${new Date(lockdownStatus.initiatedAt).toLocaleString()}` : ''}
+                    </span>
+                  ) : (
+                    'Cross-tenant isolation, JWT session tokens, telephony gatekeepers, and audit ledgers are running with normal security protocols.'
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Defensive Capabilities Matrix */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginTop: 24 }}>
+              <div style={{ background: 'rgba(15, 23, 42, 0.5)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 10, padding: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, color: '#38bdf8', fontWeight: 700 }}>
+                  <Shield size={18} /> API Perimeter Circuit Breaker
+                </div>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: 0, lineHeight: 1.5 }}>
+                  Instantly returns HTTP 503 Security Lockdown to all incoming API requests from tenant sales reps and company admins.
+                </p>
+              </div>
+
+              <div style={{ background: 'rgba(15, 23, 42, 0.5)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 10, padding: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, color: '#fbbf24', fontWeight: 700 }}>
+                  <LogOut size={18} /> Global Session Token Revocation
+                </div>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: 0, lineHeight: 1.5 }}>
+                  Terminates active JWT session tokens and pushes instant forced-logout notifications across open WebSocket / SignalR client connections.
+                </p>
+              </div>
+
+              <div style={{ background: 'rgba(15, 23, 42, 0.5)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: 10, padding: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, color: '#a78bfa', fontWeight: 700 }}>
+                  <KeyRound size={18} /> Super Admin Console Immunity
+                </div>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: 0, lineHeight: 1.5 }}>
+                  The Super Admin Console maintains uninhibited access so administrators can investigate breach vectors, review error logs, and inspect database tables.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* EMERGENCY THREAT LOCKDOWN CONFIRMATION MODAL */}
+      {/* ========================================================================= */}
+      {isLockdownModalOpen && (
+        <Modal
+          isOpen={isLockdownModalOpen}
+          onClose={() => setIsLockdownModalOpen(false)}
+          title="🚨 ARM EMERGENCY THREAT LOCKDOWN"
+          size="md"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.15)',
+              border: '1px solid rgba(239, 68, 68, 0.4)',
+              borderRadius: 8,
+              padding: '14px',
+              color: '#fca5a5',
+              fontSize: 13,
+              lineHeight: 1.5
+            }}>
+              <strong>WARNING:</strong> Engaging Emergency Threat Lockdown will immediately disconnect all tenant users, terminate active sessions, and reject all non-superadmin API traffic across the entire platform until manually disarmed.
+            </div>
+
+            <div className="form-group">
+              <label className="form-label required">Incident Reason / Threat Summary</label>
+              <textarea
+                className="form-control"
+                rows={3}
+                placeholder="e.g. Credential stuffing anomaly detected on tenant auth endpoints. Immediate mitigation required."
+                value={lockdownReason}
+                onChange={(e) => setLockdownReason(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label required">
+                Confirmation Check (Type <code>LOCKDOWN</code> to confirm)
+              </label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Type LOCKDOWN"
+                value={lockdownConfirmText}
+                onChange={(e) => setLockdownConfirmText(e.target.value)}
+              />
+            </div>
+
+            <div className="modal-actions-footer">
+              <button
+                className="btn btn-ghost"
+                onClick={() => setIsLockdownModalOpen(false)}
+                disabled={isSubmittingLockdown}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={
+                  !lockdownReason.trim() ||
+                  lockdownConfirmText.trim().toUpperCase() !== 'LOCKDOWN' ||
+                  isSubmittingLockdown
+                }
+                onClick={handleTriggerLockdown}
+              >
+                {isSubmittingLockdown ? 'Engaging Lockdown...' : 'Engage Platform Lockdown'}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

@@ -16,6 +16,8 @@ import {
   Filter,
   UserPlus,
   RefreshCw,
+  LogIn,
+  ExternalLink,
 } from 'lucide-react';
 import { User, Tenant, Role } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
@@ -74,6 +76,56 @@ export const PlatformUsersPage: React.FC = () => {
 
   // Success Feedback
   const [feedbackMsg, setFeedbackMsg] = useState('');
+
+  // User Direct Impersonation State
+  const [userToImpersonate, setUserToImpersonate] = useState<User | null>(null);
+  const [isImpersonatingLoading, setIsImpersonatingLoading] = useState(false);
+  const [impersonateError, setImpersonateError] = useState<string | null>(null);
+
+  const openUserImpersonateModal = (u: User) => {
+    setImpersonateError(null);
+    setUserToImpersonate(u);
+  };
+
+  const handleConfirmUserImpersonate = async () => {
+    if (!userToImpersonate || isImpersonatingLoading) return;
+    setIsImpersonatingLoading(true);
+    setImpersonateError(null);
+    try {
+      const currentAdminUser = localStorage.getItem('nexus_current_user');
+      const currentAdminToken = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
+      const res = await superAdminService.impersonateUser(userToImpersonate.id);
+
+      const backup = {
+        token: currentAdminToken,
+        user: currentAdminUser ? JSON.parse(currentAdminUser) : null,
+        tenantId: userToImpersonate.companyId || 'global',
+        tenantName: userToImpersonate.companyName || 'Platform Global',
+        impersonatedAt: new Date().toISOString()
+      };
+      localStorage.setItem('nexus_impersonation_backup', JSON.stringify(backup));
+
+      if (res.token) {
+        sessionStorage.setItem('nexus_auth_token', res.token);
+        localStorage.setItem('nexus_auth_token', res.token);
+      }
+      if (res.user) {
+        sessionStorage.setItem('nexus_current_user', JSON.stringify(res.user));
+        localStorage.setItem('nexus_current_user', JSON.stringify(res.user));
+      }
+      if (res.tenant) {
+        sessionStorage.setItem('nexus_current_tenant', JSON.stringify(res.tenant));
+        localStorage.setItem('nexus_current_tenant', JSON.stringify(res.tenant));
+      }
+
+      window.dispatchEvent(new Event('nexus_impersonation_changed'));
+      window.dispatchEvent(new Event('nexus_auth_updated'));
+      window.location.href = res.targetRoute || '/dashboard';
+    } catch (err: any) {
+      setImpersonateError(err.message || 'Failed to establish user impersonation session.');
+      setIsImpersonatingLoading(false);
+    }
+  };
 
   // Unsaved changes tracking
   const isProvisionDirty = isProvisionModalOpen && (newName.trim().length > 0 || newEmail.trim().length > 0);
@@ -559,6 +611,13 @@ export const PlatformUsersPage: React.FC = () => {
                       <td style={{ textAlign: 'right' }}>
                         <div className="user-row-actions">
                           <button
+                            className="action-icon-btn text-cyan"
+                            title={`Log in as ${u.name} (Direct User Impersonation)`}
+                            onClick={() => openUserImpersonateModal(u)}
+                          >
+                            <LogIn size={14} />
+                          </button>
+                          <button
                             className="action-icon-btn"
                             title="Reset Password"
                             onClick={() => openResetModal(u)}
@@ -914,6 +973,78 @@ export const PlatformUsersPage: React.FC = () => {
             <div className="modal-actions-footer">
               <button className="btn btn-primary" onClick={() => setIsResetModalOpen(false)}>
                 Done
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Direct User Impersonation Confirmation Modal */}
+      {userToImpersonate && (
+        <Modal
+          isOpen={!!userToImpersonate}
+          onClose={() => {
+            if (!isImpersonatingLoading) {
+              setUserToImpersonate(null);
+              setImpersonateError(null);
+            }
+          }}
+          title="🕵️ Direct User Impersonation"
+          size="md"
+        >
+          <div className="impersonate-modal-body">
+            <div className="impersonate-modal-alert">
+              <AlertTriangle size={20} className="text-amber" />
+              <div>
+                <div style={{ fontWeight: 700, color: '#f8fafc', marginBottom: 4 }}>
+                  Audited Operational Access
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#cbd5e1', lineHeight: 1.5 }}>
+                  You are about to securely log in as <strong>{userToImpersonate.name}</strong> ({userToImpersonate.email}), assigned role <strong>{userToImpersonate.role.name}</strong> at <strong>{userToImpersonate.companyName || 'Platform Global'}</strong>.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ margin: '14px 0', padding: '12px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: '8px', border: '1px solid rgba(148, 163, 184, 0.15)', fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.6 }}>
+              <div>• A temporary authenticated session will be created in your browser.</div>
+              <div>• A persistent golden banner will be shown at the top of your screen to return anytime.</div>
+              <div>• An immutable record of this session is logged in the <strong>Platform Audit Logs</strong>.</div>
+            </div>
+
+            {impersonateError && (
+              <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', color: '#f87171', fontSize: '0.85rem', marginBottom: '14px' }}>
+                {impersonateError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={isImpersonatingLoading}
+                onClick={() => {
+                  setUserToImpersonate(null);
+                  setImpersonateError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={isImpersonatingLoading}
+                onClick={handleConfirmUserImpersonate}
+                style={{ background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', borderColor: '#0284c7' }}
+              >
+                {isImpersonatingLoading ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" /> Launching Session...
+                  </>
+                ) : (
+                  <>
+                    <ExternalLink size={14} /> Log In as {userToImpersonate.name}
+                  </>
+                )}
               </button>
             </div>
           </div>

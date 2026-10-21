@@ -17,5 +17,4 @@ public interface IKycService
     Task<ApiResponse<List<KycListDto>>> GetAllAsync(int companyId, string? status, int? irmId, CancellationToken ct = default);
     Task<ApiResponse<KycDto>> SaveAssistedKycAsync(int companyId, int irmId, SubmitKycDto dto, CancellationToken ct = default);
     Task<ApiResponse<bool>> RevokeKycLinkAsync(int id, int companyId, int? irmId, CancellationToken ct = default);
-    Task<ApiResponse<SendKycLinkResponseDto>> ResendKycLinkAsync(int id, int companyId, int irmId, ResendKycLinkDto? dto, CancellationToken ct = default);
 }

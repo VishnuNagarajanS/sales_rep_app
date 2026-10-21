@@ -12,9 +12,10 @@ import {
   CheckCircle,
   FileText,
 } from 'lucide-react';
-import { InvestmentOpportunity, Investor, Deal, DealActivity } from '../../types';
+import { InvestmentOpportunity, Investor, Deal, DealActivity, CallRecord, Consultation, Followup } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
+import { useTheme } from '../../context/ThemeContext';
 import { storageService } from '../../services/storageService';
 import {
   getOpportunities,
@@ -22,6 +23,9 @@ import {
   deleteOpportunity as apiDeleteOpportunity,
   getInvestors,
   getDeals,
+  getCalls,
+  getConsultations,
+  getFollowups,
   saveDeal as apiSaveDeal,
   addDealActivity as apiAddDealActivity,
   saveInvestor as apiSaveInvestor,
@@ -80,6 +84,7 @@ const BLANK_OPP_FORM: OppForm = {
 export const OpportunitiesPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { initiateCall } = useCall();
+  const { theme } = useTheme();
 
   const roleCode = (user?.role?.code || '').toLowerCase();
   const isExec = roleCode === 'sales_executive';
@@ -129,19 +134,39 @@ export const OpportunitiesPage: React.FC = () => {
   const [isEditingAmount, setIsEditingAmount] = useState<boolean>(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [allCalls, setAllCalls] = useState<CallRecord[]>([]);
+  const [allConsultations, setAllConsultations] = useState<Consultation[]>([]);
+  const [allFollowups, setAllFollowups] = useState<Followup[]>([]);
+  const [activeDossierTab, setActiveDossierTab] = useState<'all' | 'basic' | 'identity' | 'bank' | 'demat' | 'nominees'>('all');
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, fieldKey: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedField(fieldKey);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const isDark = theme === 'dark';
 
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadData = async () => {
     try {
       setLoadError(null);
-      const [oppsData, investorsData, dealsData] = await Promise.all([
+      const [oppsData, investorsData, dealsData, callsData, consultationsData, followupsData] = await Promise.all([
         getOpportunities(tenant?.id),
         getInvestors(tenant?.id),
         getDeals(tenant?.id),
+        getCalls(tenant?.id).catch(() => storageService.getCalls(tenant?.id) || []),
+        getConsultations(tenant?.id).catch(() => storageService.getConsultations(tenant?.id) || []),
+        getFollowups(tenant?.id).catch(() => storageService.getFollowups(tenant?.id) || []),
       ]);
       setOpps(oppsData || []);
       setInvestors(investorsData || []);
       setDeals(dealsData || []);
+      setAllCalls(callsData || []);
+      setAllConsultations(consultationsData || []);
+      setAllFollowups(followupsData || []);
       setDetailDeal(prev => {
         if (!prev) return null;
         const fresh = (dealsData || []).find(d => d.id === prev.id);
@@ -536,6 +561,22 @@ export const OpportunitiesPage: React.FC = () => {
     showToast(`✓ Investment amount ₹${numericAmount.toLocaleString('en-IN')} confirmed for "${detailDeal.customerName}"`);
   };
 
+  const handleRouteChange = async (route: 'direct_aif' | 'debenture') => {
+    if (!detailDeal) return;
+    const updatedDeal: Deal = {
+      ...detailDeal,
+      investmentRoute: route,
+      investorType: route === 'debenture' ? 'Alternate route to Invest in AIF via Debenture' : 'Direct AIF',
+    };
+    try {
+      await persistDeal(updatedDeal);
+      setDetailDeal(updatedDeal);
+      loadData();
+    } catch (err) {
+      console.error('Failed to change investment route:', err);
+    }
+  };
+
   const getDealKycStatus = (deal: Deal, liveKyc?: any): 'Pending' | 'Partially Completed' | 'Submitted' | 'Verified' | 'Wrong' => {
     // 1. Prefer DB-sourced status from deal or live KYC record
     const raw = (deal.kycStatus || liveKyc?.status || '').toString().toLowerCase();
@@ -576,6 +617,7 @@ export const OpportunitiesPage: React.FC = () => {
       aadhaarNumber: dto.aadhaarNumber || '',
       fatherName: dto.fatherName || '',
       dob: dto.dateOfBirth || dto.dob || '',
+      dateOfBirth: dto.dateOfBirth || dto.dob || '',
       city: dto.city || '',
       state: dto.state || '',
       pincode: dto.pincode || '',
@@ -852,7 +894,7 @@ export const OpportunitiesPage: React.FC = () => {
     },
   ];
 
-  // ─────────────────────────────────────────────────────────────────────────
+
   return (
     <div className="opportunities-page">
       {/* Toast Notification */}
@@ -1229,13 +1271,44 @@ export const OpportunitiesPage: React.FC = () => {
           subtitle={`${detailDeal.customerName} • Deal Details`}
           maxWidth={760}
           footer={
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleCloseDetailModal}
-            >
-              Close
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 12 }}>
+              <div>
+                {detailDeal.phone && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    onClick={() => initiateCall(detailDeal.customerName, detailDeal.phone || '', 'customer', detailDeal.customerId || detailDeal.id, undefined, 'opportunities')}
+                  >
+                    <Phone size={13} color="#059669" />
+                    <span>Call Investor</span>
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleCloseDetailModal}
+                >
+                  Close
+                </button>
+                {!isGhlAdmin && Boolean(detailDeal.investmentAmountConfirmed) && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    onClick={() => {
+                      handleAdvanceToConverted(detailDeal);
+                      handleCloseDetailModal();
+                    }}
+                  >
+                    <CheckCircle size={14} />
+                    <span>Convert Deal</span>
+                  </button>
+                )}
+              </div>
+            </div>
           }
         >
           {(() => {

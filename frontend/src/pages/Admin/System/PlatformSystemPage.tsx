@@ -23,6 +23,9 @@ import {
   Users,
   PhoneCall,
   Globe,
+  Play,
+  Search,
+  Zap,
 } from 'lucide-react';
 import {
   SystemDiagnostics,
@@ -31,6 +34,9 @@ import {
   SystemHealthReport,
   GlobalConfig,
   BackupSnapshot,
+  DatabaseRadar,
+  ServerLogEntry,
+  BackgroundJobStatus,
 } from '../../../types';
 import { superAdminService } from '../../../services/superAdminService';
 import { signalRService } from '../../../services/signalRService';
@@ -38,7 +44,7 @@ import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
 import { Modal } from '../../../components/common/Modal';
 import './PlatformSystemPage.css';
 
-type SystemTab = 'diagnostics' | 'health' | 'config' | 'announcements' | 'backups';
+type SystemTab = 'diagnostics' | 'radar' | 'logs' | 'jobs' | 'health' | 'config' | 'announcements' | 'backups';
 
 export const PlatformSystemPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<SystemTab>('diagnostics');
@@ -75,6 +81,23 @@ export const PlatformSystemPage: React.FC = () => {
   const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
   const [backupDesc, setBackupDesc] = useState('');
   const [includeAuditLogsInBackup, setIncludeAuditLogsInBackup] = useState(true);
+
+  // Database Connection Pool Radar State
+  const [databaseRadar, setDatabaseRadar] = useState<DatabaseRadar | null>(null);
+  const [isLoadingRadar, setIsLoadingRadar] = useState(false);
+  const [isTerminatingIdle, setIsTerminatingIdle] = useState(false);
+
+  // Live Server Logs Stream State
+  const [serverLogs, setServerLogs] = useState<ServerLogEntry[]>([]);
+  const [logSearchQuery, setLogSearchQuery] = useState('');
+  const [logLevelFilter, setLogLevelFilter] = useState<'all' | 'ERROR' | 'WARN'>('all');
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [selectedLogForDrawer, setSelectedLogForDrawer] = useState<ServerLogEntry | null>(null);
+
+  // Background Services & Cron Jobs State
+  const [backgroundJobs, setBackgroundJobs] = useState<BackgroundJobStatus[]>([]);
+  const [isLoadingJobs, setIsLoadingJobs] = useState(false);
+  const [triggeringJobId, setTriggeringJobId] = useState<string | null>(null);
 
   // Announcement Modal
   const [isAnnModalOpen, setIsAnnModalOpen] = useState(false);
@@ -255,6 +278,91 @@ export const PlatformSystemPage: React.FC = () => {
       setIsTestingSmtp(false);
     }
   };
+
+  // ── ENTERPRISE RADAR & LOGS HANDLERS ──────────────────────────────────────
+
+  const loadDatabaseRadar = async () => {
+    setIsLoadingRadar(true);
+    try {
+      const data = await superAdminService.fetchDatabaseRadar();
+      setDatabaseRadar(data);
+    } catch (err: any) {
+      console.warn('Could not load database radar:', err);
+    } finally {
+      setIsLoadingRadar(false);
+    }
+  };
+
+  const handleTerminateIdleConnections = async () => {
+    setIsTerminatingIdle(true);
+    try {
+      const count = await superAdminService.terminateIdleConnections();
+      showSuccess(`Successfully terminated and released ${count} idle connection slots to the pool.`);
+      await loadDatabaseRadar();
+    } catch (err: any) {
+      alert(err.message || 'Failed to terminate idle connections.');
+    } finally {
+      setIsTerminatingIdle(false);
+    }
+  };
+
+  const loadServerLogs = async () => {
+    setIsLoadingLogs(true);
+    try {
+      const data = await superAdminService.fetchServerLogs({
+        search: logSearchQuery,
+        level: logLevelFilter,
+        limit: 100,
+      });
+      setServerLogs(data);
+    } catch (err: any) {
+      console.warn('Could not load server logs:', err);
+    } finally {
+      setIsLoadingLogs(false);
+    }
+  };
+
+  const handleClearServerLogs = async () => {
+    if (!window.confirm('Are you sure you want to permanently clear server error logs?')) return;
+    try {
+      await superAdminService.clearServerLogs();
+      setServerLogs([]);
+      showSuccess('Server error logs truncated and cleared.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to clear server logs.');
+    }
+  };
+
+  const loadBackgroundJobs = async () => {
+    setIsLoadingJobs(true);
+    try {
+      const data = await superAdminService.fetchBackgroundJobs();
+      setBackgroundJobs(data);
+    } catch (err: any) {
+      console.warn('Could not load background jobs:', err);
+    } finally {
+      setIsLoadingJobs(false);
+    }
+  };
+
+  const handleTriggerBackgroundJob = async (jobId: string) => {
+    setTriggeringJobId(jobId);
+    try {
+      const msg = await superAdminService.triggerBackgroundJob(jobId);
+      showSuccess(msg);
+      await loadBackgroundJobs();
+    } catch (err: any) {
+      alert(err.message || 'Failed to trigger background job.');
+    } finally {
+      setTriggeringJobId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'radar') loadDatabaseRadar();
+    if (activeTab === 'logs') loadServerLogs();
+    if (activeTab === 'jobs') loadBackgroundJobs();
+  }, [activeTab]);
 
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -525,6 +633,38 @@ export const PlatformSystemPage: React.FC = () => {
             <span className={`tab-badge ${diagnostics.apiStatus === 'Healthy' ? 'green' : 'amber'}`}>
               {diagnostics.apiLatencyMs}ms
             </span>
+          )}
+        </button>
+
+        <button
+          className={`system-tab-btn ${activeTab === 'radar' ? 'active' : ''}`}
+          onClick={() => setActiveTab('radar')}
+        >
+          <Database size={15} /> Database Radar
+          {databaseRadar && (
+            <span className={`tab-badge ${databaseRadar.status.includes('Critical') ? 'amber' : 'green'}`}>
+              {databaseRadar.activeConnections}/{databaseRadar.maxPoolSize} Pool
+            </span>
+          )}
+        </button>
+
+        <button
+          className={`system-tab-btn ${activeTab === 'logs' ? 'active' : ''}`}
+          onClick={() => setActiveTab('logs')}
+        >
+          <Terminal size={15} /> Error Log Stream
+          {serverLogs.length > 0 && (
+            <span className="tab-badge amber">{serverLogs.length}</span>
+          )}
+        </button>
+
+        <button
+          className={`system-tab-btn ${activeTab === 'jobs' ? 'active' : ''}`}
+          onClick={() => setActiveTab('jobs')}
+        >
+          <Clock size={15} /> Background Schedulers
+          {backgroundJobs.length > 0 && (
+            <span className="tab-badge blue">{backgroundJobs.length}</span>
           )}
         </button>
 
@@ -1398,6 +1538,396 @@ export const PlatformSystemPage: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* TAB: DATABASE RADAR & POOL TELEMETRY */}
+          {activeTab === 'radar' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Radar Pool Banner */}
+              <div className="system-card" style={{ padding: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Radio size={14} /> LIVE DATABASE POOL RADAR & CAPACITY
+                    </div>
+                    <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#f8fafc', margin: '6px 0 4px' }}>
+                      {databaseRadar?.databaseEngine || 'PostgreSQL'} Connection Pool & Storage
+                    </h2>
+                    <p style={{ fontSize: '13px', color: '#94a3b8', margin: 0 }}>
+                      Real-time connection pool saturation, idle connection eviction, and storage consumption by table.
+                    </p>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={loadDatabaseRadar}
+                      disabled={isLoadingRadar}
+                    >
+                      <RefreshCw size={13} className={isLoadingRadar ? 'animate-spin' : ''} />
+                      {isLoadingRadar ? 'Refreshing...' : 'Refresh Radar'}
+                    </button>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={handleTerminateIdleConnections}
+                      disabled={isTerminatingIdle || !databaseRadar || databaseRadar.idleConnections === 0}
+                      title="Kill idle backend connections to free up pool capacity"
+                    >
+                      <Zap size={13} />
+                      {isTerminatingIdle ? 'Evicting...' : `Evict Idle Connections (${databaseRadar?.idleConnections ?? 0})`}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Pool Saturation Gauge */}
+                <div style={{ marginTop: '20px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '10px', padding: '18px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px' }}>
+                    <span style={{ color: '#cbd5e1', fontWeight: 600 }}>Connection Pool Saturation</span>
+                    <span style={{ color: (databaseRadar?.poolUtilizationPercent ?? 0) > 85 ? '#f87171' : (databaseRadar?.poolUtilizationPercent ?? 0) > 70 ? '#fbbf24' : '#34d399', fontWeight: 700 }}>
+                      {databaseRadar?.poolUtilizationPercent ?? 0}% ({databaseRadar?.totalConnections ?? 0} / {databaseRadar?.maxPoolSize ?? 100} connections)
+                    </span>
+                  </div>
+                  <div style={{ height: '10px', borderRadius: '5px', background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${Math.min(100, databaseRadar?.poolUtilizationPercent ?? 0)}%`,
+                        background: (databaseRadar?.poolUtilizationPercent ?? 0) > 85
+                          ? 'linear-gradient(90deg, #f97316, #ef4444)'
+                          : (databaseRadar?.poolUtilizationPercent ?? 0) > 70
+                            ? 'linear-gradient(90deg, #eab308, #f59e0b)'
+                            : 'linear-gradient(90deg, #06b6d4, #10b981)',
+                        transition: 'width 0.4s ease'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Radar Metrics Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginTop: '20px' }}>
+                  <div className="telemetry-item-box">
+                    <span className="telemetry-item-label">Active / Executing</span>
+                    <span className="telemetry-item-value" style={{ color: '#38bdf8' }}>{databaseRadar?.activeConnections ?? 0}</span>
+                    <span className="telemetry-item-sub">Processing active queries</span>
+                  </div>
+                  <div className="telemetry-item-box">
+                    <span className="telemetry-item-label">Idle in Pool</span>
+                    <span className="telemetry-item-value" style={{ color: '#94a3b8' }}>{databaseRadar?.idleConnections ?? 0}</span>
+                    <span className="telemetry-item-sub">Ready for reuse</span>
+                  </div>
+                  <div className="telemetry-item-box">
+                    <span className="telemetry-item-label">Idle In Transaction</span>
+                    <span className="telemetry-item-value" style={{ color: (databaseRadar?.idleInTransaction ?? 0) > 0 ? '#f87171' : '#34d399' }}>
+                      {databaseRadar?.idleInTransaction ?? 0}
+                    </span>
+                    <span className="telemetry-item-sub">Uncommitted open transactions</span>
+                  </div>
+                  <div className="telemetry-item-box">
+                    <span className="telemetry-item-label">Total DB Disk Size</span>
+                    <span className="telemetry-item-value" style={{ color: '#a78bfa' }}>{databaseRadar?.totalDatabaseSize ?? 'Calculating...'}</span>
+                    <span className="telemetry-item-sub">Tables + Indexes on disk</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Table Storage Breakdown */}
+              <div className="system-card">
+                <div className="system-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h3 className="system-card-title">Database Storage & Table Registry</h3>
+                    <p className="system-card-desc">Storage size breakdown across all platform relational tables</p>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                    {databaseRadar?.tableSizes?.length ?? 0} tables indexed
+                  </div>
+                </div>
+
+                <div className="system-card-body" style={{ padding: 0 }}>
+                  <div className="table-responsive">
+                    <table className="backup-table">
+                      <thead>
+                        <tr>
+                          <th>Table Name</th>
+                          <th>Record Count</th>
+                          <th>Formatted Size</th>
+                          <th>Bytes</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!databaseRadar || !databaseRadar.tableSizes || databaseRadar.tableSizes.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} style={{ textAlign: 'center', padding: '32px', color: '#94a3b8' }}>
+                              {isLoadingRadar ? 'Analyzing database tables...' : 'No table metrics found.'}
+                            </td>
+                          </tr>
+                        ) : (
+                          databaseRadar.tableSizes.map(table => (
+                            <tr key={table.tableName}>
+                              <td style={{ fontWeight: 600, color: '#f1f5f9' }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                                  <Database size={14} color="#38bdf8" />
+                                  <code>{table.tableName}</code>
+                                </span>
+                              </td>
+                              <td style={{ color: '#cbd5e1' }}>{(table.recordCount ?? table.rowCount ?? 0).toLocaleString()}</td>
+                              <td style={{ fontWeight: 600, color: '#38bdf8' }}>{table.sizeFormatted || table.totalSize || '0 KB'}</td>
+                              <td style={{ color: '#94a3b8' }}>{table.sizeBytes ? `${(table.sizeBytes / 1024).toFixed(1)} KB` : '—'}</td>
+                              <td style={{ color: '#34d399' }}>Indexed</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: LIVE SERVER LOG STREAM */}
+          {activeTab === 'logs' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div className="system-card" style={{ padding: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#f87171', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Terminal size={14} /> LIVE SERVER ERROR LOG STREAM
+                    </div>
+                    <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#f8fafc', margin: '6px 0 4px' }}>
+                      Backend Exception & Telephony Log Console
+                    </h2>
+                    <p style={{ fontSize: '13px', color: '#94a3b8', margin: 0 }}>
+                      Captured unhandled exceptions, telephony pipeline errors, and HTTP 5xx responses with stack traces.
+                    </p>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <a
+                      href={superAdminService.getDownloadServerLogsUrl()}
+                      className="btn btn-secondary btn-sm"
+                      download="nexus_backend_errors.log"
+                    >
+                      <Download size={13} /> Download .log File
+                    </a>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={loadServerLogs}
+                      disabled={isLoadingLogs}
+                    >
+                      <RefreshCw size={13} className={isLoadingLogs ? 'animate-spin' : ''} />
+                      {isLoadingLogs ? 'Loading...' : 'Refresh Logs'}
+                    </button>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={handleClearServerLogs}
+                      disabled={serverLogs.length === 0}
+                    >
+                      <Trash2 size={13} /> Clear Error Logs
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filters Row */}
+                <div style={{ display: 'flex', gap: '12px', marginTop: '20px', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
+                    <Search size={15} style={{ position: 'absolute', left: '12px', top: '10px', color: '#64748b' }} />
+                    <input
+                      type="text"
+                      className="form-control"
+                      style={{ paddingLeft: '34px' }}
+                      placeholder="Search error messages, routes, exception names..."
+                      value={logSearchQuery}
+                      onChange={e => setLogSearchQuery(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') loadServerLogs(); }}
+                    />
+                  </div>
+                  <div style={{ width: '160px' }}>
+                    <select
+                      className="form-control"
+                      value={logLevelFilter}
+                      onChange={e => {
+                        setLogLevelFilter(e.target.value as any);
+                        setTimeout(loadServerLogs, 0);
+                      }}
+                    >
+                      <option value="all">All Levels</option>
+                      <option value="ERROR">ERROR Only</option>
+                      <option value="WARN">WARN Only</option>
+                    </select>
+                  </div>
+                  <button className="btn btn-primary btn-sm" onClick={loadServerLogs}>
+                    Filter
+                  </button>
+                </div>
+              </div>
+
+              {/* Logs Table */}
+              <div className="system-card">
+                <div className="system-card-body" style={{ padding: 0 }}>
+                  <div className="table-responsive">
+                    <table className="backup-table">
+                      <thead>
+                        <tr>
+                          <th>Timestamp</th>
+                          <th>Level</th>
+                          <th>Method / Route</th>
+                          <th>Exception / Message</th>
+                          <th>Client IP</th>
+                          <th style={{ textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {isLoadingLogs ? (
+                          <tr>
+                            <td colSpan={6} style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
+                              Loading server error logs...
+                            </td>
+                          </tr>
+                        ) : serverLogs.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
+                              <CheckCircle2 size={24} color="#34d399" style={{ margin: '0 auto 8px', display: 'block' }} />
+                              No error logs recorded. Backend pipeline operating cleanly!
+                            </td>
+                          </tr>
+                        ) : (
+                          serverLogs.map(log => (
+                            <tr
+                              key={log.id}
+                              style={{ cursor: 'pointer' }}
+                              onClick={() => setSelectedLogForDrawer(log)}
+                            >
+                              <td style={{ whiteSpace: 'nowrap', fontSize: '12px', color: '#94a3b8' }}>
+                                {new Date(log.timestamp).toLocaleString()}
+                              </td>
+                              <td>
+                                <span className={`status-pill ${log.level === 'ERROR' ? 'critical' : 'warning'}`}>
+                                  {log.level}
+                                </span>
+                              </td>
+                              <td style={{ fontSize: '13px', fontWeight: 600, color: '#f1f5f9' }}>
+                                <code>{log.method} {log.path || log.requestPath || '/'}</code>
+                              </td>
+                              <td style={{ fontSize: '12px', color: '#fca5a5', maxWidth: '380px' }}>
+                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={log.message}>
+                                  {(log.exceptionType || log.source) ? `[${log.exceptionType || log.source}] ` : ''}{log.message}
+                                </div>
+                              </td>
+                              <td style={{ fontSize: '12px', color: '#64748b' }}>
+                                {log.ipAddress || log.source || 'internal'}
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setSelectedLogForDrawer(log);
+                                  }}
+                                  style={{ color: '#38bdf8', fontSize: '12px' }}
+                                >
+                                  View Trace
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: BACKGROUND SERVICES & CRON JOBS */}
+          {activeTab === 'jobs' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div className="system-card" style={{ padding: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Clock size={14} /> PLATFORM BACKGROUND SERVICES & CRON DAEMONS
+                    </div>
+                    <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#f8fafc', margin: '6px 0 4px' }}>
+                      Background Workers & Automated Schedulers
+                    </h2>
+                    <p style={{ fontSize: '13px', color: '#94a3b8', margin: 0 }}>
+                      Manage automated reconciliations, daily telephony rollups, handover expirations, and trigger tasks on-demand.
+                    </p>
+                  </div>
+
+                  <div>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={loadBackgroundJobs}
+                      disabled={isLoadingJobs}
+                    >
+                      <RefreshCw size={13} className={isLoadingJobs ? 'animate-spin' : ''} />
+                      {isLoadingJobs ? 'Refreshing...' : 'Refresh Schedulers'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid of Background Job Cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+                {backgroundJobs.map(job => (
+                  <div key={job.id} className="system-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                    <div style={{ padding: '20px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                        <div>
+                          <h4 style={{ fontSize: '16px', fontWeight: 700, color: '#f8fafc', margin: 0 }}>{job.name}</h4>
+                          <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>ID: {job.id}</span>
+                        </div>
+                        <span className={`status-pill ${job.status === 'Active' ? 'active' : 'info'}`}>
+                          {job.status}
+                        </span>
+                      </div>
+
+                      <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: 1.5, marginBottom: '16px' }}>
+                        {job.description}
+                      </p>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px', background: 'rgba(15, 23, 42, 0.4)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: '#64748b' }}>Schedule:</span>
+                          <span style={{ color: '#38bdf8', fontWeight: 600 }}><code>{job.schedule}</code></span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: '#64748b' }}>Last Executed:</span>
+                          <span style={{ color: '#cbd5e1' }}>{job.lastRunAt ? new Date(job.lastRunAt).toLocaleString() : 'Pending'}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: '#64748b' }}>Next Run:</span>
+                          <span style={{ color: '#cbd5e1' }}>{job.nextRunAt ? new Date(job.nextRunAt).toLocaleString() : 'Automated interval'}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: '#64748b' }}>Items Last Processed:</span>
+                          <span style={{ color: '#34d399', fontWeight: 600 }}>{(job.processedItemsCount ?? job.itemsProcessedLastRun ?? 0).toLocaleString()} items</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: '#64748b' }}>Execution Duration:</span>
+                          <span style={{ color: '#e2e8f0' }}>{job.lastDurationMs ?? job.durationMs ?? 0} ms</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '14px 20px', borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(15, 23, 42, 0.3)', display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleTriggerBackgroundJob(job.id)}
+                        disabled={triggeringJobId === job.id}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <Play size={12} className={triggeringJobId === job.id ? 'animate-spin' : ''} />
+                        {triggeringJobId === job.id ? 'Executing...' : 'Trigger Now'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
 
@@ -1490,6 +2020,86 @@ export const PlatformSystemPage: React.FC = () => {
                 onClick={handleCreateAnnouncement}
               >
                 {isCreatingAnn ? 'Publishing...' : 'Publish Broadcast Banner'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SERVER LOG STACK TRACE MODAL */}
+      {/* ========================================================================= */}
+      {selectedLogForDrawer && (
+        <Modal
+          isOpen={!!selectedLogForDrawer}
+          onClose={() => setSelectedLogForDrawer(null)}
+          title={`Server Exception: ${selectedLogForDrawer.exceptionType || selectedLogForDrawer.source || 'Error Details'}`}
+          size="lg"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', background: 'rgba(15, 23, 42, 0.6)', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div>
+                <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase' }}>Timestamp</span>
+                <div style={{ fontSize: '13px', color: '#f1f5f9', fontWeight: 500 }}>
+                  {new Date(selectedLogForDrawer.timestamp).toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase' }}>HTTP Route</span>
+                <div style={{ fontSize: '13px', color: '#38bdf8', fontWeight: 600 }}>
+                  {selectedLogForDrawer.method} {selectedLogForDrawer.path || selectedLogForDrawer.requestPath || '/'}
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase' }}>Client / Component</span>
+                <div style={{ fontSize: '13px', color: '#f1f5f9' }}>
+                  {selectedLogForDrawer.ipAddress || selectedLogForDrawer.source || 'internal'}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="form-label" style={{ color: '#fca5a5' }}>Error Message</label>
+              <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', padding: '12px', color: '#fca5a5', fontSize: '13px', fontFamily: 'monospace' }}>
+                {selectedLogForDrawer.message}
+              </div>
+            </div>
+
+            {selectedLogForDrawer.stackTrace && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label className="form-label" style={{ margin: 0 }}>Stack Trace</label>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: '11px', padding: '2px 8px' }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedLogForDrawer.stackTrace || '');
+                      alert('Stack trace copied to clipboard.');
+                    }}
+                  >
+                    Copy Trace
+                  </button>
+                </div>
+                <pre style={{
+                  background: '#090d16',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '6px',
+                  padding: '14px',
+                  color: '#94a3b8',
+                  fontSize: '12px',
+                  maxHeight: '320px',
+                  overflowY: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                }}>
+                  {selectedLogForDrawer.stackTrace}
+                </pre>
+              </div>
+            )}
+
+            <div className="modal-actions-footer">
+              <button className="btn btn-secondary" onClick={() => setSelectedLogForDrawer(null)}>
+                Close
               </button>
             </div>
           </div>

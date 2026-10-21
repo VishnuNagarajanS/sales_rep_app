@@ -40,7 +40,38 @@ public static class ServiceExtensions
             }
             else
             {
-                options.UseNpgsql(connectionString);
+                var effectiveConnectionString = connectionString;
+                try
+                {
+                    var npgsqlBuilder = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+                    if (!connectionString!.Contains("Maximum Pool Size", StringComparison.OrdinalIgnoreCase) &&
+                        !connectionString.Contains("MaxPoolSize", StringComparison.OrdinalIgnoreCase))
+                    {
+                        npgsqlBuilder.MaxPoolSize = 10;
+                    }
+                    if (!connectionString.Contains("Minimum Pool Size", StringComparison.OrdinalIgnoreCase) &&
+                        !connectionString.Contains("MinPoolSize", StringComparison.OrdinalIgnoreCase))
+                    {
+                        npgsqlBuilder.MinPoolSize = 0;
+                    }
+                    if (!connectionString.Contains("Connection Idle Lifetime", StringComparison.OrdinalIgnoreCase) &&
+                        !connectionString.Contains("ConnectionIdleLifetime", StringComparison.OrdinalIgnoreCase))
+                    {
+                        npgsqlBuilder.ConnectionIdleLifetime = 15;
+                    }
+                    if (!connectionString.Contains("Connection Pruning Interval", StringComparison.OrdinalIgnoreCase) &&
+                        !connectionString.Contains("ConnectionPruningInterval", StringComparison.OrdinalIgnoreCase))
+                    {
+                        npgsqlBuilder.ConnectionPruningInterval = 5;
+                    }
+                    effectiveConnectionString = npgsqlBuilder.ConnectionString;
+                }
+                catch
+                {
+                    // If parsing fails for any reason, use raw connection string
+                }
+
+                options.UseNpgsql(effectiveConnectionString);
             }
         });
 

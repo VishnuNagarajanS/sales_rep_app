@@ -400,4 +400,154 @@ public class PlatformSecurityController : ControllerBase
         var pagedResult = PagedResult<SecurityEventDto>.Create(events, total, page, pageSize);
         return Ok(ApiResponse<PagedResult<SecurityEventDto>>.SuccessResult(pagedResult));
     }
+
+    // ── PLATFORM EMERGENCY LOCKDOWN SWITCH ────────────────────────────────────
+
+    private const string LockdownSettingKey = "security_emergency_lockdown";
+
+    [HttpGet("lockdown")]
+    public async Task<ActionResult<ApiResponse<EmergencyLockdownStatusDto>>> GetLockdownStatus(CancellationToken ct = default)
+    {
+        var setting = await _context.PlatformSettings.FirstOrDefaultAsync(s => s.Key == LockdownSettingKey, ct);
+        if (setting == null || string.IsNullOrWhiteSpace(setting.Value))
+        {
+            return Ok(ApiResponse<EmergencyLockdownStatusDto>.SuccessResult(new EmergencyLockdownStatusDto { IsActive = false }));
+        }
+
+        try
+        {
+            var status = JsonSerializer.Deserialize<EmergencyLockdownStatusDto>(setting.Value);
+            return Ok(ApiResponse<EmergencyLockdownStatusDto>.SuccessResult(status ?? new EmergencyLockdownStatusDto { IsActive = false }));
+        }
+        catch
+        {
+            return Ok(ApiResponse<EmergencyLockdownStatusDto>.SuccessResult(new EmergencyLockdownStatusDto { IsActive = false }));
+        }
+    }
+
+    [HttpPost("lockdown")]
+    public async Task<ActionResult<ApiResponse<EmergencyLockdownStatusDto>>> ActivateEmergencyLockdown(
+        [FromBody] EmergencyLockdownRequestDto? req = null,
+        CancellationToken ct = default)
+    {
+        var reason = !string.IsNullOrWhiteSpace(req?.Reason) ? req.Reason.Trim() : "Emergency platform incident response";
+        var currentUserId = _currentUser.UserId ?? 0;
+        var actorEmail = _currentUser.Email ?? "Super Admin";
+
+        // 1. Invalidate all sessions except the current caller Super Admin
+        var sessionsToRevoke = await _context.UserSessions
+            .Where(s => s.IsActive && s.UserId != currentUserId)
+            .ToListAsync(ct);
+
+        foreach (var session in sessionsToRevoke)
+        {
+            session.IsActive = false;
+            session.RevokedAt = DateTime.UtcNow;
+            session.RevokedReason = $"Emergency Platform Lockdown: {reason}";
+        }
+
+        // 2. Persist Lockdown Setting
+        var status = new EmergencyLockdownStatusDto
+        {
+            IsActive = true,
+            Reason = reason,
+            InitiatedBy = actorEmail,
+            InitiatedAt = DateTime.UtcNow,
+            RevokedSessionsCount = sessionsToRevoke.Count
+        };
+
+        var setting = await _context.PlatformSettings.FirstOrDefaultAsync(s => s.Key == LockdownSettingKey, ct);
+        if (setting == null)
+        {
+            setting = new PlatformSetting
+            {
+                Key = LockdownSettingKey,
+                Value = JsonSerializer.Serialize(status),
+                Description = "Platform Emergency Threat Response Lockdown State",
+                UpdatedAt = DateTime.UtcNow,
+                UpdatedBy = actorEmail
+            };
+            _context.PlatformSettings.Add(setting);
+        }
+        else
+        {
+            setting.Value = JsonSerializer.Serialize(status);
+            setting.UpdatedAt = DateTime.UtcNow;
+            setting.UpdatedBy = actorEmail;
+        }
+
+        // 3. Security Event & Audit Log
+        _context.SecurityEvents.Add(new SecurityEvent
+        {
+            EventType = "EMERGENCY_LOCKDOWN_ACTIVATED",
+            Severity = "CRITICAL",
+            Details = $"Super Admin initiated EMERGENCY PLATFORM LOCKDOWN. {sessionsToRevoke.Count} client sessions terminated. Reason: {reason}",
+            ActorEmail = actorEmail,
+            UserId = currentUserId,
+            IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1",
+            CreatedAt = DateTime.UtcNow
+        });
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "EMERGENCY_LOCKDOWN_ACTIVATED",
+            EntityType = "Security",
+            EntityId = "global_lockdown",
+            ActorName = actorEmail,
+            ActorEmail = actorEmail,
+            Details = $"Emergency lockdown activated: {reason}. {sessionsToRevoke.Count} sessions revoked.",
+            Module = "Security",
+            Status = "success",
+            Timestamp = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync(ct);
+
+        // 4. Broadcast real-time lockdown via SignalR to force disconnect client tabs
+        try
+        {
+            await _hubContext.Clients.All.PlatformDataUpdated("Security", "EmergencyLockdownActivated");
+        }
+        catch { }
+
+        return Ok(ApiResponse<EmergencyLockdownStatusDto>.SuccessResult(status, "Emergency platform lockdown successfully engaged."));
+    }
+
+    [HttpPost("unlock")]
+    public async Task<ActionResult<ApiResponse<EmergencyLockdownStatusDto>>> DeactivateEmergencyLockdown(CancellationToken ct = default)
+    {
+        var actorEmail = _currentUser.Email ?? "Super Admin";
+        var setting = await _context.PlatformSettings.FirstOrDefaultAsync(s => s.Key == LockdownSettingKey, ct);
+        if (setting != null)
+        {
+            setting.Value = JsonSerializer.Serialize(new EmergencyLockdownStatusDto { IsActive = false });
+            setting.UpdatedAt = DateTime.UtcNow;
+            setting.UpdatedBy = actorEmail;
+        }
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "EMERGENCY_LOCKDOWN_DEACTIVATED",
+            EntityType = "Security",
+            EntityId = "global_lockdown",
+            ActorName = actorEmail,
+            ActorEmail = actorEmail,
+            Details = "Super Admin deactivated emergency lockdown. Normal platform operations restored.",
+            Module = "Security",
+            Status = "success",
+            Timestamp = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync(ct);
+
+        try
+        {
+            await _hubContext.Clients.All.PlatformDataUpdated("Security", "EmergencyLockdownDeactivated");
+        }
+        catch { }
+
+        return Ok(ApiResponse<EmergencyLockdownStatusDto>.SuccessResult(
+            new EmergencyLockdownStatusDto { IsActive = false },
+            "Emergency lockdown deactivated. Normal operations restored."));
+    }
 }

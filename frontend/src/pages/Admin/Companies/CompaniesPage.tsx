@@ -24,6 +24,7 @@ import {
   List as ListIcon,
   Check,
   RefreshCw,
+  Download,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useUnsavedChanges } from '../../../context/NavigationGuardContext';
@@ -332,6 +333,33 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       }
     }
   }, [selectedTenant, isDetailDrawerOpen]);
+
+  const [isExportingComplianceId, setIsExportingComplianceId] = useState<string | null>(null);
+
+  const handleDownloadCompliancePack = async (t: Tenant) => {
+    setIsExportingComplianceId(t.id);
+    try {
+      const url = superAdminService.getComplianceExportUrl(t.id);
+      const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error('Failed to generate compliance export archive.');
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `${t.slug}_compliance_pack.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err: any) {
+      alert(err.message || 'Error generating tenant compliance export archive.');
+    } finally {
+      setIsExportingComplianceId(null);
+    }
+  };
 
   const handleViewAsCompany = (t: Tenant) => {
     setImpersonateError(null);
@@ -1348,6 +1376,15 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
               </div>
 
               <div className="banner-right">
+                <button
+                  className="btn btn-secondary btn-sm"
+                  title="Generate and download complete compliance pack (.zip) with leads, calls, deals, KYC, and audit logs"
+                  disabled={isExportingComplianceId === selectedTenant.id}
+                  onClick={() => handleDownloadCompliancePack(selectedTenant)}
+                >
+                  <Download size={13} className={isExportingComplianceId === selectedTenant.id ? 'animate-spin' : ''} />
+                  {isExportingComplianceId === selectedTenant.id ? 'Packaging...' : 'Compliance Pack (.zip)'}
+                </button>
                 <button
                   className="btn btn-secondary btn-sm"
                   title={`Log in as ${selectedTenant.name} Company Admin`}

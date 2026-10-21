@@ -2563,17 +2563,7 @@ const GhlIrmKycView: React.FC = () => {
           <KycRowActionsMenu
             deal={deal}
             isGhlAdmin={isGhlAdmin}
-            onOpenReview={d => {
-              const fDigits = (d.phone || '').replace(/\D/g, '').slice(-10);
-              const matchLead = leads.find(l => (d.customerId && l.id === d.customerId) || (l.phone && l.phone.replace(/\D/g, '').slice(-10) === fDigits));
-              const matchCust = customers.find(c => (d.customerId && c.id === d.customerId) || (c.phone && c.phone.replace(/\D/g, '').slice(-10) === fDigits));
-              const backendKyc = findBackendKyc(d, dbKycs, tenant?.id);
-              setProfileKycData(buildMergedProfileData(d, backendKyc, matchLead, matchCust));
-              setVerifyModalDeal(d);
-            }}
             onShowToast={msg => showToast(msg)}
-            onViewProfile={d => handleOpenCustomerProfile(d)}
-            onEditKyc={isGhlAdmin ? undefined : (d => startKycFlow(d))}
             onAssistedKyc={isGhlAdmin ? undefined : (d => startAssistedKycFlow(d))}
             onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.customerId || d.id, undefined, 'kyc')}
             // Only show "Advance to Opportunity" after KYC is fully completed (not available in Admin oversight mode)

@@ -168,7 +168,7 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
   }, [user?.role?.code, tenant?.id, user?.companyId]);
 
   return (
-    <div className={`app-container ${theme === 'dark' ? 'dark-theme' : ''}`}>
+    <div className={`app-container ${theme === 'dark' ? 'dark-theme' : 'light-theme'}`}>
       <NetworkStatusBanner />
       {/* Dynamic Tenant-Aware Sidebar */}
       <Sidebar currentRoute={currentRoute} onNavigate={onNavigate} />

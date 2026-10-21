@@ -65,12 +65,12 @@
   background: #090d16 !important;
 }
 
-.dark-theme .topbar-header {
-  background: #0f172a !important;
-  border-bottom-color: #334155 !important;
+:is(.admin-theme, .dark-theme) .topbar-header {
+  background: #000000 !important;
+  border-bottom-color: rgba(255, 255, 255, 0.1) !important;
 }
 
-.dark-theme .sidebar-container {
+:is(.admin-theme, .dark-theme) .sidebar-container {
   background: #0f172a !important;
   border-right-color: #334155 !important;
 }

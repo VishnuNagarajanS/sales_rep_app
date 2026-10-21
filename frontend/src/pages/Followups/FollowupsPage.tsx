@@ -1202,6 +1202,57 @@ export const FollowupsPage: React.FC = () => {
       }
       return false;
     });
+
+    // Also synthesize follow-up tasks for any leads assigned to this Sales Executive that are in Follow-up/Callback stage
+    const existingFollowupContactIds = new Set(
+      scopedFollowups.map(f => String(f.contactId)).filter(Boolean)
+    );
+    const existingFollowupPhones = new Set(
+      scopedFollowups.map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10)).filter(Boolean)
+    );
+
+    const missingFollowupLeads = allLeads.filter(l => {
+      const isAssignedToMe =
+        (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
+        (l.assignedAgentName && user?.name && l.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
+      if (!isAssignedToMe) return false;
+      if (l.companyId && tenant?.id && !isTenantMatch(l.companyId, tenant.id)) return false;
+
+      const lStatus = (l.status || '').toLowerCase();
+      if (lStatus === 'interested' || lStatus === 'qualified' || lStatus === 'converted' || lStatus === 'not interested' || lStatus === 'junk') {
+        return false;
+      }
+
+      const isInFollowupStage =
+        l.status === 'Follow-up Required' ||
+        l.status === 'Callback';
+      if (!isInFollowupStage) return false;
+
+      const cleanPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+      if (existingFollowupContactIds.has(String(l.id))) return false;
+      if (cleanPhone && existingFollowupPhones.has(cleanPhone)) return false;
+
+      return true;
+    });
+
+    for (const ml of missingFollowupLeads) {
+      scopedFollowups.push({
+        id: `lead-flw-${ml.id}`,
+        companyId: tenant?.id || 't-ghl-01',
+        contactId: String(ml.id),
+        contactType: 'lead',
+        contactName: ml.name,
+        contactPhone: ml.phone,
+        contactEmail: ml.email || '',
+        scheduledAt: ml.nextFollowupDate || new Date(Date.now() + 86400000).toISOString(),
+        priority: (ml.priority === 'Urgent' ? 'High' : (ml.priority || 'High')) as 'Low' | 'Medium' | 'High',
+        status: 'Pending',
+        notes: ml.notes || 'Scheduled follow-up callback',
+        assignedAgentId: String(user?.id || ''),
+        assignedAgentName: user?.name || ml.assignedAgentName || '',
+        assignedRole: 'Sales Executive',
+      });
+    }
   } else if (isIrm) {
     // IRM: Show pending follow-ups assigned to THIS authenticated IRM OR associated with a lead assigned to THIS IRM
     // Build sets of contacts that have moved beyond follow-up (KYC, Opportunities, Converted, etc.)

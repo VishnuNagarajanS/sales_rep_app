@@ -335,14 +335,78 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
     }).length;
   }, [scopedInvestors, sevenDaysAgo]);
 
-  // ── Today's Assigned Leads for this IRM (Present Day only) ──────────────────
+  // ── Today's Assigned Leads for this IRM (Present Day only & Not in Follow-up) ──
 
   const todayLeads = useMemo(() => {
-    return scopedLeads.filter(l => {
-      const d = l.assignedIrmAt || (l as any).assignedAt || l.createdAt;
-      return isDateToday(d);
+    // 1. Pending follow-ups tracking
+    const pendingFollowupContactIds = new Set<string>();
+    const pendingFollowupPhones = new Set<string>();
+
+    (followups || []).forEach(f => {
+      if (String(f.status || '').toLowerCase() === 'pending') {
+        if (f.contactId) pendingFollowupContactIds.add(String(f.contactId));
+        const ph = (f.contactPhone || '').replace(/\D/g, '').slice(-10);
+        if (ph) pendingFollowupPhones.add(ph);
+      }
     });
-  }, [scopedLeads]);
+
+    // 2. Deals tracking (KYC / Opportunity / Converted)
+    const dealtContactIds = new Set<string>();
+    const dealtPhones = new Set<string>();
+    (deals || []).forEach(d => {
+      const dStage = (d.stage || '').toLowerCase();
+      if (dStage && dStage !== 'lost') {
+        if (d.customerId) dealtContactIds.add(String(d.customerId));
+        const ph = (d.phone || '').replace(/\D/g, '').slice(-10);
+        if (ph) dealtPhones.add(ph);
+      }
+    });
+
+    return scopedLeads.filter(l => {
+      // Must be assigned or created today
+      const d = l.assignedIrmAt || (l as any).assignedAt || l.createdAt;
+      if (!isDateToday(d)) return false;
+
+      // If status moved to follow-up or callback, do not show here
+      const s = (l.status || '').trim().toLowerCase();
+      if (
+        s === 'follow-up' ||
+        s === 'followup' ||
+        s === 'follow-up required' ||
+        s === 'callback' ||
+        s === 'call back' ||
+        s.includes('follow')
+      ) {
+        return false;
+      }
+
+      // If next follow-up date is set, it belongs in Follow-ups
+      if (l.nextFollowupDate) return false;
+
+      const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+      const lId = String(l.id || '');
+
+      // If a pending follow-up record exists, it belongs in Follow-ups
+      if (lId && pendingFollowupContactIds.has(lId)) return false;
+      if (lPhone && pendingFollowupPhones.has(lPhone)) return false;
+
+      // If already converted, won, in opportunity, or KYC deal exists, do not show here
+      if (lId && dealtContactIds.has(lId)) return false;
+      if (lPhone && dealtPhones.has(lPhone)) return false;
+      if (
+        s === 'converted' ||
+        s === 'qualified' ||
+        s.includes('opportunity') ||
+        s === 'lost' ||
+        s === 'junk' ||
+        s === 'not interested'
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [scopedLeads, followups, deals]);
 
   const todayDateLabel = useMemo(() => {
     return new Date().toLocaleDateString('en-IN', {

@@ -1,3 +1,6 @@
+using System.IO.Compression;
+using System.Text;
+using System.Text.Json;
 using backend.Authentication.Interfaces;
 using backend.Data;
 using backend.DTOs.Common;
@@ -536,6 +539,153 @@ public class PlatformTenantsController : ControllerBase
         };
 
         return Ok(ApiResponse<ImpersonateTenantResponseDto>.SuccessResult(responseDto, $"Impersonation session established for {tenant.Name}."));
+    }
+
+    /// <summary>
+    /// Generates and streams a comprehensive, encrypted-ready compliance zip bundle for a tenant.
+    /// Bundles formatted CSV tables of leads, customers, calls, deals, followups, KYC records, and audit logs.
+    /// </summary>
+    [HttpGet("{id}/compliance-export")]
+    public async Task<IActionResult> GetComplianceExport(string id, CancellationToken ct = default)
+    {
+        var tenant = await FindTenantAsync(id, ct);
+        if (tenant == null)
+            return NotFound(ApiResponse<bool>.FailureResult("Tenant organization not found."));
+
+        var actorEmail = _currentUser.Email ?? "Super Admin";
+
+        var leads = await _context.Leads.AsNoTracking().Where(l => l.CompanyId == tenant.Id).ToListAsync(ct);
+        var customers = await _context.Customers.AsNoTracking().Where(c => c.CompanyId == tenant.Id).ToListAsync(ct);
+        var calls = await _context.CallRecords.AsNoTracking().Where(c => c.CompanyId == tenant.Id).ToListAsync(ct);
+        var followups = await _context.Followups.AsNoTracking().Where(f => f.CompanyId == tenant.Id).ToListAsync(ct);
+        var deals = await _context.GhlDeals.AsNoTracking().Where(d => d.CompanyId == tenant.Id).ToListAsync(ct);
+        var kycRecords = await _context.InvestorKycs.AsNoTracking().Where(k => k.CompanyId == tenant.Id).ToListAsync(ct);
+        var auditLogs = await _context.AuditLogs.AsNoTracking().Where(a => a.CompanyId == tenant.Id).Take(1000).ToListAsync(ct);
+
+        using var memoryStream = new MemoryStream();
+        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, true))
+        {
+            // 1. Company Profile JSON
+            var summaryJson = JsonSerializer.Serialize(new
+            {
+                tenant.Id,
+                tenant.Name,
+                tenant.LegalName,
+                tenant.Slug,
+                tenant.Industry,
+                tenant.SubscriptionPlan,
+                tenant.Status,
+                tenant.CreatedAt,
+                ExportedAt = DateTime.UtcNow,
+                ExportedBy = actorEmail,
+                SummaryCounts = new
+                {
+                    TotalLeads = leads.Count,
+                    TotalCustomers = customers.Count,
+                    TotalCalls = calls.Count,
+                    TotalFollowups = followups.Count,
+                    TotalDeals = deals.Count,
+                    TotalKycRecords = kycRecords.Count,
+                    TotalAuditEvents = auditLogs.Count
+                }
+            }, new JsonSerializerOptions { WriteIndented = true });
+            AddZipFile(archive, "company_summary.json", summaryJson);
+
+            // 2. Leads CSV
+            var leadsSb = new StringBuilder();
+            leadsSb.AppendLine("Id,Name,Email,Phone,Source,Status,CreatedDate");
+            foreach (var l in leads)
+            {
+                leadsSb.AppendLine($"{l.Id},\"{EscapeCsv(l.Name)}\",\"{EscapeCsv(l.Email)}\",\"{EscapeCsv(l.Phone)}\",\"{EscapeCsv(l.Source)}\",\"{EscapeCsv(l.Status.ToString())}\",\"{l.CreatedAt:o}\"");
+            }
+            AddZipFile(archive, "leads.csv", leadsSb.ToString());
+
+            // 3. Customers CSV
+            var custSb = new StringBuilder();
+            custSb.AppendLine("Id,Name,Email,Phone,Location,Status,TotalValue,CreatedDate");
+            foreach (var c in customers)
+            {
+                custSb.AppendLine($"{c.Id},\"{EscapeCsv(c.Name)}\",\"{EscapeCsv(c.Email)}\",\"{EscapeCsv(c.Phone)}\",\"{EscapeCsv(c.Location)}\",\"{EscapeCsv(c.Status)}\",{c.TotalValue},\"{c.CreatedAt:o}\"");
+            }
+            AddZipFile(archive, "customers.csv", custSb.ToString());
+
+            // 4. Calls CSV
+            var callsSb = new StringBuilder();
+            callsSb.AppendLine("Id,ContactName,ContactPhone,Direction,DurationSeconds,Disposition,RecordingUrl,CreatedDate");
+            foreach (var cl in calls)
+            {
+                callsSb.AppendLine($"{cl.Id},\"{EscapeCsv(cl.ContactName)}\",\"{EscapeCsv(cl.ContactPhone)}\",\"{EscapeCsv(cl.Direction)}\",{cl.Duration},\"{EscapeCsv(cl.Disposition)}\",\"{EscapeCsv(cl.RecordingUrl)}\",\"{cl.CreatedAt:o}\"");
+            }
+            AddZipFile(archive, "call_records.csv", callsSb.ToString());
+
+            // 5. Followups CSV
+            var followupsSb = new StringBuilder();
+            followupsSb.AppendLine("Id,LeadId,ScheduledAt,Status,Notes,CreatedAt");
+            foreach (var f in followups)
+            {
+                followupsSb.AppendLine($"{f.Id},{f.LeadId},\"{f.ScheduledAt:o}\",\"{EscapeCsv(f.Status.ToString())}\",\"{EscapeCsv(f.Notes)}\",\"{f.CreatedAt:o}\"");
+            }
+            AddZipFile(archive, "followups.csv", followupsSb.ToString());
+
+            // 6. Deals CSV
+            var dealsSb = new StringBuilder();
+            dealsSb.AppendLine("Id,Title,Value,Stage,ExpectedCloseDate,CreatedDate");
+            foreach (var d in deals)
+            {
+                dealsSb.AppendLine($"{d.Id},\"{EscapeCsv(d.Title)}\",{d.Value},\"{EscapeCsv(d.Stage)}\",\"{EscapeCsv(d.ExpectedCloseDate)}\",\"{d.CreatedAt:o}\"");
+            }
+            AddZipFile(archive, "deals.csv", dealsSb.ToString());
+
+            // 7. KYC Records CSV
+            var kycSb = new StringBuilder();
+            kycSb.AppendLine("Id,InvestorName,PanNumber,Status,VerifiedAt,CreatedAt");
+            foreach (var k in kycRecords)
+            {
+                kycSb.AppendLine($"{k.Id},\"{EscapeCsv(k.InvestorName)}\",\"{EscapeCsv(k.PanNumber)}\",\"{EscapeCsv(k.Status.ToString())}\",\"{k.VerifiedAt:o}\",\"{k.CreatedAt:o}\"");
+            }
+            AddZipFile(archive, "kyc_records.csv", kycSb.ToString());
+
+            // 8. Audit Trail CSV
+            var auditSb = new StringBuilder();
+            auditSb.AppendLine("Id,Action,Module,ActorName,ActorEmail,Details,Timestamp");
+            foreach (var a in auditLogs)
+            {
+                auditSb.AppendLine($"{a.Id},\"{EscapeCsv(a.Action)}\",\"{EscapeCsv(a.Module)}\",\"{EscapeCsv(a.ActorName)}\",\"{EscapeCsv(a.ActorEmail)}\",\"{EscapeCsv(a.Details)}\",\"{a.Timestamp:o}\"");
+            }
+            AddZipFile(archive, "audit_trail.csv", auditSb.ToString());
+        }
+
+        _context.AuditLogs.Add(new AuditLog
+        {
+            Action = "EXPORT_TENANT_DATA",
+            EntityType = "Tenant",
+            EntityId = tenant.Id.ToString(),
+            CompanyId = tenant.Id,
+            ActorName = actorEmail,
+            ActorEmail = actorEmail,
+            Details = $"Super Admin downloaded full compliance zip archive bundle for tenant '{tenant.Name}'.",
+            Module = "Companies",
+            Status = "success",
+            Timestamp = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync(ct);
+
+        var zipBytes = memoryStream.ToArray();
+        var filename = $"{tenant.Slug}_compliance_pack_{DateTime.UtcNow:yyyyMMdd_HHmm}.zip";
+        return File(zipBytes, "application/zip", filename);
+    }
+
+    private static void AddZipFile(ZipArchive archive, string entryName, string content)
+    {
+        var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+        using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
+        writer.Write(content);
+    }
+
+    private static string EscapeCsv(string? val)
+    {
+        if (string.IsNullOrEmpty(val)) return string.Empty;
+        return val.Replace("\"", "\"\"").Replace("\r", " ").Replace("\n", " ");
     }
 
     private async Task<Tenant?> FindTenantAsync(string id, CancellationToken ct)
