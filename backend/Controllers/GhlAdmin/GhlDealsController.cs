@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using backend.Services.Interfaces;
 using backend.Services.Implementations;
+using backend.Constants;
 
 namespace backend.Controllers.GhlAdmin;
 
@@ -264,7 +265,11 @@ public class GhlDealsController : ControllerBase
             Value = dto.Value,
             ExpectedCloseDate = dto.ExpectedCloseDate.Trim(),
             Notes = dto.Notes.Trim(),
-            InvestorType = dto.InvestorType,
+            InvestorType = !string.IsNullOrWhiteSpace(dto.InvestmentRoute)
+                ? (dto.InvestmentRoute.Trim().ToLowerInvariant().Contains("debenture")
+                    ? "Alternate route to Invest in AIF via Debenture"
+                    : "Direct AIF")
+                : dto.InvestorType,
             InvestmentRange = OptionalFieldNormalizer.Normalize(dto.InvestmentRange),
             PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass),
             Priority = string.IsNullOrWhiteSpace(dto.Priority) ? "Medium" : dto.Priority.Trim(),
@@ -336,6 +341,28 @@ public class GhlDealsController : ControllerBase
         if (dto.PreferredAssetClass != null) deal.PreferredAssetClass = OptionalFieldNormalizer.Normalize(dto.PreferredAssetClass);
         if (dto.Priority != null) deal.Priority = dto.Priority.Trim();
         if (dto.StageEnteredAt.HasValue) deal.StageEnteredAt = dto.StageEnteredAt.Value;
+
+        if (!string.IsNullOrWhiteSpace(dto.InvestmentRoute))
+        {
+            var r = dto.InvestmentRoute.Trim().ToLowerInvariant();
+            deal.InvestorType = r.Contains("debenture")
+                ? "Alternate route to Invest in AIF via Debenture"
+                : "Direct AIF";
+        }
+
+        // Validate amount limits when setting or re-confirming investment amount
+        if (dto.InvestmentAmountConfirmed == true)
+        {
+            var effectiveRoute = dto.InvestmentRoute ?? ResolveInvestmentRoute(dto.InvestorType ?? deal.InvestorType, deal.Remarks);
+            var effectiveAmount = dto.Value ?? deal.Value;
+
+            var (isValid, errorMessage) = InvestmentRouteConstants.ValidateInvestmentAmount(effectiveAmount, effectiveRoute);
+            if (!isValid)
+            {
+                return BadRequest(ApiResponse<GhlDealResponseDto>.FailureResult(errorMessage!));
+            }
+        }
+
         if (dto.InvestmentAmountConfirmed.HasValue) deal.InvestmentAmountConfirmed = dto.InvestmentAmountConfirmed.Value;
         if (dto.KycStatus != null) deal.KycStatus = dto.KycStatus.Trim();
 
@@ -492,6 +519,7 @@ public class GhlDealsController : ControllerBase
         VerifiedAt = d.VerifiedAt,
         Remarks = d.Remarks,
         FlaggedSections = d.FlaggedSections,
+        InvestmentRoute = ResolveInvestmentRoute(d.InvestorType, d.Remarks),
         // Resolve contact details from the authoritative Customer record first,
         // then fall back to any denormalised contact data on the deal itself.
         Phone = (!string.IsNullOrWhiteSpace(d.Customer?.Phone) ? d.Customer.Phone : null),
@@ -502,6 +530,25 @@ public class GhlDealsController : ControllerBase
         HandoverPlannedEnd = d.Handover?.PlannedEndAt,
         OriginalOwnerId = d.OriginalOwnerId,
     };
+
+    private static string? ResolveInvestmentRoute(string? investorType, string? remarks)
+    {
+        if (!string.IsNullOrWhiteSpace(investorType))
+        {
+            if (investorType.Contains("Debenture", StringComparison.OrdinalIgnoreCase)) return "debenture";
+            if (investorType.Contains("Direct", StringComparison.OrdinalIgnoreCase)) return "direct_aif";
+            if (investorType.Equals("debenture", StringComparison.OrdinalIgnoreCase)) return "debenture";
+            if (investorType.Equals("direct_aif", StringComparison.OrdinalIgnoreCase)) return "direct_aif";
+        }
+        if (!string.IsNullOrWhiteSpace(remarks))
+        {
+            if (remarks.Contains("\"investmentRoute\":\"debenture\"", StringComparison.OrdinalIgnoreCase) || remarks.Contains("debenture", StringComparison.OrdinalIgnoreCase))
+                return "debenture";
+            if (remarks.Contains("\"investmentRoute\":\"direct_aif\"", StringComparison.OrdinalIgnoreCase) || remarks.Contains("direct_aif", StringComparison.OrdinalIgnoreCase))
+                return "direct_aif";
+        }
+        return null;
+    }
 
     private async Task PopulateContactDetailsAsync(
         List<GhlDealResponseDto> dtos,

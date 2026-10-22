@@ -26,6 +26,7 @@ import { FilterBar } from '../../components/common/FilterBar';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
 import { getAuthHeaders } from '../../utils/authHeaders';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './AssignedLeadsPage.css';
 
 interface AssignedLeadsPageProps {
@@ -752,26 +753,30 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
         );
       },
     },
-    {
-      key: 'quickCall',
-      header: 'Quick Call',
-      align: 'center',
-      render: l => (
-        <div className="lead-quick-call-cell">
-          <button
-            className="btn btn-call btn-sm btn-icon customer-list-call-btn"
-            title={`Call ${l.name}`}
-            aria-label={`Call ${l.name}`}
-            onClick={e => {
-              e.stopPropagation();
-              initiateCall(l.name, l.phone, 'lead', l.id);
-            }}
-          >
-            <Phone size={12} color="#ffffff" />
-          </button>
-        </div>
-      ),
-    },
+    ...(canPlaceCalls(user)
+      ? [
+          {
+            key: 'quickCall',
+            header: 'Quick Call',
+            align: 'center' as const,
+            render: (l: Lead) => (
+              <div className="lead-quick-call-cell">
+                <button
+                  className="btn btn-call btn-sm btn-icon customer-list-call-btn"
+                  title={`Call ${l.name}`}
+                  aria-label={`Call ${l.name}`}
+                  onClick={e => {
+                    e.stopPropagation();
+                    initiateCall(l.name, l.phone, 'lead', l.id);
+                  }}
+                >
+                  <Phone size={12} color="#ffffff" />
+                </button>
+              </div>
+            ),
+          } as Column<Lead>,
+        ]
+      : []),
   ];
 
   const rowActions: RowAction<Lead>[] = [
@@ -1032,14 +1037,16 @@ export const AssignedLeadsPage: React.FC<AssignedLeadsPageProps> = ({ onNavigate
             >
               <Edit size={14} /> Edit Record
             </button>
-            <button
-              className="btn btn-call"
-              onClick={() => {
-                if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id);
-              }}
-            >
-              <Phone size={14} /> Call Lead
-            </button>
+            {canPlaceCalls(user) && (
+              <button
+                className="btn btn-call"
+                onClick={() => {
+                  if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id);
+                }}
+              >
+                <Phone size={14} /> Call Lead
+              </button>
+            )}
           </>
         }
       >

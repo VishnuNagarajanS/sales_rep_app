@@ -43,6 +43,7 @@ import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawe
 import { StatusChip } from '../../components/common/StatusChip';
 import { CallRecord, Lead, Followup, Consultation } from '../../types';
 import { storageService } from '../../services/storageService';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import { IrmProfileView } from './components/IrmProfileView';
 import './ProfilePage.css';
 
@@ -784,10 +785,12 @@ export const ProfilePage: React.FC = () => {
               <span className="profile-meta-item"><Mail size={12} /><strong>{user?.email}</strong></span>
               <span className="profile-meta-item"><Phone size={12} /><strong>{user?.phone}</strong></span>
               <span className="profile-meta-item"><MapPin size={12} /><strong>{tenant?.city || tenant?.name || 'Bengaluru'}</strong></span>
-              <span className="profile-meta-item">
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: availability === 'Available' ? '#10b981' : availability === 'Busy' ? '#f59e0b' : '#64748b' }} />
-                <strong>{availability}</strong>
-              </span>
+              {canPlaceCalls(user) && (
+                <span className="profile-meta-item">
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: availability === 'Available' ? '#10b981' : availability === 'Busy' ? '#f59e0b' : '#64748b' }} />
+                  <strong>{availability}</strong>
+                </span>
+              )}
             </div>
           </div>
 
@@ -1234,7 +1237,7 @@ export const ProfilePage: React.FC = () => {
               tenantId={tenant?.id}
               tenantName={tenant?.name}
               hideAutoNotes={true}
-              onCall={() => initiateCall(statPerson.name, statPerson.phone)}
+              onCall={canPlaceCalls(user) ? () => initiateCall(statPerson.name, statPerson.phone) : undefined}
             />
           </div>
         ) : (

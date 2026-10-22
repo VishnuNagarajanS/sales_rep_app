@@ -14,6 +14,7 @@ import { storageService } from '../../services/storageService';
 import { getCalls } from '../../services/ghlApiService';
 import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from './StatusChip';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 
 interface LeadDetailDrawerContentProps {
   /** The contact's display name */
@@ -29,7 +30,7 @@ interface LeadDetailDrawerContentProps {
   /** Tenant name shown in the activity badge */
   tenantName?: string;
   /** Called when the "Call Now" button is pressed */
-  onCall: () => void;
+  onCall?: () => void;
   /**
    * Optional whitelist of dispositions to include in call history.
    * When undefined or empty, ALL dispositions are shown (suitable for
@@ -226,9 +227,11 @@ export const LeadDetailDrawerContent: React.FC<LeadDetailDrawerContentProps> = (
               {activeFollowupCount > 0 && ` • ${activeFollowupCount} Active Follow-up${activeFollowupCount > 1 ? 's' : ''}`}
             </div>
           </div>
-          <button className="btn btn-call btn-sm" onClick={onCall}>
-            <Phone size={13} /> Call Now
-          </button>
+          {onCall && canPlaceCalls(user) && (
+            <button className="btn btn-call btn-sm" onClick={onCall}>
+              <Phone size={13} /> Call Now
+            </button>
+          )}
         </div>
       )}
 

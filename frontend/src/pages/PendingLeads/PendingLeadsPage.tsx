@@ -26,6 +26,7 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './PendingLeadsPage.css';
 
 // Statuses that represent leads that have moved beyond the initial leads stage to the next step / module
@@ -453,11 +454,11 @@ export const PendingLeadsPage: React.FC = () => {
         return <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{cap}</span>;
       },
     },
-    {
+    ...(canPlaceCalls(user) ? [{
       key: 'quickCall',
       header: 'Quick Call',
-      align: 'center',
-      render: l => (
+      align: 'center' as const,
+      render: (l: Lead) => (
         <div className="pending-lead-quick-call-cell">
           <button
             className="btn btn-call btn-sm btn-icon"
@@ -472,7 +473,7 @@ export const PendingLeadsPage: React.FC = () => {
           </button>
         </div>
       ),
-    },
+    } as Column<Lead>] : []),
   ];
 
   const rowActions: RowAction<Lead>[] = [
@@ -693,7 +694,7 @@ export const PendingLeadsPage: React.FC = () => {
             contactType="lead"
             tenantId={tenant?.id}
             tenantName={tenant?.name}
-            onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id)}
+            onCall={canPlaceCalls(user) ? () => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id) : undefined}
           />
         )}
       </Drawer>

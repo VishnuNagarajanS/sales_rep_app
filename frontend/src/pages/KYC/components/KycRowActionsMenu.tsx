@@ -226,7 +226,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
             <div className="kyc-link-menu-divider" />
           )}
 
-          {onAssistedKyc && (() => {
+          {!isGhlAdmin && onAssistedKyc && (() => {
             const draftRaw = localStorage.getItem(`nexus_kyc_draft_${deal.id}`);
             let hasDraft = (deal as any).customerKycStatus === 'Assisted Draft';
             let draftStep = 1;
@@ -258,7 +258,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
             );
           })()}
 
-          {onCallInvestor && (
+          {!isGhlAdmin && onCallInvestor && (
             <button
               type="button"
               className="kyc-link-menu-item"
@@ -270,7 +270,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
             </button>
           )}
 
-          {onAdvanceStage && (
+          {!isGhlAdmin && onAdvanceStage && (
             <button
               type="button"
               className="kyc-link-menu-item"

@@ -38,6 +38,12 @@ public class WorkHandoverService : IWorkHandoverService
         var coveredUserIds = activeHandovers.Select(h => h.OriginalUserId).ToHashSet();
         var coveringUserIds = activeHandovers.Select(h => h.CoveringUserId).ToHashSet();
 
+        var today = await _clock.GetCompanyTodayAsync(companyId, ct);
+        var approvedLeaves = await _db.LeaveRequests
+            .Where(lr => lr.CompanyId == companyId && lr.Status == "Approved" && lr.StartDate <= today && today <= lr.EndDate)
+            .ToListAsync(ct);
+        var leaveByUser = approvedLeaves.ToDictionary(lr => lr.UserId, lr => lr);
+
         var result = new List<WorkHandoverCandidateDto>();
 
         foreach (var user in users)
@@ -46,28 +52,11 @@ public class WorkHandoverService : IWorkHandoverService
             var isCovering = coveringUserIds.Contains(user.Id);
             var activeHandover = activeHandovers.FirstOrDefault(h => h.OriginalUserId == user.Id || h.CoveringUserId == user.Id);
 
-            int openCount = 0;
-            if (normalizedRole == "sales_executive")
-            {
-                var openLeads = await _db.Leads.CountAsync(l => l.CompanyId == companyId && l.AssignedAgentId == user.Id &&
-                    l.Status != "Converted" && l.Status != "Not Interested" && l.Status != "Junk", ct);
-                var openCustomers = await _db.Customers.CountAsync(c => c.CompanyId == companyId && c.AssignedAgentId == user.Id, ct);
-                var openFollowups = await _db.Followups.CountAsync(f => f.CompanyId == companyId && f.AssignedAgentId == user.Id && f.Status == FollowupStatus.Pending, ct);
-                var openDeals = await _db.GhlDeals.CountAsync(d => d.CompanyId == companyId && d.AssignedAgentId == user.Id &&
-                    d.Stage != "won" && d.Stage != "lost" && d.Stage != "converted", ct);
-                openCount = openLeads + openCustomers + openFollowups + openDeals;
-            }
-            else // irm
-            {
-                var openInvestors = await _db.Investors.CountAsync(i => i.CompanyId == companyId && i.AssignedIrmId == user.Id, ct);
-                var openKycs = await _db.InvestorKycs.CountAsync(k => k.CompanyId == companyId && k.IrmId == user.Id &&
-                    k.Status != KycStatus.Approved && k.Status != KycStatus.Rejected, ct);
-                var openConsultations = await _db.Consultations.CountAsync(c => c.CompanyId == companyId && c.ConsultantId == user.Id &&
-                    c.Status == ConsultationStatus.Scheduled, ct);
-                var openCards = await _db.IrmPipelineCards.CountAsync(c => c.CompanyId == companyId && c.AssignedIrmId == user.Id, ct);
-                var openFollowups = await _db.Followups.CountAsync(f => f.CompanyId == companyId && f.AssignedAgentId == user.Id && f.Status == FollowupStatus.Pending, ct);
-                openCount = openInvestors + openKycs + openConsultations + openCards + openFollowups;
-            }
+            var onLeave = leaveByUser.TryGetValue(user.Id, out var leaveReq);
+            string? leaveReason = onLeave ? $"On approved leave ({leaveReq!.StartDate:d MMM} - {leaveReq.EndDate:d MMM})" : null;
+
+            var counts = await CalculateCountsAsync(companyId, user.Id, ct);
+            int openCount = counts.TotalCount;
 
             result.Add(new WorkHandoverCandidateDto
             {
@@ -79,6 +68,8 @@ public class WorkHandoverService : IWorkHandoverService
                 OpenItemsCount = openCount,
                 IsCovered = isCovered,
                 IsCovering = isCovering,
+                OnLeave = onLeave,
+                LeaveReason = leaveReason,
                 ActiveHandoverId = activeHandover?.Id
             });
         }
@@ -86,25 +77,29 @@ public class WorkHandoverService : IWorkHandoverService
         return result;
     }
 
-    public async Task<WorkHandoverPreviewDto> GetPreviewAsync(int companyId, int fromUserId, int toUserId, CancellationToken ct = default)
+    public async Task<WorkHandoverPreviewDto> GetPreviewAsync(int companyId, int fromUserId, int toUserId = 0, CancellationToken ct = default)
     {
-        if (fromUserId <= 0 || toUserId <= 0)
-            throw new ArgumentException("Valid FromUserId and ToUserId are required.");
-
-        if (fromUserId == toUserId)
-            throw new InvalidOperationException("Source and covering user cannot be the same person.");
+        if (fromUserId <= 0)
+            throw new ArgumentException("Valid FromUserId is required.");
 
         var fromUser = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == fromUserId && u.CompanyId == companyId, ct)
             ?? throw new KeyNotFoundException($"Source user ID {fromUserId} not found in this company.");
 
-        var toUser = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == toUserId && u.CompanyId == companyId, ct)
-            ?? throw new KeyNotFoundException($"Target user ID {toUserId} not found in this company.");
+        User? toUser = null;
+        if (toUserId > 0)
+        {
+            if (fromUserId == toUserId)
+                throw new InvalidOperationException("Source and covering user cannot be the same person.");
 
-        if (fromUser.Role.Code.ToLowerInvariant() != toUser.Role.Code.ToLowerInvariant())
-            throw new InvalidOperationException($"Role mismatch: {fromUser.Name} is '{fromUser.Role.Code}' while {toUser.Name} is '{toUser.Role.Code}'. Handover is strictly allowed only between the same role.");
+            toUser = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == toUserId && u.CompanyId == companyId, ct)
+                ?? throw new KeyNotFoundException($"Target user ID {toUserId} not found in this company.");
 
-        if (toUser.Status != UserStatus.Active)
-            throw new InvalidOperationException($"Target user '{toUser.Name}' is not Active and cannot receive handover.");
+            if (fromUser.Role.Code.ToLowerInvariant() != toUser.Role.Code.ToLowerInvariant())
+                throw new InvalidOperationException($"Role mismatch: {fromUser.Name} is '{fromUser.Role.Code}' while {toUser.Name} is '{toUser.Role.Code}'. Handover is strictly allowed only between the same role.");
+
+            if (toUser.Status != UserStatus.Active)
+                throw new InvalidOperationException($"Target user '{toUser.Name}' is not Active and cannot receive handover.");
+        }
 
         var counts = await CalculateCountsAsync(companyId, fromUserId, ct);
 
@@ -112,8 +107,8 @@ public class WorkHandoverService : IWorkHandoverService
         {
             FromUserId = fromUser.Id,
             FromUserName = fromUser.Name,
-            ToUserId = toUser.Id,
-            ToUserName = toUser.Name,
+            ToUserId = toUser?.Id ?? 0,
+            ToUserName = toUser?.Name ?? string.Empty,
             RoleCode = fromUser.Role.Code,
             LeadsCount = counts.LeadsCount,
             CustomersCount = counts.CustomersCount,
@@ -185,197 +180,194 @@ public class WorkHandoverService : IWorkHandoverService
 
         var items = new List<WorkHandoverItem>();
 
-        // 1. Leads
-        var openLeads = await _db.Leads
-            .Where(l => l.CompanyId == companyId && l.AssignedAgentId == fromUser.Id &&
-                        (handover.RoleCode == "irm" || (l.Status != "Converted" && l.Status != "Not Interested" && l.Status != "Junk")))
-            .ToListAsync(ct);
-        foreach (var lead in openLeads)
+        if (handover.RoleCode == "sales_executive")
         {
-            lead.AssignedAgentId = toUser.Id;
-            lead.AssignedAt = DateTime.UtcNow;
-            lead.HandoverId = handover.Id;
-            lead.OriginalOwnerId = fromUser.Id;
-            lead.UpdatedAt = DateTime.UtcNow;
-            items.Add(new WorkHandoverItem
-            {
-                HandoverId = handover.Id,
-                EntityType = "Lead",
-                EntityId = lead.Id,
-                Origin = "included_at_start",
-                CreatedAt = DateTime.UtcNow
-            });
-        }
+            // 1. Leads: leads currently assigned to this sales exec that are NOT yet assigned/handed to an IRM.
+            // Exclude closed/converted/archived/junk.
+            var openLeads = await _db.Leads
+                .Where(l => l.CompanyId == companyId && l.AssignedAgentId == fromUser.Id &&
+                            l.Status != "Converted" && l.Status != "Not Interested" && l.Status != "Junk" &&
+                            l.Status != "Closed" && l.Status != "Archived" &&
+                            (l.CustomFieldsJson == null ||
+                             (!l.CustomFieldsJson.Contains("\"assignedIrmId\"") && !l.CustomFieldsJson.Contains("\"assignedIrmName\""))))
+                .ToListAsync(ct);
 
-        // 2. Customers
-        var customers = await _db.Customers
-            .Where(c => c.CompanyId == companyId && c.AssignedAgentId == fromUser.Id)
-            .ToListAsync(ct);
-        foreach (var customer in customers)
-        {
-            customer.AssignedAgentId = toUser.Id;
-            customer.HandoverId = handover.Id;
-            customer.OriginalOwnerId = fromUser.Id;
-            customer.UpdatedAt = DateTime.UtcNow;
-            items.Add(new WorkHandoverItem
+            foreach (var lead in openLeads)
             {
-                HandoverId = handover.Id,
-                EntityType = "Customer",
-                EntityId = customer.Id,
-                Origin = "included_at_start",
-                CreatedAt = DateTime.UtcNow
-            });
-        }
+                lead.AssignedAgentId = toUser.Id;
+                lead.AssignedAt = DateTime.UtcNow;
+                lead.HandoverId = handover.Id;
+                lead.OriginalOwnerId = fromUser.Id;
+                lead.UpdatedAt = DateTime.UtcNow;
+                items.Add(new WorkHandoverItem
+                {
+                    HandoverId = handover.Id,
+                    EntityType = "Lead",
+                    EntityId = lead.Id,
+                    Origin = "included_at_start",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
 
-        // 3. Pending Follow-ups
-        var pendingFollowups = await _db.Followups
-            .Where(f => f.CompanyId == companyId && f.AssignedAgentId == fromUser.Id && f.Status == FollowupStatus.Pending)
-            .ToListAsync(ct);
-        foreach (var followup in pendingFollowups)
-        {
-            followup.AssignedAgentId = toUser.Id;
-            followup.AssignedToName = toUser.Name;
-            followup.HandoverId = handover.Id;
-            followup.OriginalOwnerId = fromUser.Id;
-            followup.UpdatedAt = DateTime.UtcNow;
-            items.Add(new WorkHandoverItem
+            // 2. Pending Follow-ups belonging to those leads
+            var eligibleLeadIds = openLeads.Select(l => l.Id).ToHashSet();
+            var eligibleLeadIdStrs = openLeads.SelectMany(l => new[] { l.Id.ToString(), $"lead-{l.Id}" }).ToHashSet();
+            var eligibleLeadPhones = openLeads.Where(l => !string.IsNullOrWhiteSpace(l.Phone)).Select(l => l.Phone.Trim()).ToHashSet();
+            var eligibleLeadPhone10s = openLeads.Where(l => !string.IsNullOrWhiteSpace(l.Phone) && l.Phone.Length >= 10).Select(l => l.Phone[^10..]).ToHashSet();
+
+            var pendingFollowups = await _db.Followups
+                .Where(f => f.CompanyId == companyId && f.AssignedAgentId == fromUser.Id && f.Status == FollowupStatus.Pending)
+                .ToListAsync(ct);
+
+            var eligibleFollowups = pendingFollowups.Where(f =>
             {
-                HandoverId = handover.Id,
-                EntityType = "Followup",
-                EntityId = followup.Id,
-                Origin = "included_at_start",
-                CreatedAt = DateTime.UtcNow
-            });
-        }
+                if (f.InvestorId != null || f.ContactType == "investor") return false;
 
-        // 4. Open GhlDeals
-        var openDeals = await _db.GhlDeals
-            .Where(d => d.CompanyId == companyId && d.AssignedAgentId == fromUser.Id &&
-                        (handover.RoleCode == "irm" || (d.Stage != "won" && d.Stage != "lost" && d.Stage != "converted")))
-            .ToListAsync(ct);
-        foreach (var deal in openDeals)
-        {
-            deal.AssignedAgentId = toUser.Id;
-            deal.HandoverId = handover.Id;
-            deal.OriginalOwnerId = fromUser.Id;
-            items.Add(new WorkHandoverItem
+                if (!string.IsNullOrWhiteSpace(f.ContactId))
+                {
+                    var cleanId = f.ContactId.Replace("lead-", "").Trim();
+                    if (int.TryParse(cleanId, out var parsedId) && eligibleLeadIds.Contains(parsedId))
+                        return true;
+                    if (eligibleLeadIdStrs.Contains(f.ContactId.Trim()))
+                        return true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(f.ContactPhone))
+                {
+                    var p = f.ContactPhone.Trim();
+                    if (eligibleLeadPhones.Contains(p)) return true;
+                    if (p.Length >= 10 && eligibleLeadPhone10s.Contains(p[^10..])) return true;
+                }
+
+                return false;
+            }).ToList();
+
+            foreach (var followup in eligibleFollowups)
             {
-                HandoverId = handover.Id,
-                EntityType = "GhlDeal",
-                EntityId = deal.Id,
-                Origin = "included_at_start",
-                CreatedAt = DateTime.UtcNow
-            });
+                followup.AssignedAgentId = toUser.Id;
+                followup.AssignedToName = toUser.Name;
+                followup.HandoverId = handover.Id;
+                followup.OriginalOwnerId = fromUser.Id;
+                followup.UpdatedAt = DateTime.UtcNow;
+                items.Add(new WorkHandoverItem
+                {
+                    HandoverId = handover.Id,
+                    EntityType = "Followup",
+                    EntityId = followup.Id,
+                    Origin = "included_at_start",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
         }
-
-        // 5. Open GhlInvestmentOpportunities
-        var openOpps = await _db.GhlInvestmentOpportunities
-            .Where(o => o.CompanyId == companyId && o.AssignedAgentId == fromUser.Id &&
-                        (handover.RoleCode == "irm" || (o.Stage != "Closed Won" && o.Stage != "Closed Lost")))
-            .ToListAsync(ct);
-        foreach (var opp in openOpps)
+        else // irm
         {
-            opp.AssignedAgentId = toUser.Id;
-            opp.HandoverId = handover.Id;
-            opp.OriginalOwnerId = fromUser.Id;
-            opp.UpdatedAt = DateTime.UtcNow;
-            items.Add(new WorkHandoverItem
+            // 1. Investors
+            var investors = await _db.Investors
+                .Where(i => i.CompanyId == companyId && i.AssignedIrmId == fromUser.Id)
+                .ToListAsync(ct);
+            foreach (var inv in investors)
             {
-                HandoverId = handover.Id,
-                EntityType = "GhlInvestmentOpportunity",
-                EntityId = opp.Id,
-                Origin = "included_at_start",
-                CreatedAt = DateTime.UtcNow
-            });
-        }
+                inv.AssignedIrmId = toUser.Id;
+                inv.AssignedIrmName = toUser.Name;
+                inv.HandoverId = handover.Id;
+                inv.OriginalOwnerId = fromUser.Id;
+                inv.UpdatedAt = DateTime.UtcNow;
+                items.Add(new WorkHandoverItem
+                {
+                    HandoverId = handover.Id,
+                    EntityType = "Investor",
+                    EntityId = inv.Id,
+                    Origin = "included_at_start",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
 
-        // 7. Scheduled Consultations
-        var consultations = await _db.Consultations
-            .Where(c => c.CompanyId == companyId && c.ConsultantId == fromUser.Id && c.Status == ConsultationStatus.Scheduled)
-            .ToListAsync(ct);
-        foreach (var cons in consultations)
-        {
-            cons.ConsultantId = toUser.Id;
-            cons.ConsultantName = toUser.Name;
-            cons.HandoverId = handover.Id;
-            cons.OriginalOwnerId = fromUser.Id;
-            cons.UpdatedAt = DateTime.UtcNow;
-            items.Add(new WorkHandoverItem
+            // 2. InvestorKycs
+            var kycs = await _db.InvestorKycs
+                .Where(k => k.CompanyId == companyId && k.IrmId == fromUser.Id &&
+                            (k.Status != KycStatus.Approved && k.Status != KycStatus.Rejected))
+                .ToListAsync(ct);
+            foreach (var kyc in kycs)
             {
-                HandoverId = handover.Id,
-                EntityType = "Consultation",
-                EntityId = cons.Id,
-                Origin = "included_at_start",
-                CreatedAt = DateTime.UtcNow
-            });
-        }
+                kyc.IrmId = toUser.Id;
+                kyc.HandoverId = handover.Id;
+                kyc.OriginalOwnerId = fromUser.Id;
+                kyc.UpdatedAt = DateTime.UtcNow;
+                items.Add(new WorkHandoverItem
+                {
+                    HandoverId = handover.Id,
+                    EntityType = "InvestorKyc",
+                    EntityId = kyc.Id,
+                    Origin = "included_at_start",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
 
-        // 8. Investors (IRM)
-        var investors = await _db.Investors
-            .Where(i => i.CompanyId == companyId && i.AssignedIrmId == fromUser.Id)
-            .ToListAsync(ct);
-        foreach (var inv in investors)
-        {
-            inv.AssignedIrmId = toUser.Id;
-            inv.AssignedIrmName = toUser.Name;
-            inv.HandoverId = handover.Id;
-            inv.OriginalOwnerId = fromUser.Id;
-            inv.UpdatedAt = DateTime.UtcNow;
-            items.Add(new WorkHandoverItem
+            // 3. Scheduled Consultations
+            var consultations = await _db.Consultations
+                .Where(c => c.CompanyId == companyId && c.ConsultantId == fromUser.Id && c.Status == ConsultationStatus.Scheduled)
+                .ToListAsync(ct);
+            foreach (var cons in consultations)
             {
-                HandoverId = handover.Id,
-                EntityType = "Investor",
-                EntityId = inv.Id,
-                Origin = "included_at_start",
-                CreatedAt = DateTime.UtcNow
-            });
-        }
+                cons.ConsultantId = toUser.Id;
+                cons.ConsultantName = toUser.Name;
+                cons.HandoverId = handover.Id;
+                cons.OriginalOwnerId = fromUser.Id;
+                cons.UpdatedAt = DateTime.UtcNow;
+                items.Add(new WorkHandoverItem
+                {
+                    HandoverId = handover.Id,
+                    EntityType = "Consultation",
+                    EntityId = cons.Id,
+                    Origin = "included_at_start",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
 
-        // 9. InvestorKycs
-        var kycs = await _db.InvestorKycs
-            .Where(k => k.CompanyId == companyId && k.IrmId == fromUser.Id &&
-                        (handover.RoleCode == "irm" || (k.Status != KycStatus.Approved && k.Status != KycStatus.Rejected)))
-            .ToListAsync(ct);
-        foreach (var kyc in kycs)
-        {
-            kyc.IrmId = toUser.Id;
-            kyc.HandoverId = handover.Id;
-            kyc.OriginalOwnerId = fromUser.Id;
-            kyc.UpdatedAt = DateTime.UtcNow;
-            items.Add(new WorkHandoverItem
+            // 4. IrmPipelineCards
+            var cards = await _db.IrmPipelineCards
+                .Where(c => c.CompanyId == companyId && c.AssignedIrmId == fromUser.Id)
+                .ToListAsync(ct);
+            foreach (var card in cards)
             {
-                HandoverId = handover.Id,
-                EntityType = "InvestorKyc",
-                EntityId = kyc.Id,
-                Origin = "included_at_start",
-                CreatedAt = DateTime.UtcNow
-            });
-        }
+                card.AssignedIrmId = toUser.Id;
+                card.AssignedIrmName = toUser.Name;
+                card.HandoverId = handover.Id;
+                card.OriginalOwnerId = fromUser.Id;
+                card.UpdatedAt = DateTime.UtcNow;
+                items.Add(new WorkHandoverItem
+                {
+                    HandoverId = handover.Id,
+                    EntityType = "IrmPipelineCard",
+                    EntityId = card.Id,
+                    Origin = "included_at_start",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
 
-        // 10. IrmPipelineCards
-        var cards = await _db.IrmPipelineCards
-            .Where(c => c.CompanyId == companyId && c.AssignedIrmId == fromUser.Id)
-            .ToListAsync(ct);
-        foreach (var card in cards)
-        {
-            card.AssignedIrmId = toUser.Id;
-            card.AssignedIrmName = toUser.Name;
-            card.HandoverId = handover.Id;
-            card.OriginalOwnerId = fromUser.Id;
-            card.UpdatedAt = DateTime.UtcNow;
-            items.Add(new WorkHandoverItem
+            // 5. IRM Pending Follow-ups
+            var irmFollowups = await _db.Followups
+                .Where(f => f.CompanyId == companyId && f.AssignedAgentId == fromUser.Id && f.Status == FollowupStatus.Pending &&
+                            (f.InvestorId != null || f.ContactType == "investor" || f.AssignedToRole == "irm"))
+                .ToListAsync(ct);
+            foreach (var followup in irmFollowups)
             {
-                HandoverId = handover.Id,
-                EntityType = "IrmPipelineCard",
-                EntityId = card.Id,
-                Origin = "included_at_start",
-                CreatedAt = DateTime.UtcNow
-            });
-        }
+                followup.AssignedAgentId = toUser.Id;
+                followup.AssignedToName = toUser.Name;
+                followup.HandoverId = handover.Id;
+                followup.OriginalOwnerId = fromUser.Id;
+                followup.UpdatedAt = DateTime.UtcNow;
+                items.Add(new WorkHandoverItem
+                {
+                    HandoverId = handover.Id,
+                    EntityType = "Followup",
+                    EntityId = followup.Id,
+                    Origin = "included_at_start",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
 
-        // 11. Leads with Assigned IRM
-        if (fromUser.Role.Code.Equals("irm", StringComparison.OrdinalIgnoreCase))
-        {
+            // 6. Leads with Assigned IRM
             var irmLeads = await _db.Leads
                 .Where(l => l.CompanyId == companyId && l.CustomFieldsJson != null &&
                             (l.CustomFieldsJson.Contains($"\"assignedIrmId\":\"{fromUser.Id}\"") ||
@@ -1186,32 +1178,95 @@ public class WorkHandoverService : IWorkHandoverService
         var user = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == userId && u.CompanyId == companyId, ct);
         var isIrm = user?.Role?.Code == "irm";
 
-        var leads = await _db.Leads.CountAsync(l => l.CompanyId == companyId && l.AssignedAgentId == userId &&
-            (isIrm || (l.Status != "Converted" && l.Status != "Not Interested" && l.Status != "Junk")), ct);
-        var customers = await _db.Customers.CountAsync(c => c.CompanyId == companyId && c.AssignedAgentId == userId, ct);
-        var followups = await _db.Followups.CountAsync(f => f.CompanyId == companyId && f.AssignedAgentId == userId && f.Status == FollowupStatus.Pending, ct);
-        var deals = await _db.GhlDeals.CountAsync(d => d.CompanyId == companyId && d.AssignedAgentId == userId &&
-            (isIrm || (d.Stage != "won" && d.Stage != "lost" && d.Stage != "converted")), ct);
-        var opps = await _db.GhlInvestmentOpportunities.CountAsync(o => o.CompanyId == companyId && o.AssignedAgentId == userId &&
-            (isIrm || (o.Stage != "Closed Won" && o.Stage != "Closed Lost")), ct);
-        var consults = await _db.Consultations.CountAsync(c => c.CompanyId == companyId && c.ConsultantId == userId && c.Status == ConsultationStatus.Scheduled, ct);
-        var investors = await _db.Investors.CountAsync(i => i.CompanyId == companyId && i.AssignedIrmId == userId, ct);
-        var kycs = await _db.InvestorKycs.CountAsync(k => k.CompanyId == companyId && k.IrmId == userId &&
-            (isIrm || (k.Status != KycStatus.Approved && k.Status != KycStatus.Rejected)), ct);
-        var cards = await _db.IrmPipelineCards.CountAsync(c => c.CompanyId == companyId && c.AssignedIrmId == userId, ct);
-
-        return new WorkHandoverCountsDto
+        if (!isIrm)
         {
-            LeadsCount = leads,
-            CustomersCount = customers,
-            FollowupsCount = followups,
-            DealsCount = deals,
-            InvestorsCount = investors,
-            KycsCount = kycs,
-            OpportunitiesCount = opps,
-            ConsultationsCount = consults,
-            PipelineCardsCount = cards
-        };
+            // Sales Executive
+            // 1. Leads currently assigned to this sales exec that are NOT yet assigned/handed to an IRM.
+            // Exclude closed/converted/archived/junk.
+            var eligibleLeads = await _db.Leads
+                .Where(l => l.CompanyId == companyId &&
+                            l.AssignedAgentId == userId &&
+                            l.Status != "Converted" &&
+                            l.Status != "Not Interested" &&
+                            l.Status != "Junk" &&
+                            l.Status != "Closed" &&
+                            l.Status != "Archived" &&
+                            (l.CustomFieldsJson == null ||
+                             (!l.CustomFieldsJson.Contains("\"assignedIrmId\"") && !l.CustomFieldsJson.Contains("\"assignedIrmName\""))))
+                .Select(l => new { l.Id, l.Phone })
+                .ToListAsync(ct);
+
+            var eligibleLeadIds = eligibleLeads.Select(l => l.Id).ToHashSet();
+            var eligibleLeadIdStrs = eligibleLeads.SelectMany(l => new[] { l.Id.ToString(), $"lead-{l.Id}" }).ToHashSet();
+            var eligibleLeadPhones = eligibleLeads.Where(l => !string.IsNullOrWhiteSpace(l.Phone)).Select(l => l.Phone.Trim()).ToHashSet();
+            var eligibleLeadPhone10s = eligibleLeads.Where(l => !string.IsNullOrWhiteSpace(l.Phone) && l.Phone.Length >= 10).Select(l => l.Phone[^10..]).ToHashSet();
+
+            // 2. Follow-ups: pending/open follow-ups belonging to those leads (not completed/cancelled), and only for leads not yet assigned to an IRM.
+            var pendingFollowups = await _db.Followups
+                .Where(f => f.CompanyId == companyId && f.AssignedAgentId == userId && f.Status == FollowupStatus.Pending)
+                .ToListAsync(ct);
+
+            var eligibleFollowupsCount = pendingFollowups.Count(f =>
+            {
+                if (f.InvestorId != null || f.ContactType == "investor") return false;
+
+                if (!string.IsNullOrWhiteSpace(f.ContactId))
+                {
+                    var cleanId = f.ContactId.Replace("lead-", "").Trim();
+                    if (int.TryParse(cleanId, out var parsedId) && eligibleLeadIds.Contains(parsedId))
+                        return true;
+                    if (eligibleLeadIdStrs.Contains(f.ContactId.Trim()))
+                        return true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(f.ContactPhone))
+                {
+                    var p = f.ContactPhone.Trim();
+                    if (eligibleLeadPhones.Contains(p)) return true;
+                    if (p.Length >= 10 && eligibleLeadPhone10s.Contains(p[^10..])) return true;
+                }
+
+                return false;
+            });
+
+            return new WorkHandoverCountsDto
+            {
+                LeadsCount = eligibleLeads.Count,
+                FollowupsCount = eligibleFollowupsCount,
+                CustomersCount = 0,
+                DealsCount = 0,
+                InvestorsCount = 0,
+                KycsCount = 0,
+                OpportunitiesCount = 0,
+                ConsultationsCount = 0,
+                PipelineCardsCount = 0
+            };
+        }
+        else
+        {
+            // IRM
+            var openInvestors = await _db.Investors.CountAsync(i => i.CompanyId == companyId && i.AssignedIrmId == userId, ct);
+            var openKycs = await _db.InvestorKycs.CountAsync(k => k.CompanyId == companyId && k.IrmId == userId &&
+                k.Status != KycStatus.Approved && k.Status != KycStatus.Rejected, ct);
+            var openConsultations = await _db.Consultations.CountAsync(c => c.CompanyId == companyId && c.ConsultantId == userId &&
+                c.Status == ConsultationStatus.Scheduled, ct);
+            var openCards = await _db.IrmPipelineCards.CountAsync(c => c.CompanyId == companyId && c.AssignedIrmId == userId, ct);
+            var openFollowups = await _db.Followups.CountAsync(f => f.CompanyId == companyId && f.AssignedAgentId == userId && f.Status == FollowupStatus.Pending &&
+                (f.InvestorId != null || f.ContactType == "investor" || f.AssignedToRole == "irm"), ct);
+
+            return new WorkHandoverCountsDto
+            {
+                LeadsCount = 0,
+                CustomersCount = 0,
+                FollowupsCount = openFollowups,
+                DealsCount = 0,
+                InvestorsCount = openInvestors,
+                KycsCount = openKycs,
+                OpportunitiesCount = 0,
+                ConsultationsCount = openConsultations,
+                PipelineCardsCount = openCards
+            };
+        }
     }
 
     private async Task<WorkHandoverProgressDto> CalculateProgressAsync(WorkHandover handover, CancellationToken ct)
@@ -1484,24 +1539,8 @@ public class WorkHandoverService : IWorkHandoverService
                 disabledReason = $"On approved leave ({leave.StartDate:d MMM} - {leave.EndDate:d MMM})";
             }
 
-            int openItems = 0;
-            if (roleCode == "sales_executive")
-            {
-                var openLeads = await _db.Leads.CountAsync(l => l.CompanyId == companyId && l.AssignedAgentId == c.Id && l.Status != "Converted" && l.Status != "Not Interested" && l.Status != "Junk", ct);
-                var pendingFollowups = await _db.Followups.CountAsync(f => f.CompanyId == companyId && f.AssignedAgentId == c.Id && f.Status == FollowupStatus.Pending, ct);
-                var openDeals = await _db.GhlDeals.CountAsync(d => d.CompanyId == companyId && d.AssignedAgentId == c.Id && d.Stage != "won" && d.Stage != "lost" && d.Stage != "converted", ct);
-                openItems = openLeads + pendingFollowups + openDeals;
-            }
-            else if (roleCode == "irm")
-            {
-                var openInvestors = await _db.Investors.CountAsync(i => i.CompanyId == companyId && i.AssignedIrmId == c.Id, ct);
-                var openKycs = await _db.InvestorKycs.CountAsync(k => k.CompanyId == companyId && k.IrmId == c.Id, ct);
-                var openConsultations = await _db.Consultations.CountAsync(con => con.CompanyId == companyId && con.ConsultantId == c.Id && con.Status == ConsultationStatus.Scheduled, ct);
-                var openCards = await _db.IrmPipelineCards.CountAsync(card => card.CompanyId == companyId && card.AssignedIrmId == c.Id, ct);
-                var openDeals = await _db.GhlDeals.CountAsync(d => d.CompanyId == companyId && d.AssignedAgentId == c.Id, ct);
-                var openLeads = await _db.Leads.CountAsync(l => l.CompanyId == companyId && l.AssignedAgentId == c.Id, ct);
-                openItems = openInvestors + openKycs + openConsultations + openCards + openDeals + openLeads;
-            }
+            var counts = await CalculateCountsAsync(companyId, c.Id, ct);
+            int openItems = counts.TotalCount;
 
             suggestions.Add(new backend.DTOs.Admin.CoverSuggestionDto
             {

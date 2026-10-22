@@ -14,6 +14,9 @@ export interface AssignableAgent {
   name: string;
   dbId?: number;
   roleCode?: string;
+  disabled?: boolean;
+  onLeave?: boolean;
+  disabledReason?: string;
 }
 
 export interface AgentDirectory {
@@ -34,12 +37,17 @@ export async function loadAgentDirectory(companyId?: string, currentUserId?: str
     try {
       const res = await apiClient.get<any>('/ghl/agents');
       if (res.success && res.data) {
-        const agents: AssignableAgent[] = res.data.map((u: any) => ({
-          id: String(u.userId || u.id),
-          name: u.name,
-          dbId: Number(u.userId || u.id),
-          roleCode: u.roleCode
-        }));
+        const agents: AssignableAgent[] = res.data
+          // 1.1: Exclude on-leave and covered (disabled) agents from all assignment flows
+          .filter((u: any) => !u.disabled && !u.onLeave)
+          .map((u: any) => ({
+            id: String(u.userId || u.id),
+            name: u.name,
+            dbId: Number(u.userId || u.id),
+            roleCode: u.roleCode,
+            disabled: false,
+            onLeave: false,
+          }));
         return { agents, adminIds, fromApi: true };
       }
     } catch (err) {

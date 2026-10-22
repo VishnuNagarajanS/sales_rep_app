@@ -2159,22 +2159,6 @@
   border: 2px solid rgba(255, 255, 255, 0.25);
 }
 
-.kyc-glass-avatar-ring {
-  position: absolute;
-  top: -5px;
-  left: -5px;
-  right: -5px;
-  bottom: -5px;
-  border-radius: 50%;
-  border: 2px dashed rgba(239, 68, 68, 0.65);
-  animation: kycRingSpin 24s linear infinite;
-  pointer-events: none;
-}
-
-@keyframes kycRingSpin {
-  100% { transform: rotate(360deg); }
-}
-
 .kyc-glass-hero-user {
   display: flex;
   flex-direction: column;
@@ -2920,10 +2904,47 @@
   color: #34d399;
 }
 
+.kyc-glass-verify-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(15, 23, 42, 0.04);
+  color: #334155;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.kyc-glass-verify-btn:hover {
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
+:is(.admin-theme, .dark-theme) .kyc-glass-verify-btn {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+}
+
+:is(.admin-theme, .dark-theme) .kyc-glass-verify-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
 .kyc-glass-empty-container {
   min-height: 28px;
   display: flex;
   align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
 }
 
 .kyc-glass-empty-pill {

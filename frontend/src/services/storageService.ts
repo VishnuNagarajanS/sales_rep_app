@@ -246,6 +246,17 @@ class StorageService {
     this.set('tenants', tenants);
   }
 
+  getUser(): User | null {
+    try {
+      const raw = sessionStorage.getItem('nexus_current_user') || localStorage.getItem('nexus_current_user');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed?.user && (parsed.user.id || parsed.user.email) ? parsed.user : parsed;
+    } catch {
+      return null;
+    }
+  }
+
   // Users
   getUsers(companySlug?: string): User[] {
     let users = this.get<User[]>('users', []);

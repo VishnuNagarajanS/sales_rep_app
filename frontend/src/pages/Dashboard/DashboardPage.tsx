@@ -38,6 +38,7 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { FEATURES } from '../../constants/features';
 import { IrmDashboardView } from './components/IrmDashboardView';
 import { formatSmartScheduleDate } from '../../utils/dateUtils';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './DashboardPage.css';
 
 const getStoredPlots = (): Plot[] => {
@@ -588,7 +589,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                     <th className="dashboard-table-th">Investor</th>
                     <th className="dashboard-table-th">Status</th>
                     <th className="dashboard-table-th">Committed AUM</th>
-                    <th className="dashboard-table-th right">Quick Call</th>
+                    {canPlaceCalls(user) && <th className="dashboard-table-th right">Quick Call</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -606,20 +607,22 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                           {inv.committedAUM || inv.investmentCapacity || '—'}
                         </span>
                       </td>
-                      <td className="dashboard-table-td right">
-                        <button
-                          className="btn btn-call btn-sm btn-icon dashboard-call-btn"
-                          title={`Call ${inv.name}`}
-                          onClick={() => initiateCall(inv.name, inv.phone, 'customer', inv.id)}
-                        >
-                          <Phone size={13} />
-                        </button>
-                      </td>
+                      {canPlaceCalls(user) && (
+                        <td className="dashboard-table-td right">
+                          <button
+                            className="btn btn-call btn-sm btn-icon dashboard-call-btn"
+                            title={`Call ${inv.name}`}
+                            onClick={() => initiateCall(inv.name, inv.phone, 'customer', inv.id)}
+                          >
+                            <Phone size={13} />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                   {scopedInvestors.length === 0 && (
                     <tr>
-                      <td colSpan={4} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                      <td colSpan={canPlaceCalls(user) ? 4 : 3} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                         No assigned investors found.
                       </td>
                     </tr>
@@ -648,7 +651,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                     <th className="dashboard-table-th">Contact</th>
                     <th className="dashboard-table-th">Status</th>
                     <th className="dashboard-table-th">Priority</th>
-                    <th className="dashboard-table-th right">Quick Call</th>
+                    {canPlaceCalls(user) && <th className="dashboard-table-th right">Quick Call</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -664,20 +667,22 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                       <td className="dashboard-table-td">
                         <StatusChip status={l.priority} size="sm" />
                       </td>
-                      <td className="dashboard-table-td right">
-                        <button
-                          className="btn btn-call btn-sm btn-icon dashboard-call-btn"
-                          title={`Call ${l.name}`}
-                          onClick={() => initiateCall(l.name, l.phone, 'lead', l.id)}
-                        >
-                          <Phone size={13} />
-                        </button>
-                      </td>
+                      {canPlaceCalls(user) && (
+                        <td className="dashboard-table-td right">
+                          <button
+                            className="btn btn-call btn-sm btn-icon dashboard-call-btn"
+                            title={`Call ${l.name}`}
+                            onClick={() => initiateCall(l.name, l.phone, 'lead', l.id)}
+                          >
+                            <Phone size={13} />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                   {scopedLeads.length === 0 && (
                     <tr>
-                      <td colSpan={4} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                      <td colSpan={canPlaceCalls(user) ? 4 : 3} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                         {isExec ? 'No active leads assigned yet.' : 'No inbound leads found.'}
                       </td>
                     </tr>
@@ -717,12 +722,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                     </div>
                   </div>
 
-                  <button
-                    className="btn btn-call btn-sm"
-                    onClick={() => initiateCall(c.investorName, c.investorPhone, 'customer', c.investorId)}
-                  >
-                    <Phone size={13} /> Call
-                  </button>
+                  {canPlaceCalls(user) && (
+                    <button
+                      className="btn btn-call btn-sm"
+                      onClick={() => initiateCall(c.investorName, c.investorPhone, 'customer', c.investorId)}
+                    >
+                      <Phone size={13} /> Call
+                    </button>
+                  )}
                 </div>
               ))}
               {upcomingConsultations.length === 0 && (
@@ -761,12 +768,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate, onOpen
                     </div>
                   </div>
 
-                  <button
-                    className="btn btn-call btn-sm"
-                    onClick={() => initiateCall(f.contactName, f.contactPhone, 'lead', f.contactId)}
-                  >
-                    <Phone size={13} /> Call Now
-                  </button>
+                  {canPlaceCalls(user) && (
+                    <button
+                      className="btn btn-call btn-sm"
+                      onClick={() => initiateCall(f.contactName, f.contactPhone, 'lead', f.contactId)}
+                    >
+                      <Phone size={13} /> Call Now
+                    </button>
+                  )}
                 </div>
               ))}
               {scopedFollowups.length === 0 && (

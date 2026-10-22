@@ -924,6 +924,7 @@ using (var scope = app.Services.CreateScope())
                         ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""RecordingUrl"" character varying(256) NULL;
                         ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Transcript"" text NULL;
                         ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""CallModule"" character varying(50) NULL;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""LeadStatusAtCall"" character varying(50) NULL;
                         ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Reason"" text NULL;
                     END IF;
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'CallRecords') THEN
@@ -931,6 +932,7 @@ using (var scope = app.Services.CreateScope())
                         ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""RecordingUrl"" character varying(256) NULL;
                         ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""Transcript"" text NULL;
                         ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""CallModule"" character varying(50) NULL;
+                        ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""LeadStatusAtCall"" character varying(50) NULL;
                         ALTER TABLE ""CallRecords"" ADD COLUMN IF NOT EXISTS ""Reason"" text NULL;
                     END IF;
 

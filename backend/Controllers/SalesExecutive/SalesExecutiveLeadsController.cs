@@ -172,7 +172,8 @@ public class SalesExecutiveLeadsController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "company_admin,super_admin")]
+    // 1.5: company_admin must NOT delete leads (returns 403). Only super_admin can delete.
+    [Authorize(Roles = "super_admin")]
     public async Task<ActionResult<ApiResponse<object>>> DeleteLead([FromRoute] int id, CancellationToken ct)
     {
         var result = await _leadService.DeleteLeadAsync(id, ct);

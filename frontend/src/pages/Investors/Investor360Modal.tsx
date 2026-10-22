@@ -42,6 +42,8 @@ import { useTheme } from '../../context/ThemeContext';
 import { getAuthHeaders } from '../../utils/authHeaders';
 import { apiUrl } from '../../utils/apiUrl';
 import { formatSmartScheduleDate } from '../../utils/dateUtils';
+import { useAuth } from '../../context/AuthContext';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './Investor360Modal.css';
 
 interface Investor360ModalProps {
@@ -56,7 +58,7 @@ interface Investor360ModalProps {
   tenant?: any;
   isGhlAdmin?: boolean;
   onEditInvestor: (investor: Investor) => void;
-  onCallCustomer: (name: string, phone: string, entityId?: string) => void;
+  onCallCustomer?: (name: string, phone: string, entityId?: string) => void;
   isInline?: boolean;
 }
 
@@ -158,6 +160,7 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
   onCallCustomer,
   isInline = false,
 }) => {
+  const { user } = useAuth();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
@@ -1255,20 +1258,24 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
 
       {/* ── Footer ──────────────────────────────────────────────────────── */}
       <div className="iv-ft">
-        <button
-          className="iv-btn"
-          onClick={() => onEditInvestor(investor)}
-          id="iv-btn-edit-footer"
-        >
-          <Edit3 size={14} /> Edit Profile
-        </button>
-        <button
-          className="iv-btn iv-btn-call"
-          onClick={() => onCallCustomer(investor.name, investor.phone, investor.id)}
-          id="iv-btn-call-footer"
-        >
-          <Phone size={14} /> Call Customer
-        </button>
+        {!isGhlAdmin && (
+          <button
+            className="iv-btn"
+            onClick={() => onEditInvestor(investor)}
+            id="iv-btn-edit-footer"
+          >
+            <Edit3 size={14} /> Edit Profile
+          </button>
+        )}
+        {!isGhlAdmin && canPlaceCalls(user) && onCallCustomer && (
+          <button
+            className="iv-btn iv-btn-call"
+            onClick={() => onCallCustomer(investor.name, investor.phone, investor.id)}
+            id="iv-btn-call-footer"
+          >
+            <Phone size={14} /> Call Customer
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1289,22 +1296,26 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
             </div>
           </div>
           <div className="iv-top-right-actions">
-            <button
-              className="iv-action-btn iv-action-secondary"
-              onClick={() => onEditInvestor(investor)}
-              id="iv-btn-edit-top"
-            >
-              <Edit3 size={14} />
-              <span>Edit Profile</span>
-            </button>
-            <button
-              className="iv-action-btn iv-action-call"
-              onClick={() => onCallCustomer(investor.name, investor.phone, investor.id)}
-              id="iv-btn-call-top"
-            >
-              <Phone size={14} />
-              <span>Call Customer</span>
-            </button>
+            {!isGhlAdmin && (
+              <button
+                className="iv-action-btn iv-action-secondary"
+                onClick={() => onEditInvestor(investor)}
+                id="iv-btn-edit-top"
+              >
+                <Edit3 size={14} />
+                <span>Edit Profile</span>
+              </button>
+            )}
+            {!isGhlAdmin && canPlaceCalls(user) && onCallCustomer && (
+              <button
+                className="iv-action-btn iv-action-call"
+                onClick={() => onCallCustomer(investor.name, investor.phone, investor.id)}
+                id="iv-btn-call-top"
+              >
+                <Phone size={14} />
+                <span>Call Customer</span>
+              </button>
+            )}
           </div>
         </div>
         {mainCard}

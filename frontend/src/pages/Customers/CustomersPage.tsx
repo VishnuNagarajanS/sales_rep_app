@@ -869,7 +869,7 @@ export const CustomersPage: React.FC = () => {
     const custDigits = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
     const custName = (selectedCustomer.name || '').trim().toLowerCase();
 
-    return calls.filter(c => {
+    const filtered = calls.filter(c => {
       if (c.customerId && (c.customerId === selectedCustomer.id || String(c.customerId) === String(selectedCustomer.id))) {
         return true;
       }
@@ -884,6 +884,24 @@ export const CustomersPage: React.FC = () => {
       }
       return false;
     });
+
+    // Deduplicate by twilioCallSid / id so duplicates never render
+    const seenSids = new Set<string>();
+    const seenIds = new Set<string>();
+    const uniqueCalls: CallRecord[] = [];
+    for (const c of filtered) {
+      if (c.twilioCallSid) {
+        if (seenSids.has(c.twilioCallSid)) continue;
+        seenSids.add(c.twilioCallSid);
+      }
+      if (c.id) {
+        const idStr = String(c.id);
+        if (seenIds.has(idStr)) continue;
+        seenIds.add(idStr);
+      }
+      uniqueCalls.push(c);
+    }
+    return uniqueCalls;
   }, [calls, selectedCustomer]);
 
   // Respect existing call ownership and role permissions: An IRM user is strictly authorized only to view their own calls
@@ -1491,7 +1509,7 @@ export const CustomersPage: React.FC = () => {
                                   <span className="customer-call-duration">
                                     <Clock size={12} /> {formatCallDuration(c.duration)}
                                   </span>
-                                  <StatusChip status={c.disposition} size="sm" />
+                                  <StatusChip status={c.leadStatusAtCall || c.disposition} size="sm" />
                                 </div>
                                 <div className="customer-call-meta-right">
                                   <span className={`customer-call-connect-badge ${c.callerType === 'IRM' || c.connectVia === 'Connect via IRM' ? 'is-irm' : 'is-agent'}`}>
@@ -1507,11 +1525,12 @@ export const CustomersPage: React.FC = () => {
                                   </span>
                                   <span className="customer-call-agent-label">
                                     <User size={12} />
-                                    <strong>{c.agentName || 'System'}</strong>
-                                    <span className={`customer-call-role-tag ${c.callerType === 'IRM' ? 'role-irm' : 'role-agent'}`}>
-                                      {c.callerType === 'IRM' ? 'IRM' : 'Agent'}
+                                    <strong>{c.agentName || 'Sales Executive'}</strong>
+                                    <span className={`customer-call-role-tag ${c.callerType === 'IRM' || c.agentRole === 'IRM' ? 'role-irm' : 'role-agent'}`}>
+                                      {c.agentRole || (c.callerType === 'IRM' ? 'IRM' : 'Sales Executive')}
                                     </span>
                                   </span>
+                                </div>
                                   <button
                                     type="button"
                                     className="btn btn-ghost btn-sm customer-call-expand-btn"
@@ -1530,7 +1549,6 @@ export const CustomersPage: React.FC = () => {
                                     )}
                                   </button>
                                 </div>
-                              </div>
                               {isExpanded && (
                                 <div className="customer-call-expanded-panel">
                                   {c.notes && (
@@ -1684,7 +1702,7 @@ export const CustomersPage: React.FC = () => {
                               <span className="customer-call-duration">
                                 <Clock size={12} /> {formatCallDuration(c.duration)}
                               </span>
-                              <StatusChip status={c.disposition} size="sm" />
+                              <StatusChip status={c.leadStatusAtCall || c.disposition} size="sm" />
                             </div>
 
                             <div className="customer-call-meta-right">
@@ -1704,9 +1722,9 @@ export const CustomersPage: React.FC = () => {
                               {/* Caller Name & Role */}
                               <span className="customer-call-agent-label">
                                 <User size={12} />
-                                <strong>{c.agentName || 'System'}</strong>
-                                <span className={`customer-call-role-tag ${c.callerType === 'IRM' ? 'role-irm' : 'role-agent'}`}>
-                                  {c.callerType === 'IRM' ? 'IRM' : 'Agent'}
+                                <strong>{c.agentName || 'Sales Executive'}</strong>
+                                <span className={`customer-call-role-tag ${c.callerType === 'IRM' || c.agentRole === 'IRM' ? 'role-irm' : 'role-agent'}`}>
+                                  {c.agentRole || (c.callerType === 'IRM' ? 'IRM' : 'Sales Executive')}
                                 </span>
                               </span>
 

@@ -258,6 +258,7 @@ export interface Deal {
   investorType?: string;
   investmentRoute?: 'direct_aif' | 'debenture' | string;
   investmentAmountConfirmed?: boolean;
+  customFields?: Record<string, any>;
   kycStatus?: string;
   kycId?: number;
   customerKycStatus?: string;
@@ -315,6 +316,7 @@ export interface CallRecord {
   callerType?: 'Agent' | 'IRM';
   connectVia?: 'Connect via Agent' | 'Connect via IRM';
   disposition: CallDisposition;
+  leadStatusAtCall?: string;
   timestamp: string;
   recordingUrl?: string;
   transcription?: string;

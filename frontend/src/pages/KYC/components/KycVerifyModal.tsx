@@ -24,6 +24,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { PERMISSIONS } from '../../../constants/permissions';
 import { isMockMode } from '../../../config/environment';
 import { getAuthHeaders } from '../../../utils/authHeaders';
+import { EXTERNAL_VERIFICATION_LINKS } from '../../../constants/externalLinks';
 import './KycVerifyModal.css';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -74,11 +75,14 @@ function NotProvided() {
   return <span className="kvm-not-provided">Not provided</span>;
 }
 
-function DetailField({ label, value }: { label: string; value?: string | null }) {
+function DetailField({ label, value, extra }: { label: string; value?: string | null; extra?: React.ReactNode }) {
   return (
     <div className="kvm-detail-row">
       <span className="kvm-detail-label">{label}</span>
-      {value ? <span className="kvm-detail-val">{value}</span> : <NotProvided />}
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {value ? <span className="kvm-detail-val">{value}</span> : <NotProvided />}
+        {extra}
+      </div>
     </div>
   );
 }
@@ -96,19 +100,21 @@ function SensitiveField({
   label,
   full,
   masked,
+  extra,
 }: {
   label: string;
   full?: string | null;
   masked?: string | null;
+  extra?: React.ReactNode;
 }) {
   const [revealed, setRevealed] = useState(false);
   if (!full) {
-    return <DetailField label={label} value={null} />;
+    return <DetailField label={label} value={null} extra={extra} />;
   }
   return (
     <div className="kvm-detail-row">
       <span className="kvm-detail-label">{label}</span>
-      <span className="kvm-detail-val" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span className="kvm-detail-val" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {revealed ? full : masked}
         <button
           type="button"
@@ -132,6 +138,7 @@ function SensitiveField({
           {revealed ? <EyeOff size={12} /> : <Eye size={12} />}
           {revealed ? 'Hide' : 'Show'}
         </button>
+        {extra}
       </span>
     </div>
   );
@@ -181,15 +188,50 @@ function DocumentPreviewBar({ label, doc, onView }: DocPreviewProps) {
 function PanDetails({
   data,
   onViewDoc,
+  onShowToast,
 }: {
   data: Record<string, any>;
   onViewDoc: (doc: { name: string; url?: string }) => void;
+  onShowToast?: (msg: string) => void;
 }) {
   const doc = data.panDoc?.url ? data.panDoc : data.panDocumentUrl ? { name: 'PAN Card Proof', url: data.panDocumentUrl } : null;
 
   return (
     <div className="kvm-detail-block">
-      <DetailField label="PAN Number" value={data.panNumber} />
+      <DetailField
+        label="PAN Number"
+        value={data.panNumber}
+        extra={
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            title="Verify PAN on Income Tax portal"
+            aria-label="Verify PAN on Income Tax portal"
+            onClick={() => {
+              const rawPan = data.panNumber ? String(data.panNumber).trim() : '';
+              if (rawPan && rawPan !== '—' && rawPan.toLowerCase() !== 'not provided') {
+                try {
+                  navigator.clipboard.writeText(rawPan);
+                  onShowToast?.('PAN copied. Paste it on the Income Tax portal.');
+                } catch {}
+              }
+              window.open(EXTERNAL_VERIFICATION_LINKS.PAN, '_blank', 'noopener,noreferrer');
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '2px 8px',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              borderRadius: 6,
+            }}
+          >
+            <ShieldCheck size={12} /> <span>Verify PAN</span>
+          </button>
+        }
+      />
       <DetailField label="Name as per PAN" value={data.nameAsPerPan || data.investorName} />
       <DetailField label="Father's Name" value={data.fatherName} />
       <DocumentPreviewBar label="PAN Card" doc={doc} onView={onViewDoc} />
@@ -212,6 +254,29 @@ function AadhaarDetails({
         label="Aadhaar Number"
         full={formatAadhaar(data.aadhaarNumber)}
         masked={maskAadhaar(data.aadhaarNumber)}
+        extra={
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            title="Verify Aadhaar on UIDAI portal"
+            aria-label="Verify Aadhaar on UIDAI portal"
+            onClick={() => {
+              window.open(EXTERNAL_VERIFICATION_LINKS.AADHAAR, '_blank', 'noopener,noreferrer');
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '2px 8px',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              borderRadius: 6,
+            }}
+          >
+            <ShieldCheck size={12} /> <span>Verify Aadhaar</span>
+          </button>
+        }
       />
       <DetailField label="Name on Document" value={data.nameAsPerPan || data.investorName} />
       <DetailField label="Date of Birth" value={data.dob || data.dateOfBirth} />
@@ -763,7 +828,7 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
 
           {s.expanded && (
             <>
-              {key === 'pan' && <PanDetails data={mergedData} onViewDoc={handleViewDoc} />}
+              {key === 'pan' && <PanDetails data={mergedData} onViewDoc={handleViewDoc} onShowToast={onShowToast} />}
               {key === 'aadhaar' && <AadhaarDetails data={mergedData} onViewDoc={handleViewDoc} />}
               {key === 'bank' && <BankDetails data={mergedData} onViewDoc={handleViewDoc} />}
               {key === 'demat' && <DematDetails data={mergedData} onViewDoc={handleViewDoc} />}

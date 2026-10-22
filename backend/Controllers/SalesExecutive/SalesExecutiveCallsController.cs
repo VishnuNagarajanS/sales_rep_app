@@ -263,7 +263,8 @@ public class SalesExecutiveCallsController : ControllerBase
             CreatedAt = c.CreatedAt,
             RecordingUrl = c.RecordingUrl,
             Transcript = c.Transcript,
-            TwilioCallSid = c.TwilioCallSid
+            TwilioCallSid = c.TwilioCallSid,
+            LeadStatusAtCall = c.LeadStatusAtCall
         };
     }
 
@@ -301,18 +302,41 @@ public class SalesExecutiveCallsController : ControllerBase
         return Ok(ApiResponse<List<MessagingChannelStatusDto>>.SuccessResult(channels, "Messaging channels retrieved."));
     }
 
+    private bool IsAdminCaller()
+    {
+        var role = (_currentUser.Role ?? User.GetUserRole()).ToLowerInvariant();
+        if (role == "super_admin" || User.IsSuperAdmin()) return false;
+        return role == "company_admin" || role == "admin" || role == "ghl_admin" || User.IsGhlAdmin();
+    }
+
+    [HttpPost("start")]
+    [Authorize(Roles = "sales_executive,irm,super_admin")]
+    public async Task<ActionResult<ApiResponse<CallRecordResponseDto>>> StartCall(
+        [FromBody] LogCallDto dto,
+        CancellationToken ct = default)
+    {
+        if (IsAdminCaller())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<CallRecordResponseDto>.FailureResult("Access denied: Admin roles cannot place or start calls."));
+        }
+
+        return await LogCall(dto, ct);
+    }
+
     [HttpPost]
+    [Authorize(Roles = "sales_executive,irm,super_admin")]
     public async Task<ActionResult<ApiResponse<CallRecordResponseDto>>> LogCall(
         [FromBody] LogCallDto dto,
         CancellationToken ct = default)
     {
-        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
-        if (User.IsGhlAdmin() || role == "ghl_admin")
+        if (IsAdminCaller())
         {
             return StatusCode(StatusCodes.Status403Forbidden,
-                ApiResponse<CallRecordResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to IRM call records."));
+                ApiResponse<CallRecordResponseDto>.FailureResult("Access denied: Admin roles cannot place or log calls."));
         }
 
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
         var agentId = _currentUser.UserId;
         if (!agentId.HasValue || agentId.Value <= 0)
             return Unauthorized(ApiResponse<CallRecordResponseDto>.FailureResult("Unauthorized: User ID is missing."));
@@ -433,24 +457,49 @@ public class SalesExecutiveCallsController : ControllerBase
             }
         }
 
-        var call = new CallRecord
+        CallRecord? call = null;
+        var isNewRecord = false;
+        if (!string.IsNullOrWhiteSpace(dto.TwilioCallSid))
         {
-            CompanyId = companyId.Value,
-            AgentId = agentId.Value,
-            ContactName = dto.ContactName.Trim(),
-            ContactPhone = dto.ContactPhone.Trim(),
-            Direction = string.IsNullOrWhiteSpace(dto.Direction) ? "outbound" : dto.Direction.Trim().ToLower(),
-            Duration = effectiveDuration,
-            Disposition = effectiveDisposition,
-            Notes = rawNotes,
-            Reason = storedReason,
-            CallModule = normalizedModule,
-            LeadId = validLeadId,
-            CustomerId = validCustomerId,
-            TwilioCallSid = dto.TwilioCallSid,
-            Timestamp = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow
-        };
+            call = await _context.CallRecords.FirstOrDefaultAsync(c =>
+                c.CompanyId == companyId.Value && c.TwilioCallSid == dto.TwilioCallSid, ct);
+        }
+
+        if (call == null)
+        {
+            isNewRecord = true;
+            call = new CallRecord
+            {
+                CompanyId = companyId.Value,
+                AgentId = agentId.Value,
+                ContactName = dto.ContactName.Trim(),
+                ContactPhone = dto.ContactPhone.Trim(),
+                Direction = string.IsNullOrWhiteSpace(dto.Direction) ? "outbound" : dto.Direction.Trim().ToLower(),
+                Duration = effectiveDuration,
+                Disposition = effectiveDisposition,
+                Notes = rawNotes,
+                Reason = storedReason,
+                CallModule = normalizedModule,
+                LeadId = validLeadId,
+                CustomerId = validCustomerId,
+                TwilioCallSid = dto.TwilioCallSid,
+                Timestamp = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow
+            };
+        }
+        else
+        {
+            call.ContactName = string.IsNullOrWhiteSpace(call.ContactName) ? dto.ContactName.Trim() : call.ContactName;
+            call.ContactPhone = string.IsNullOrWhiteSpace(call.ContactPhone) ? dto.ContactPhone.Trim() : call.ContactPhone;
+            call.Direction = string.IsNullOrWhiteSpace(dto.Direction) ? call.Direction : dto.Direction.Trim().ToLower();
+            if (effectiveDuration > 0 || call.Duration == 0) call.Duration = effectiveDuration;
+            if (!string.IsNullOrWhiteSpace(effectiveDisposition)) call.Disposition = effectiveDisposition;
+            if (!string.IsNullOrWhiteSpace(rawNotes)) call.Notes = rawNotes;
+            if (!string.IsNullOrWhiteSpace(storedReason)) call.Reason = storedReason;
+            if (!string.IsNullOrWhiteSpace(normalizedModule)) call.CallModule = normalizedModule;
+            if (validLeadId.HasValue) call.LeadId = validLeadId;
+            if (validCustomerId.HasValue) call.CustomerId = validCustomerId;
+        }
 
         int? resolvedLeadId = dto.LeadId;
         if ((!resolvedLeadId.HasValue || resolvedLeadId.Value <= 0) && !string.IsNullOrWhiteSpace(dto.ContactPhone))
@@ -471,11 +520,13 @@ public class SalesExecutiveCallsController : ControllerBase
             }
         }
 
+        string? leadStatusBeforeUpdate = null;
         if (resolvedLeadId.HasValue && resolvedLeadId.Value > 0)
         {
             var lead = await _context.Leads.FirstOrDefaultAsync(l => l.Id == resolvedLeadId.Value && l.CompanyId == companyId.Value, ct);
             if (lead != null)
             {
+                leadStatusBeforeUpdate = lead.Status;
                 var dispo = dto.Disposition?.Trim() ?? string.Empty;
                 if (string.Equals(dispo, "Follow-up Required", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(dispo, "Follow Up Required", StringComparison.OrdinalIgnoreCase))
@@ -592,7 +643,16 @@ public class SalesExecutiveCallsController : ControllerBase
             }
         }
 
-        _context.CallRecords.Add(call);
+        if (string.IsNullOrWhiteSpace(call.LeadStatusAtCall))
+        {
+            call.LeadStatusAtCall = leadStatusBeforeUpdate 
+                ?? (!string.IsNullOrWhiteSpace(effectiveDisposition) ? effectiveDisposition : "Completed");
+        }
+
+        if (isNewRecord)
+        {
+            _context.CallRecords.Add(call);
+        }
         await _context.SaveChangesAsync(ct);
 
         try
@@ -610,16 +670,18 @@ public class SalesExecutiveCallsController : ControllerBase
     }
 
     [HttpPost("disposition")]
+    [Authorize(Roles = "sales_executive,irm,super_admin")]
     public async Task<ActionResult<ApiResponse<CallRecordDto>>> ProcessDisposition(
         [FromBody] CallDispositionDto request,
         CancellationToken ct = default)
     {
-        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
-        if (User.IsGhlAdmin() || role == "ghl_admin")
+        if (IsAdminCaller())
         {
             return StatusCode(StatusCodes.Status403Forbidden,
-                ApiResponse<CallRecordDto>.FailureResult("Access denied: GHL Admin has read-only access to call disposition records."));
+                ApiResponse<CallRecordDto>.FailureResult("Access denied: Admin roles cannot submit call dispositions."));
         }
+
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
 
         if (role == "irm")
         {
@@ -687,12 +749,19 @@ public class SalesExecutiveCallsController : ControllerBase
     }
 
     [HttpPost("other/{callId:int}/move")]
+    [Authorize(Roles = "sales_executive,irm,super_admin")]
     public async Task<IActionResult> MoveOtherRecord(
         int callId,
         [FromQuery] string? targetModule,
         [FromServices] IIrmOtherService otherService,
         CancellationToken ct = default)
     {
+        if (IsAdminCaller())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<object>.FailureResult("Access denied: Admin roles cannot move call records."));
+        }
+
         var companyId = _currentUser.CompanyId ?? User.GetCompanyId();
         var result = await otherService.MoveOtherRecordAsync(companyId, callId, targetModule, ct);
         if (!result.Success) return BadRequest(result);
@@ -751,17 +820,18 @@ public class SalesExecutiveCallsController : ControllerBase
     }
 
     [HttpPost("send-customer-message")]
+    [Authorize(Roles = "sales_executive,irm,super_admin")]
     public async Task<ActionResult<ApiResponse<SendCustomerMessageResponseDto>>> SendCustomerMessage(
         [FromBody] SendCustomerMessageRequestDto dto,
         CancellationToken ct = default)
     {
-        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
-        if (User.IsGhlAdmin() || role == "ghl_admin")
+        if (IsAdminCaller())
         {
             return StatusCode(StatusCodes.Status403Forbidden,
-                ApiResponse<SendCustomerMessageResponseDto>.FailureResult("Access denied: GHL Admin has read-only access to customer messaging records."));
+                ApiResponse<SendCustomerMessageResponseDto>.FailureResult("Access denied: Admin roles cannot send customer follow-up messages."));
         }
 
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
         var agentId = _currentUser.UserId;
         if (!agentId.HasValue || agentId.Value <= 0)
             return Unauthorized(ApiResponse<SendCustomerMessageResponseDto>.FailureResult("Unauthorized: User ID is missing."));

@@ -15,6 +15,7 @@ public class CreateGhlDealDto
     public string? InvestmentRange { get; set; }
     public string? PreferredAssetClass { get; set; }
     public string Priority { get; set; } = "Medium";
+    public string? InvestmentRoute { get; set; }
 }
 
 public class UpdateGhlDealDto
@@ -32,6 +33,7 @@ public class UpdateGhlDealDto
     public DateTime? StageEnteredAt { get; set; }
     public bool? InvestmentAmountConfirmed { get; set; }
     public string? KycStatus { get; set; }
+    public string? InvestmentRoute { get; set; }
 }
 
 public class LogGhlDealActivityDto
@@ -76,6 +78,7 @@ public class GhlDealResponseDto
     public DateTime? VerifiedAt { get; set; }
     public string? Remarks { get; set; }
     public string? FlaggedSections { get; set; }
+    public string? InvestmentRoute { get; set; }
 
     /// <summary>Contact phone resolved from the linked Customer record, then the denormalised CustomerName fallback.</summary>
     public string? Phone { get; set; }

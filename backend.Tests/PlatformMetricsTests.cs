@@ -33,8 +33,9 @@ public class PlatformMetricsTests
         currentUserMock.Setup(c => c.Role).Returns("super_admin");
 
         var hubMock = new Mock<IHubContext<PlatformHub, IPlatformHubClient>>();
+        var jwtMock = new Mock<IJwtService>();
 
-        var controller = new PlatformUsersController(db, currentUserMock.Object, hubMock.Object);
+        var controller = new PlatformUsersController(db, currentUserMock.Object, hubMock.Object, jwtMock.Object);
 
         var result = await controller.GetPlatformMetrics("Asia/Calcutta");
         Assert.NotNull(result);
@@ -72,8 +73,9 @@ public class PlatformMetricsTests
         currentUserMock.Setup(c => c.Role).Returns("super_admin");
 
         var hubMock = new Mock<IHubContext<PlatformHub, IPlatformHubClient>>();
+        var jwtMock = new Mock<IJwtService>();
 
-        var controller = new PlatformUsersController(db, currentUserMock.Object, hubMock.Object);
+        var controller = new PlatformUsersController(db, currentUserMock.Object, hubMock.Object, jwtMock.Object);
 
         var result = await controller.GetPlatformMetrics("Asia/Calcutta");
         Assert.NotNull(result);

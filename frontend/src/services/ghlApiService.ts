@@ -132,6 +132,7 @@ function mapDeal(d: Record<string, any>): Deal {
     location: d.location,
     investmentAmountConfirmed: Boolean(d.investmentAmountConfirmed),
     kycStatus: d.kycStatus,
+    investmentRoute: d.investmentRoute || (typeof d.investorType === 'string' && d.investorType.includes('Debenture') ? 'debenture' : typeof d.investorType === 'string' && d.investorType.includes('Direct') ? 'direct_aif' : undefined),
   };
 }
 
@@ -187,6 +188,7 @@ export async function saveDeal(deal: Deal): Promise<Deal> {
       investmentRange: deal.investmentRange,
       preferredAssetClass: deal.preferredAssetClass,
       priority: deal.priority ?? 'Medium',
+      investmentRoute: deal.investmentRoute,
     };
     const res: ApiResponse<any> = await apiClient.post('/ghl/deals', payload);
     if (!res.success || !res.data) throw new Error(res.message);
@@ -209,6 +211,7 @@ export async function saveDeal(deal: Deal): Promise<Deal> {
       stageEnteredAt: deal.stageEnteredAt,
       investmentAmountConfirmed: deal.investmentAmountConfirmed ?? false,
       kycStatus: (deal as any).kycStatus,
+      investmentRoute: deal.investmentRoute,
     };
     const res: ApiResponse<any> = await apiClient.put(`/ghl/deals/${nid(deal.id)}`, payload);
     if (!res.success || !res.data) throw new Error(res.message);
@@ -699,7 +702,10 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
-      throw new Error(res?.message || 'Failed to create follow-up on server');
+      // Propagate errors array so callers can read SUGGESTED_TIME:<iso> etc.
+      const createErr: any = new Error(res?.message || 'Failed to create follow-up on server');
+      createErr.errors = res?.errors || [];
+      throw createErr;
     } else {
       const payload = {
         scheduledAt: followup.scheduledAt,
@@ -717,7 +723,10 @@ export async function saveFollowup(followup: Followup): Promise<Followup> {
         window.dispatchEvent(new Event('nexus_storage_updated'));
         return saved;
       }
-      throw new Error(res?.message || 'Failed to update follow-up on server');
+      // Propagate errors array so callers can read SUGGESTED_TIME:<iso> etc.
+      const updateErr: any = new Error(res?.message || 'Failed to update follow-up on server');
+      updateErr.errors = res?.errors || [];
+      throw updateErr;
     }
   } catch (err: any) {
     console.error('[ghlApiService] API saveFollowup failed:', err);
@@ -866,6 +875,7 @@ function mapCallRecord(c: Record<string, any>): CallRecord {
     recordingUrl: recordingUrl,
     transcription: transcription,
     twilioCallSid: c.twilioCallSid || undefined,
+    leadStatusAtCall: c.leadStatusAtCall || undefined,
     leadId: c.leadId ? sid(c.leadId) : undefined,
     customerId: c.customerId ? sid(c.customerId) : undefined,
   };

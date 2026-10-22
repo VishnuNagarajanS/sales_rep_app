@@ -131,3 +131,5 @@ export const PERMISSIONS = {
 } as const;
 
 export type PermissionKey = typeof PERMISSIONS[keyof typeof PERMISSIONS];
+
+export { canPlaceCalls } from '../utils/agentRoleUtils';

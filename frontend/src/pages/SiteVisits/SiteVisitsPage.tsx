@@ -6,6 +6,7 @@ import { useCall } from '../../context/CallContext';
 import { DataTable, Column, RowAction } from '../../components/common/DataTable';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './SiteVisitsPage.css';
 const getStoredSiteVisits = (tenantId?: string): SiteVisit[] => {
   try {
@@ -160,11 +161,15 @@ export const SiteVisitsPage: React.FC = () => {
   ];
 
   const rowActions: RowAction<SiteVisit>[] = [
-    {
-      label: 'Call Client',
-      icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
-      onClick: sv => initiateCall(sv.customerName, sv.customerPhone),
-    },
+    ...(canPlaceCalls(user)
+      ? [
+          {
+            label: 'Call Client',
+            icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
+            onClick: (sv: SiteVisit) => initiateCall(sv.customerName, sv.customerPhone),
+          },
+        ]
+      : []),
     {
       label: 'Mark Completed',
       icon: <CheckCircle2 size={14} color="#2563eb" style={{ marginRight: 6 }} />,

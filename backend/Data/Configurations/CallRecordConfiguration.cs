@@ -28,6 +28,9 @@ public class CallRecordConfiguration : IEntityTypeConfiguration<CallRecord>
         builder.Property(cr => cr.CallModule)
             .HasMaxLength(50);
 
+        builder.Property(cr => cr.LeadStatusAtCall)
+            .HasMaxLength(50);
+
         builder.Property(cr => cr.Reason);
 
         builder.Property(cr => cr.TwilioCallSid)

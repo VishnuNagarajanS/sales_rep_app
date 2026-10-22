@@ -209,6 +209,7 @@ import {
   getCustomers as apiGetCustomers,
 } from './services/ghlApiService';
 import { PERMISSIONS } from './constants/permissions';
+import { canPlaceCalls } from './utils/agentRoleUtils';
 import { useNavigationGuard, useUnsavedChanges } from './context/NavigationGuardContext';
 import './App.css';
 
@@ -246,8 +247,14 @@ export const App: React.FC = () => {
     } else if (user?.role?.code === 'sales_executive' && (currentRoute === 'kyc' || currentRoute === 'all-leads' || currentRoute === 'irm-other' || currentRoute === 'other' || currentRoute === 'investors' || currentRoute === 'opportunities')) {
       setCurrentRoute('dashboard');
       sessionStorage.setItem('nexus_current_route', 'dashboard');
+    } else if (!canPlaceCalls(user) && currentRoute === 'call-center') {
+      setCurrentRoute('dashboard');
+      sessionStorage.setItem('nexus_current_route', 'dashboard');
+      if (window.location.pathname.includes('call-center')) {
+        window.history.replaceState(null, '', '/dashboard');
+      }
     }
-  }, [user?.role?.code, currentRoute]);
+  }, [user, currentRoute]);
 
   // Real-Time SignalR Fleet Event Listener
   useEffect(() => {
@@ -812,9 +819,13 @@ export const App: React.FC = () => {
             <FollowupsPage />
           </ProtectedRoute>
         ) : currentRoute === 'call-center' ? (
-          <ProtectedRoute permission={PERMISSIONS.CALLS_MAKE}>
-            <CallCenterPage />
-          </ProtectedRoute>
+          !canPlaceCalls(user) ? (
+            <DashboardPage onNavigate={navigate} onOpenQuickCreate={handleOpenQuickCreate} />
+          ) : (
+            <ProtectedRoute permission={PERMISSIONS.CALLS_MAKE}>
+              <CallCenterPage />
+            </ProtectedRoute>
+          )
         ) : currentRoute === 'call-history' ? (
           <ProtectedRoute permission={PERMISSIONS.CALLS_VIEW}>
             <CallHistoryPage />

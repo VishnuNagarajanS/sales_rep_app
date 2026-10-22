@@ -11,7 +11,15 @@ import {
   Clock,
   CheckCircle,
   FileText,
+  AlertCircle,
 } from 'lucide-react';
+import {
+  validateInvestmentAmount,
+  formatIndianCurrencyWords,
+  INVESTMENT_ROUTE_LIMITS,
+  InvestmentRouteKey,
+} from '../../constants/investmentRoutes';
+import { FUND_DETAILS_DATA } from '../../constants/fundDetails';
 import { InvestmentOpportunity, Investor, Deal, DealActivity, CallRecord, Consultation, Followup } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
@@ -37,6 +45,7 @@ import { FilterBar } from '../../components/common/FilterBar';
 import { Modal } from '../../components/common/Modal';
 import { apiUrl } from '../../utils/apiUrl';
 import { getAuthHeaders } from '../../utils/authHeaders';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './OpportunitiesPage.css';
 
 // ─── Stage enum (full ordered list) ─────────────────────────────────────────
@@ -133,6 +142,8 @@ export const OpportunitiesPage: React.FC = () => {
   const [amountInput, setAmountInput] = useState<string>('');
   const [isEditingAmount, setIsEditingAmount] = useState<boolean>(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState<boolean>(false);
+  const [amountError, setAmountError] = useState<string | null>(null);
+  const [selectedFundTab, setSelectedFundTab] = useState<'debenture' | 'direct_aif'>('debenture');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [allCalls, setAllCalls] = useState<CallRecord[]>([]);
   const [allConsultations, setAllConsultations] = useState<Consultation[]>([]);
@@ -372,6 +383,7 @@ export const OpportunitiesPage: React.FC = () => {
         const inv = investors.find(i => i.id === o.investorId);
         if (inv) initiateCall(inv.name, inv.phone, 'customer', inv.id, undefined, 'opportunities');
       },
+      hidden: () => !canPlaceCalls(user),
     },
     {
       label: 'Edit',
@@ -504,22 +516,51 @@ export const OpportunitiesPage: React.FC = () => {
     return Math.max(0, days);
   };
 
+  // Helper to resolve route key from deal
+  const getDealRouteKey = (deal: Deal | null): 'debenture' | 'direct_aif' => {
+    if (!deal) return 'debenture';
+    if (deal.investmentRoute === 'direct_aif' || deal.investmentRoute === 'debenture') {
+      return deal.investmentRoute;
+    }
+    const invType = (deal.investorType || '').toLowerCase();
+    if (invType.includes('direct') || invType.includes('aif - direct')) {
+      return 'direct_aif';
+    }
+    return 'debenture';
+  };
+
   // ── IRM Customer Detail & Investment Amount Handlers ───────────────────────
   const handleOpenDetailModal = (deal: Deal) => {
     setDetailDeal(deal);
     setAmountInput(deal.value ? String(deal.value) : '');
     setIsEditingAmount(false);
     setShowConfirmDialog(false);
+    setAmountError(null);
+    const initialRoute = getDealRouteKey(deal);
+    setSelectedFundTab(initialRoute);
   };
 
   const handleCloseDetailModal = () => {
     setDetailDeal(null);
     setIsEditingAmount(false);
     setShowConfirmDialog(false);
+    setAmountError(null);
+  };
+
+  const handleAmountChange = (val: string) => {
+    setAmountInput(val);
+    const route = getDealRouteKey(detailDeal);
+    if (!val || val.trim() === '') {
+      setAmountError('Please enter an investment amount.');
+      return;
+    }
+    const res = validateInvestmentAmount(val, route);
+    setAmountError(res.isValid ? null : (res.error || null));
   };
 
   const handleEditAmount = async () => {
     if (!detailDeal) return;
+    const currentRoute = getDealRouteKey(detailDeal);
     const updatedDeal: Deal = {
       ...detailDeal,
       investmentAmountConfirmed: false,
@@ -532,45 +573,85 @@ export const OpportunitiesPage: React.FC = () => {
     }
     setDetailDeal(updatedDeal);
     setIsEditingAmount(true);
-    setAmountInput(detailDeal.value ? String(detailDeal.value) : '');
+    const currentVal = detailDeal.value ? String(detailDeal.value) : '';
+    setAmountInput(currentVal);
+    if (currentVal) {
+      const res = validateInvestmentAmount(currentVal, currentRoute);
+      setAmountError(res.isValid ? null : (res.error || null));
+    } else {
+      setAmountError(null);
+    }
     loadData();
   };
 
   const handleConfirmAmount = async () => {
     if (!detailDeal) return;
+    const currentRoute = getDealRouteKey(detailDeal);
+    const validationResult = validateInvestmentAmount(amountInput, currentRoute);
+    if (!validationResult.isValid) {
+      setAmountError(validationResult.error || 'Invalid investment amount.');
+      showToast(validationResult.error || 'Invalid investment amount.');
+      setShowConfirmDialog(false);
+      return;
+    }
+
     const numericAmount = parseFloat(amountInput) || 0;
     const updatedDeal: Deal = {
       ...detailDeal,
       value: numericAmount,
       investmentAmountConfirmed: true,
+      investmentRoute: currentRoute,
+      investorType: currentRoute === 'debenture' ? 'Alternate route to Invest in AIF via Debenture' : 'Direct AIF',
+      customFields: {
+        ...(detailDeal.customFields || {}),
+        investmentRoute: currentRoute,
+      },
     };
 
     // Save investment amount confirmed to DB
     try {
       await persistDeal(updatedDeal);
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[OpportunitiesPage] API saveDeal (amount confirm) failed:', err);
-      showToast('Failed to save investment amount');
+      const errMsg = err?.response?.data?.message || err?.message || 'Failed to save investment amount';
+      showToast(errMsg);
+      setAmountError(errMsg);
+      setShowConfirmDialog(false);
       return;
     }
 
     setDetailDeal(updatedDeal);
     setIsEditingAmount(false);
     setShowConfirmDialog(false);
+    setAmountError(null);
     loadData();
     showToast(`✓ Investment amount ₹${numericAmount.toLocaleString('en-IN')} confirmed for "${detailDeal.customerName}"`);
   };
 
   const handleRouteChange = async (route: 'direct_aif' | 'debenture') => {
-    if (!detailDeal) return;
+    if (!detailDeal || isGhlAdmin) return;
     const updatedDeal: Deal = {
       ...detailDeal,
       investmentRoute: route,
       investorType: route === 'debenture' ? 'Alternate route to Invest in AIF via Debenture' : 'Direct AIF',
+      customFields: {
+        ...(detailDeal.customFields || {}),
+        investmentRoute: route,
+      },
     };
+    setDetailDeal(updatedDeal);
+    setSelectedFundTab(route);
+
+    // If currently editing amount or an amount is entered, revalidate against the new route limits
+    if (amountInput && amountInput.trim() !== '') {
+      const res = validateInvestmentAmount(amountInput, route);
+      setAmountError(res.isValid ? null : (res.error || null));
+    } else {
+      setAmountError(null);
+    }
+
     try {
       await persistDeal(updatedDeal);
-      setDetailDeal(updatedDeal);
       loadData();
     } catch (err) {
       console.error('Failed to change investment route:', err);
@@ -854,7 +935,7 @@ export const OpportunitiesPage: React.FC = () => {
         const isConfirmed = Boolean(deal.investmentAmountConfirmed);
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
-            {deal.phone && (
+            {canPlaceCalls(user) && deal.phone && (
               <button
                 type="button"
                 className="btn btn-sm btn-ghost btn-icon"
@@ -1269,11 +1350,11 @@ export const OpportunitiesPage: React.FC = () => {
           onClose={handleCloseDetailModal}
           title="Customer Detail Card"
           subtitle={`${detailDeal.customerName} • Deal Details`}
-          maxWidth={760}
+          maxWidth="min(1160px, 94vw)"
           footer={
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 12 }}>
               <div>
-                {detailDeal.phone && (
+                {canPlaceCalls(user) && detailDeal.phone && (
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
@@ -1378,181 +1459,301 @@ export const OpportunitiesPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Top Row: KYC Status & Investment Amount */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-                  {/* KYC Status Section */}
-                  <div
-                    style={{
-                      padding: '16px',
-                      borderRadius: 10,
-                      border: '1px solid var(--border-color, #e2e8f0)',
-                      background: 'var(--bg-surface, #ffffff)',
-                    }}
-                  >
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
-                      KYC Status
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span
+                {/* Top Row: KYC Status, Investment Route & Investment Amount */}
+                {(() => {
+                  const activeRouteKey = getDealRouteKey(detailDeal);
+                  const currentRouteLimits = INVESTMENT_ROUTE_LIMITS[activeRouteKey];
+                  const numericAmount = parseFloat(amountInput) || 0;
+                  const isCurrentAmountValid = Boolean(
+                    amountInput &&
+                    amountInput.trim() !== '' &&
+                    validateInvestmentAmount(amountInput, activeRouteKey).isValid
+                  );
+
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+                      {/* 1. KYC Status Section */}
+                      <div
                         style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          padding: '4px 12px',
-                          borderRadius: 9999,
-                          fontSize: 12,
-                          fontWeight: 700,
-                          backgroundColor: kycBadgeStyles.bg,
-                          color: kycBadgeStyles.color,
-                          border: `1px solid ${kycBadgeStyles.border}`,
+                          padding: '16px',
+                          borderRadius: 10,
+                          border: '1px solid var(--border-color, #e2e8f0)',
+                          background: 'var(--bg-surface, #ffffff)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
                         }}
                       >
-                        {kycStatus}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Investment Amount Section (Editable) */}
-                  <div
-                    style={{
-                      padding: '16px',
-                      borderRadius: 10,
-                      border: '1px solid var(--border-color, #e2e8f0)',
-                      background: 'var(--bg-surface, #ffffff)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                        Investment Amount
-                      </span>
-                      {isConfirmed ? (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            padding: '3px 8px',
-                            borderRadius: 9999,
-                            fontSize: 11,
-                            fontWeight: 700,
-                            backgroundColor: '#ecfdf5',
-                            color: '#059669',
-                            border: '1px solid #a7f3d0',
-                          }}
-                        >
-                          Confirmed
-                        </span>
-                      ) : (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            padding: '3px 8px',
-                            borderRadius: 9999,
-                            fontSize: 11,
-                            fontWeight: 700,
-                            backgroundColor: '#fffbeb',
-                            color: '#d97706',
-                            border: '1px solid #fde68a',
-                          }}
-                        >
-                          Unconfirmed
-                        </span>
-                      )}
-                    </div>
-
-                    {isGhlAdmin ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ flex: 1, position: 'relative' }}>
-                          <input
-                            id="opp-admin-amount"
-                            name="adminAmount"
-                            aria-label="Investment Amount"
-                            type="text"
-                            readOnly
-                            className="form-input"
-                            value={detailDeal.value && Number(detailDeal.value) > 0 ? formatCurrency(detailDeal.value) : 'Not Specified'}
-                            style={{
-                              width: '100%',
-                              fontSize: 14,
-                              fontWeight: 700,
-                              color: detailDeal.value && Number(detailDeal.value) > 0 ? '#10b981' : 'var(--text-muted)',
-                              height: 38,
-                              backgroundColor: 'var(--bg-surface-hover, #f8fafc)',
-                              cursor: 'default',
-                            }}
-                          />
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
+                          KYC Status
                         </div>
-                      </div>
-                    ) : isConfirmed ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ flex: 1, position: 'relative' }}>
-                          <input
-                            id="opp-confirmed-amount"
-                            name="confirmedAmount"
-                            aria-label="Confirmed Investment Amount"
-                            type="text"
-                            readOnly
-                            className="form-input"
-                            value={formatCurrency(detailDeal.value)}
-                            style={{
-                              width: '100%',
-                              fontSize: 14,
-                              fontWeight: 700,
-                              color: '#10b981',
-                              height: 38,
-                              backgroundColor: 'var(--bg-surface-hover, #f8fafc)',
-                              cursor: 'default',
-                            }}
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={handleEditAmount}
-                          style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, padding: '0 14px' }}
-                        >
-                          <Edit2 size={13} /> Edit
-                        </button>
-                      </div>
-                    ) : (
-                      <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <div style={{ position: 'relative', flex: 1 }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '4px 12px',
+                              borderRadius: 9999,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              backgroundColor: kycBadgeStyles.bg,
+                              color: kycBadgeStyles.color,
+                              border: `1px solid ${kycBadgeStyles.border}`,
+                            }}
+                          >
+                            {kycStatus}
+                          </span>
+                        </div>
+                        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-muted)' }}>
+                          Status from KYC dossier
+                        </div>
+                      </div>
+
+                      {/* 2. Investment Route Selector */}
+                      <div
+                        style={{
+                          padding: '16px',
+                          borderRadius: 10,
+                          border: '1px solid var(--border-color, #e2e8f0)',
+                          background: 'var(--bg-surface, #ffffff)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                              Investment Route
+                            </span>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--primary-600, #3b82f6)' }}>
+                              Category II AIF
+                            </span>
+                          </div>
+
+                          {isGhlAdmin ? (
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', padding: '8px 12px', background: 'var(--bg-surface-hover, #f8fafc)', borderRadius: 6, border: '1px solid var(--border-color, #e2e8f0)' }}>
+                              {activeRouteKey === 'direct_aif' ? 'Direct AIF Route' : 'Debenture (Category II AIF)'}
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button
+                                type="button"
+                                onClick={() => handleRouteChange('debenture')}
+                                style={{
+                                  flex: 1,
+                                  padding: '7px 8px',
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  borderRadius: 6,
+                                  border: activeRouteKey === 'debenture' ? '2px solid #3b82f6' : '1px solid var(--border-color, #cbd5e1)',
+                                  backgroundColor: activeRouteKey === 'debenture' ? 'rgba(59, 130, 246, 0.12)' : 'var(--bg-surface, #ffffff)',
+                                  color: activeRouteKey === 'debenture' ? '#2563eb' : 'var(--text-secondary, #64748b)',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  textAlign: 'center',
+                                }}
+                              >
+                                Debenture
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRouteChange('direct_aif')}
+                                style={{
+                                  flex: 1,
+                                  padding: '7px 8px',
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  borderRadius: 6,
+                                  border: activeRouteKey === 'direct_aif' ? '2px solid #3b82f6' : '1px solid var(--border-color, #cbd5e1)',
+                                  backgroundColor: activeRouteKey === 'direct_aif' ? 'rgba(59, 130, 246, 0.12)' : 'var(--bg-surface, #ffffff)',
+                                  color: activeRouteKey === 'direct_aif' ? '#2563eb' : 'var(--text-secondary, #64748b)',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  textAlign: 'center',
+                                }}
+                              >
+                                Direct AIF
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                          Limits: Min <strong>{currentRouteLimits.minLabel}</strong> (Max {currentRouteLimits.maxLabel})
+                        </div>
+                      </div>
+
+                      {/* 3. Investment Amount Section (Editable) */}
+                      <div
+                        style={{
+                          padding: '16px',
+                          borderRadius: 10,
+                          border: '1px solid var(--border-color, #e2e8f0)',
+                          background: 'var(--bg-surface, #ffffff)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Investment Amount
+                          </span>
+                          {isConfirmed ? (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                padding: '3px 8px',
+                                borderRadius: 9999,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                backgroundColor: '#ecfdf5',
+                                color: '#059669',
+                                border: '1px solid #a7f3d0',
+                              }}
+                            >
+                              Confirmed
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                padding: '3px 8px',
+                                borderRadius: 9999,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                backgroundColor: '#fffbeb',
+                                color: '#d97706',
+                                border: '1px solid #fde68a',
+                              }}
+                            >
+                              Unconfirmed
+                            </span>
+                          )}
+                        </div>
+
+                        {isGhlAdmin ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             <input
-                              id="opp-enter-amount"
-                              name="amountInput"
-                              aria-label="Enter investment amount in rupees"
-                              type="number"
-                              min="0"
-                              step="100000"
+                              id="opp-admin-amount"
+                              name="adminAmount"
+                              aria-label="Investment Amount"
+                              type="text"
+                              readOnly
                               className="form-input"
-                              placeholder="Enter amount in ₹"
-                              value={amountInput}
-                              onChange={e => setAmountInput(e.target.value)}
-                              style={{ width: '100%', fontSize: 13, height: 38 }}
+                              value={detailDeal.value && Number(detailDeal.value) > 0 ? `${formatCurrency(detailDeal.value)} (${formatIndianCurrencyWords(Number(detailDeal.value))})` : 'Not Specified'}
+                              style={{
+                                width: '100%',
+                                fontSize: 13,
+                                fontWeight: 700,
+                                color: detailDeal.value && Number(detailDeal.value) > 0 ? '#10b981' : 'var(--text-muted)',
+                                height: 38,
+                                backgroundColor: 'var(--bg-surface-hover, #f8fafc)',
+                                cursor: 'default',
+                              }}
                             />
                           </div>
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            disabled={!amountInput || parseFloat(amountInput) <= 0}
-                            onClick={() => {
-                              const val = parseFloat(amountInput);
-                              if (val && val > 0) {
-                                setShowConfirmDialog(true);
-                              }
-                            }}
-                            style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, padding: '0 14px' }}
-                          >
-                            <CheckCircle size={13} /> Confirm
-                          </button>
-                        </div>
-                        <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
-                          Display format: <strong style={{ color: '#10b981' }}>{formatCurrency(parseFloat(amountInput) || 0)}</strong>
-                        </div>
+                        ) : isConfirmed ? (
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <div style={{ flex: 1, position: 'relative' }}>
+                                <input
+                                  id="opp-confirmed-amount"
+                                  name="confirmedAmount"
+                                  aria-label="Confirmed Investment Amount"
+                                  type="text"
+                                  readOnly
+                                  className="form-input"
+                                  value={formatCurrency(detailDeal.value)}
+                                  style={{
+                                    width: '100%',
+                                    fontSize: 14,
+                                    fontWeight: 700,
+                                    color: '#10b981',
+                                    height: 38,
+                                    backgroundColor: 'var(--bg-surface-hover, #f8fafc)',
+                                    cursor: 'default',
+                                  }}
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={handleEditAmount}
+                                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 38, padding: '0 14px' }}
+                              >
+                                <Edit2 size={13} /> Edit
+                              </button>
+                            </div>
+                            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                              Display: <strong style={{ color: '#10b981' }}>{formatIndianCurrencyWords(Number(detailDeal.value) || 0)}</strong>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <div style={{ position: 'relative', flex: 1 }}>
+                                <input
+                                  id="opp-enter-amount"
+                                  name="amountInput"
+                                  aria-label="Enter investment amount in rupees"
+                                  type="number"
+                                  min="0"
+                                  step="100000"
+                                  className="form-input"
+                                  placeholder={`Min ₹${currentRouteLimits.minAmount.toLocaleString('en-IN')}`}
+                                  value={amountInput}
+                                  onChange={e => handleAmountChange(e.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    fontSize: 13,
+                                    height: 38,
+                                    borderColor: amountError ? '#ef4444' : undefined,
+                                  }}
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                disabled={!isCurrentAmountValid}
+                                onClick={() => {
+                                  if (isCurrentAmountValid) {
+                                    setShowConfirmDialog(true);
+                                  }
+                                }}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  height: 38,
+                                  padding: '0 14px',
+                                  opacity: isCurrentAmountValid ? 1 : 0.6,
+                                  cursor: isCurrentAmountValid ? 'pointer' : 'not-allowed',
+                                }}
+                              >
+                                <CheckCircle size={13} /> Confirm
+                              </button>
+                            </div>
+
+                            {amountError && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: '#ef4444', fontWeight: 500 }}>
+                                <AlertCircle size={13} style={{ flexShrink: 0 }} />
+                                <span>{amountError}</span>
+                              </div>
+                            )}
+
+                            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                              Display format:{' '}
+                              <strong style={{ color: '#10b981' }}>
+                                {formatCurrency(numericAmount)} ({formatIndianCurrencyWords(numericAmount)})
+                              </strong>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Form Details Section */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1872,6 +2073,126 @@ export const OpportunitiesPage: React.FC = () => {
                     </div>
                   )}
                 </div>
+
+                {/* ── Fund Details Reference Section ────────────────────────────── */}
+                <div
+                  style={{
+                    border: '1px solid var(--border-color, #e2e8f0)',
+                    borderRadius: 10,
+                    padding: '20px',
+                    background: 'var(--bg-surface, #ffffff)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <FileText size={18} color="var(--primary-600, #3b82f6)" />
+                      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                        Fund & Scheme Reference Details
+                      </span>
+                    </div>
+
+                    {/* Route Scheme Tabs */}
+                    <div style={{ display: 'flex', gap: 6, background: 'var(--bg-surface-hover, #f1f5f9)', padding: 4, borderRadius: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFundTab('debenture')}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: 12,
+                          fontWeight: selectedFundTab === 'debenture' ? 700 : 500,
+                          borderRadius: 6,
+                          border: 'none',
+                          backgroundColor: selectedFundTab === 'debenture' ? 'var(--bg-surface, #ffffff)' : 'transparent',
+                          color: selectedFundTab === 'debenture' ? 'var(--primary-600, #2563eb)' : 'var(--text-secondary, #64748b)',
+                          boxShadow: selectedFundTab === 'debenture' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Debenture Route
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFundTab('direct_aif')}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: 12,
+                          fontWeight: selectedFundTab === 'direct_aif' ? 700 : 500,
+                          borderRadius: 6,
+                          border: 'none',
+                          backgroundColor: selectedFundTab === 'direct_aif' ? 'var(--bg-surface, #ffffff)' : 'transparent',
+                          color: selectedFundTab === 'direct_aif' ? 'var(--primary-600, #2563eb)' : 'var(--text-secondary, #64748b)',
+                          boxShadow: selectedFundTab === 'direct_aif' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Direct AIF Route
+                      </button>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const fund = FUND_DETAILS_DATA[selectedFundTab];
+                    return (
+                      <div className="opp-fund-details-grid">
+                        {/* Left Column: Scheme info & Key Terms */}
+                        <div className="opp-fund-left-col">
+                          <div className="opp-fund-row">
+                            <span className="opp-fund-label">Scheme Title</span>
+                            <span className="opp-fund-value" style={{ fontWeight: 600 }}>{fund.title}</span>
+                          </div>
+                          <div className="opp-fund-row">
+                            <span className="opp-fund-label">Fund Classification</span>
+                            <span className="opp-fund-value">{fund.fundType}</span>
+                          </div>
+                          <div className="opp-fund-row">
+                            <span className="opp-fund-label">Strategy Focus</span>
+                            <span className="opp-fund-value">{fund.focus}</span>
+                          </div>
+
+                          <div className="opp-fund-subhead">Key Terms & Economics</div>
+                          {fund.keyTerms.map((term, idx) => (
+                            <div key={idx} className="opp-fund-row">
+                              <span className="opp-fund-label">{term.label}</span>
+                              <span className="opp-fund-value" style={{ fontWeight: idx === 0 ? 700 : 500, color: idx === 0 ? '#10b981' : undefined }}>
+                                {term.value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Right Column: Strategy, Documents & Security */}
+                        <div className="opp-fund-right-col">
+                          <div>
+                            <div className="opp-fund-group-title">Investment Strategy</div>
+                            <ul className="opp-fund-bullets">
+                              {fund.investmentStrategy.map((bullet, idx) => (
+                                <li key={idx}>{bullet}</li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div>
+                            <div className="opp-fund-group-title">Documents Provided to Investor</div>
+                            <ul className="opp-fund-bullets">
+                              {fund.documentsProvided.map((doc, idx) => (
+                                <li key={idx}>{doc}</li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div>
+                            <div className="opp-fund-group-title">Security Structure & Trustee</div>
+                            <ul className="opp-fund-bullets">
+                              {fund.securityStructure.map((sec, idx) => (
+                                <li key={idx}>{sec}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
             );
           })()}
@@ -1906,9 +2227,10 @@ export const OpportunitiesPage: React.FC = () => {
         <div style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.6 }}>
           Set investment amount to{' '}
           <strong style={{ color: '#10b981' }}>
-            {formatCurrency(parseFloat(amountInput) || 0)}
+            {formatCurrency(parseFloat(amountInput) || 0)} ({formatIndianCurrencyWords(parseFloat(amountInput) || 0)})
           </strong>{' '}
-          for <strong>{detailDeal?.customerName}</strong>? This will be used for conversion.
+          for <strong>{detailDeal?.customerName}</strong> under route{' '}
+          <strong>{getDealRouteKey(detailDeal) === 'direct_aif' ? 'Direct AIF Route' : 'Debenture Route'}</strong>? This will be used for conversion.
         </div>
       </Modal>
     </div>

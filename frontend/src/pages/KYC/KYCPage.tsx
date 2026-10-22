@@ -31,7 +31,9 @@ import {
   Copy,
   Sparkles,
   Check,
+  ExternalLink,
 } from 'lucide-react';
+import { EXTERNAL_VERIFICATION_LINKS } from '../../constants/externalLinks';
 import { SendKycLinkModal } from './components/SendKycLinkModal';
 import { KycStatusBadge } from './components/KycStatusBadge';
 import { KycStatusDropdown } from './components/KycStatusDropdown';
@@ -44,6 +46,7 @@ import { PERMISSIONS } from '../../constants/permissions';
 import { Deal, DealActivity, DocumentItem, Lead, Customer } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import { storageService } from '../../services/storageService';
 import {
   getDeals,
@@ -2565,7 +2568,7 @@ const GhlIrmKycView: React.FC = () => {
             isGhlAdmin={isGhlAdmin}
             onShowToast={msg => showToast(msg)}
             onAssistedKyc={isGhlAdmin ? undefined : (d => startAssistedKycFlow(d))}
-            onCallInvestor={d => initiateCall(d.customerName, d.phone || '', 'customer', d.customerId || d.id, undefined, 'kyc')}
+            onCallInvestor={canPlaceCalls(user) ? d => initiateCall(d.customerName, d.phone || '', 'customer', d.customerId || d.id, undefined, 'kyc') : undefined}
             // Only show "Advance to Opportunity" after KYC is fully completed (not available in Admin oversight mode)
             onAdvanceStage={!isGhlAdmin && normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' ? d => handleAdvanceStage(d) : undefined}
           />
@@ -2630,7 +2633,7 @@ const GhlIrmKycView: React.FC = () => {
         const renderField = (
           label: string,
           value?: string | number | null,
-          options?: { copyable?: boolean; isDoc?: boolean; isMono?: boolean }
+          options?: { copyable?: boolean; isDoc?: boolean; isMono?: boolean; extraAction?: React.ReactNode }
         ) => {
           const valStr = value ? String(value).trim() : '';
           const hasVal = valStr && valStr !== '—' && valStr.toLowerCase() !== 'not provided' && valStr.toLowerCase() !== 'not specified';
@@ -2662,10 +2665,12 @@ const GhlIrmKycView: React.FC = () => {
                       {isCopied ? <Check size={11} color="#10b981" /> : <Copy size={11} />}
                     </button>
                   )}
+                  {options?.extraAction}
                 </div>
               ) : (
                 <div className="kyc-glass-empty-container">
                   <span className="kyc-glass-empty-pill">Not Specified</span>
+                  {options?.extraAction}
                 </div>
               )}
             </div>
@@ -2700,14 +2705,16 @@ const GhlIrmKycView: React.FC = () => {
               </div>
 
               <div className="kyc-glass-top-right">
-                <button
-                  type="button"
-                  className="kyc-glass-action-pill kyc-btn-call"
-                  onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc')}
-                  title={`Initiate direct phone consultation with ${deal.customerName}`}
-                >
-                  <Phone size={13} /> <span>Call Investor</span>
-                </button>
+                {canPlaceCalls(user) && (
+                  <button
+                    type="button"
+                    className="kyc-glass-action-pill kyc-btn-call"
+                    onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc')}
+                    title={`Initiate direct phone consultation with ${deal.customerName}`}
+                  >
+                    <Phone size={13} /> <span>Call Investor</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   className="kyc-glass-action-pill kyc-btn-edit"
@@ -2729,7 +2736,6 @@ const GhlIrmKycView: React.FC = () => {
                   <div className="kyc-glass-avatar-box">
                     <div className="kyc-glass-avatar">
                       {initial}
-                      <span className="kyc-glass-avatar-ring" />
                     </div>
                   </div>
                   <div className="kyc-glass-hero-user">
@@ -2808,6 +2814,24 @@ const GhlIrmKycView: React.FC = () => {
                             <Copy size={10} />
                           </button>
                         )}
+                        <button
+                          type="button"
+                          className="kyc-glass-mini-copy"
+                          title="Verify PAN on Income Tax portal"
+                          aria-label="Verify PAN on Income Tax portal"
+                          onClick={() => {
+                            const rawPan = data.panNumber ? String(data.panNumber).trim() : '';
+                            if (rawPan && rawPan !== '—' && rawPan.toLowerCase() !== 'not specified' && rawPan.toLowerCase() !== 'not provided') {
+                              try {
+                                navigator.clipboard.writeText(rawPan);
+                                showToast('PAN copied. Paste it on the Income Tax portal.');
+                              } catch {}
+                            }
+                            window.open(EXTERNAL_VERIFICATION_LINKS.PAN, '_blank', 'noopener,noreferrer');
+                          }}
+                        >
+                          <ExternalLink size={10} />
+                        </button>
                       </div>
                     </div>
                     <div className="kyc-glass-metric-cell">
@@ -3024,7 +3048,31 @@ const GhlIrmKycView: React.FC = () => {
                     {renderField('Full Name', data.investorName || deal.customerName)}
                     {renderField('Email', data.email || deal.email, { copyable: true })}
                     {renderField('Phone', data.phone || deal.phone, { copyable: true, isMono: true })}
-                    {renderField('PAN Number', data.panNumber, { copyable: true, isMono: true })}
+                    {renderField('PAN Number', data.panNumber, {
+                      copyable: true,
+                      isMono: true,
+                      extraAction: (
+                        <button
+                          type="button"
+                          className="kyc-glass-verify-btn"
+                          title="Verify PAN on Income Tax portal"
+                          aria-label="Verify PAN on Income Tax portal"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const rawPan = data.panNumber ? String(data.panNumber).trim() : '';
+                            if (rawPan && rawPan !== '—' && rawPan.toLowerCase() !== 'not specified' && rawPan.toLowerCase() !== 'not provided') {
+                              try {
+                                navigator.clipboard.writeText(rawPan);
+                                showToast('PAN copied. Paste it on the Income Tax portal.');
+                              } catch {}
+                            }
+                            window.open(EXTERNAL_VERIFICATION_LINKS.PAN, '_blank', 'noopener,noreferrer');
+                          }}
+                        >
+                          <ShieldCheck size={12} /> <span>Verify PAN</span>
+                        </button>
+                      ),
+                    })}
                     {renderField('City', data.city || getResolvedLocation(deal))}
                     {renderField('Date of Birth', data.dob)}
                     {renderField('Occupation', data.occupation)}
@@ -3055,7 +3103,24 @@ const GhlIrmKycView: React.FC = () => {
                   <div className="kyc-glass-fields-matrix">
                     {renderField('Name on Document', data.nameAsPerPan || data.investorName || deal.customerName)}
                     {renderField("Father's Name", data.fatherName)}
-                    {renderField('Aadhaar Number', data.aadhaarNumber, { copyable: true, isMono: true })}
+                    {renderField('Aadhaar Number', data.aadhaarNumber, {
+                      copyable: true,
+                      isMono: true,
+                      extraAction: (
+                        <button
+                          type="button"
+                          className="kyc-glass-verify-btn"
+                          title="Verify Aadhaar on UIDAI portal"
+                          aria-label="Verify Aadhaar on UIDAI portal"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window.open(EXTERNAL_VERIFICATION_LINKS.AADHAAR, '_blank', 'noopener,noreferrer');
+                          }}
+                        >
+                          <ShieldCheck size={12} /> <span>Verify Aadhaar</span>
+                        </button>
+                      ),
+                    })}
                     {renderField('Permanent Address', data.address)}
                     {renderField('Courier Address', data.courierAddress || data.address)}
                     {renderField('City', data.city || getResolvedLocation(deal))}
@@ -4725,7 +4790,7 @@ const GhlIrmKycView: React.FC = () => {
       />
 
       {/* Review Customer KYC Drawer */}
-      <KycReviewDrawer isOpen={!!reviewDeal} onClose={() => setReviewDeal(null)} deal={reviewDeal} onShowToast={showToast} onChangeKycStatus={handleStatusChange} />
+      <KycReviewDrawer isOpen={!!reviewDeal} onClose={() => setReviewDeal(null)} deal={reviewDeal} onShowToast={showToast} onChangeKycStatus={handleStatusChange} isReadOnly={isGhlAdmin} />
 
       {/* ── Assisted KYC Review & Consent Confirmation Modal ── */}
       <Modal
@@ -5100,14 +5165,16 @@ const OriginalKYCView: React.FC = () => {
       header: 'Stage Action',
       render: deal => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost btn-icon"
-            title={`Call ${deal.customerName}`}
-            onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc')}
-          >
-            <Phone size={14} color="#059669" />
-          </button>
+          {canPlaceCalls(user) && (
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost btn-icon"
+              title={`Call ${deal.customerName}`}
+              onClick={() => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc')}
+            >
+              <Phone size={14} color="#059669" />
+            </button>
+          )}
           <button
             type="button"
             className="kyc-advance-btn"
@@ -5127,11 +5194,15 @@ const OriginalKYCView: React.FC = () => {
       icon: <Eye size={14} style={{ marginRight: 6 }} />,
       onClick: deal => setSelectedDealForDetail(deal),
     },
-    {
-      label: 'Call Investor',
-      icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
-      onClick: deal => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc'),
-    },
+    ...(canPlaceCalls(user)
+      ? [
+          {
+            label: 'Call Investor',
+            icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
+            onClick: (deal: Deal) => initiateCall(deal.customerName, deal.phone || '', 'customer', deal.customerId || deal.id, undefined, 'kyc'),
+          },
+        ]
+      : []),
     {
       label: 'Advance to Opportunity',
       icon: <ArrowRight size={14} color="var(--primary-600)" style={{ marginRight: 6 }} />,

@@ -57,6 +57,24 @@ public class TwiMLController : ControllerBase
             "Outbound TwiML request: CallSid={CallSid} From={From} To={To} Direction={Direction}",
             form.CallSid, form.From, to, form.Direction);
 
+        // Disallow outbound dialing for admin roles
+        if (!string.IsNullOrWhiteSpace(form.From) && form.From.Contains("agent_"))
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(form.From, @"agent_(\d+)");
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var callingUserId))
+            {
+                var callingUser = _context.Users.AsNoTracking().Include(u => u.Role).FirstOrDefault(u => u.Id == callingUserId);
+                var roleCode = callingUser?.Role?.Code?.ToLowerInvariant();
+                if (roleCode == "company_admin" || roleCode == "admin" || roleCode == "ghl_admin")
+                {
+                    _logger.LogWarning("Outbound call rejected: User {UserId} with role {Role} is not permitted to place calls.", callingUserId, roleCode);
+                    var forbiddenResp = new VoiceResponse();
+                    forbiddenResp.Say("You are not authorized to place calls.");
+                    return Content(forbiddenResp.ToString(), "application/xml");
+                }
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(to))
         {
             _logger.LogWarning("Outbound TwiML: missing 'To' parameter.");
@@ -110,7 +128,7 @@ public class TwiMLController : ControllerBase
             .AsNoTracking()
             .Include(u => u.Role)
             .Where(u => u.CompanyId == companyId && u.Role != null &&
-                        (u.Role.Code == "sales_executive" || u.Role.Code == "irm" || u.Role.Code == "company_admin"))
+                        (u.Role.Code == "sales_executive" || u.Role.Code == "irm"))
             .ToListAsync(ct);
 
         var response = new VoiceResponse();

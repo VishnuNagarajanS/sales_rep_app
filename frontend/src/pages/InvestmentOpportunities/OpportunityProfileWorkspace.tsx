@@ -37,6 +37,8 @@ import {
 } from 'lucide-react';
 import { Deal, CallRecord, Consultation, Followup } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './OpportunityProfileWorkspace.css';
 
 export interface InvestmentRouteDetails {
@@ -219,6 +221,7 @@ export const OpportunityProfileWorkspace: React.FC<OpportunityProfileWorkspacePr
   copyToClipboard,
   getDealKycStatus,
 }) => {
+  const { user } = useAuth();
   const { theme } = useTheme();
   const effectiveIsDark = isDark !== undefined ? isDark : theme === 'dark';
 
@@ -432,7 +435,7 @@ Date: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short',
             <span className="opp-ribbon-metric-val">{formatCurrency(dealValueNum)}</span>
           </div>
 
-          {deal.phone && (
+          {deal.phone && canPlaceCalls(user) && (
             <button
               type="button"
               className="opp-ribbon-btn-call"
@@ -1009,7 +1012,7 @@ Date: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short',
                       Recorded consultations, phone touchpoints and follow-up activities
                     </p>
                   </div>
-                  {deal.phone && (
+                  {deal.phone && canPlaceCalls(user) && (
                     <button
                       type="button"
                       className="opp-ribbon-btn-call"

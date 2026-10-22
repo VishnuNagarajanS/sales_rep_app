@@ -43,7 +43,7 @@ import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
-import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../../utils/agentRoleUtils';
+import { getAgentRoleInfo, getAssigningSalesAgentInfo, canPlaceCalls } from '../../utils/agentRoleUtils';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './LeadsPage.css';
 
@@ -349,7 +349,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     if (coveringNames.length === 0 && returnedNames.length === 0) return [];
 
     return [
-      { value: 'All', label: 'All Leads' },
+
       { value: 'Mine', label: 'Mine (Regular)' },
       ...coveringNames.map(name => ({ value: `Handover_${name}`, label: `Covering for ${name}` })),
       ...(returnedNames.length > 0 ? [{ value: 'Returned', label: 'Returned from Handover' }] : []),
@@ -610,14 +610,39 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const matchCapacity = (lead: Lead, filterRange: string): boolean => {
     if (!filterRange || filterRange === 'All') return true;
+    // 1.3: Check all field names where investment capacity might be stored
     const rawCap = (
       lead.customFields?.investmentCapacity ||
+      lead.customFields?.investmentRange ||
+      lead.customFields?.capacityRange ||
       lead.customFields?.budgetRange ||
       (lead as any).investmentAmount ||
+      (lead as any).investmentRange ||
       ''
     ).trim();
 
     if (!rawCap) return false;
+
+    // Parse Indian numeric format to crore value
+    const parseInrToCrore = (s: string): number | null => {
+      const clean = s.replace(/[₹,\s]/g, '').toLowerCase();
+      const lakhMatch = clean.match(/^(\d+\.?\d*)\s*l(?:akh)?/);
+      if (lakhMatch) return parseFloat(lakhMatch[1]) / 100;
+      const crMatch = clean.match(/^(\d+\.?\d*)\s*(?:cr(?:ore)?)/);
+      if (crMatch) return parseFloat(crMatch[1]);
+      const num = parseFloat(clean.replace(/[^\d.]/g, ''));
+      if (!isNaN(num) && num > 0) return num / 1e7;
+      return null;
+    };
+
+    const extractFirstValue = (s: string): number | null => {
+      const parts = s.split(/[-–—]/);
+      for (const p of parts) {
+        const v = parseInrToCrore(p.trim());
+        if (v !== null) return v;
+      }
+      return null;
+    };
 
     const normalize = (s: string) => s.replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
     const nCap = normalize(rawCap);
@@ -625,49 +650,31 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
     if (nCap === nFilter) return true;
 
-    // Match range buckets
-    if (filterRange === '₹1 Cr – ₹5 Cr') {
-      return (
-        nCap.includes('1 cr') ||
-        nCap.includes('1.5 cr') ||
-        nCap.includes('2 cr') ||
-        nCap.includes('3 cr') ||
-        nCap.includes('4 cr') ||
-        nCap.includes('5 cr') ||
-        nCap.includes('75l')
-      );
-    }
-    if (filterRange === '₹5 Cr – ₹10 Cr') {
-      return (
-        nCap.includes('5 cr') ||
-        nCap.includes('6 cr') ||
-        nCap.includes('7 cr') ||
-        nCap.includes('8 cr') ||
-        nCap.includes('10 cr')
-      );
-    }
-    if (filterRange === '₹10 Cr – ₹25 Cr') {
-      return (
-        nCap.includes('10 cr') ||
-        nCap.includes('15 cr') ||
-        nCap.includes('20 cr') ||
-        nCap.includes('25 cr')
-      );
-    }
-    if (filterRange === '₹25 Cr+') {
-      return (
-        nCap.includes('25 cr') ||
-        nCap.includes('25cr') ||
-        nCap.includes('30 cr') ||
-        nCap.includes('50 cr')
-      );
-    }
+    const capValue = extractFirstValue(rawCap);
+
     if (filterRange === 'Contact for Co-Invest Details') {
       return nCap.includes('co-invest') || nCap.includes('contact');
+    }
+    if (filterRange === '₹1 Cr – ₹5 Cr') {
+      if (capValue !== null) return capValue >= 1 && capValue <= 5;
+      return nCap.includes('1 cr') || nCap.includes('1.5 cr') || nCap.includes('2 cr') || nCap.includes('3 cr') || nCap.includes('4 cr') || nCap.includes('5 cr') || nCap.includes('75l');
+    }
+    if (filterRange === '₹5 Cr – ₹10 Cr') {
+      if (capValue !== null) return capValue > 5 && capValue <= 10;
+      return nCap.includes('5 cr') || nCap.includes('6 cr') || nCap.includes('7 cr') || nCap.includes('8 cr') || nCap.includes('10 cr');
+    }
+    if (filterRange === '₹10 Cr – ₹25 Cr') {
+      if (capValue !== null) return capValue > 10 && capValue <= 25;
+      return nCap.includes('10 cr') || nCap.includes('15 cr') || nCap.includes('20 cr') || nCap.includes('25 cr');
+    }
+    if (filterRange === '₹25 Cr+') {
+      if (capValue !== null) return capValue > 25;
+      return nCap.includes('25 cr') || nCap.includes('25cr') || nCap.includes('30 cr') || nCap.includes('50 cr');
     }
 
     return false;
   };
+
 
   const filteredLeads = scopedLeads.filter(lead => {
     if (assignedLeadIds.has(lead.id)) return false;
@@ -684,8 +691,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       });
       if (hasPendingFollowup) return false;
     }
-    if (!isGhlAdmin && statusFilter !== 'All' && (lead.status as string) !== statusFilter) return false;
-    if (agentFilter !== 'All' && lead.assignedAgentName !== agentFilter) return false;
+    if (!isGhlAdmin && !isIrm && statusFilter !== 'All' && (lead.status as string) !== statusFilter) return false;
+    // Agent filter is only shown for non-admin, non-GhlAdmin scoped views
+    if (!isGhlAdmin && agentFilter !== 'All' && lead.assignedAgentName !== agentFilter) return false;
     if (capacityFilter !== 'All') {
       if (!matchCapacity(lead, capacityFilter)) return false;
     }
@@ -1015,16 +1023,28 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       setIsEditDrawerOpen(false);
       await loadData();
     } catch (err: any) {
-      console.error('Failed to schedule follow-up activity:', err);
       const msg = err.message || '';
-      if (msg.includes('already booked') || msg.includes('time slot') || msg.includes('between calls')) {
+      // 2.1: Backend returns SUGGESTED_TIME:<isoUtc> in the errors array
+      const errorsArr: string[] = err?.errors || err?.response?.errors || [];
+      const suggestedEntry = errorsArr.find((e: string) => e.startsWith('SUGGESTED_TIME:'));
+      if (suggestedEntry || msg.includes('already booked') || msg.includes('time slot') || msg.includes('between calls')) {
+        let suggestedDateIso: string;
+        let formattedSuggestedTime: string;
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        if (suggestedEntry) {
+          // Backend sent the authoritative suggested time as ISO UTC
+          const suggestedUtc = new Date(suggestedEntry.replace('SUGGESTED_TIME:', ''));
+          suggestedDateIso = `${suggestedUtc.getFullYear()}-${pad(suggestedUtc.getMonth() + 1)}-${pad(suggestedUtc.getDate())}T${pad(suggestedUtc.getHours())}:${pad(suggestedUtc.getMinutes())}`;
+          formattedSuggestedTime = suggestedUtc.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedUtc.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+        } else {
+          // Fallback: +20 from requested time (less accurate but better than nothing)
+          const conflictDateObj = new Date(targetIso);
+          const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+          suggestedDateIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+          formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+        }
         const conflictDateObj = new Date(targetIso);
         const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-        const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
-        const pad = (n: number) => n.toString().padStart(2, '0');
-        const suggestedDateIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
-        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
-
         setSlotConflictModal({
           conflictTime: formattedConflictTime,
           contactName: 'Existing Appointment',
@@ -1441,11 +1461,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
         // Alias map: target field → list of substrings to check (first match wins)
         const fieldAliases: Record<string, string[]> = {
-          name:     ['fullname', 'full_name', 'full name', 'contact name', 'name'],
-          phone:    ['phone', 'mobile', 'contact'],
-          email:    ['email'],
+          name: ['fullname', 'full_name', 'full name', 'contact name', 'name'],
+          phone: ['phone', 'mobile', 'contact'],
+          email: ['email'],
           location: ['city', 'state', 'location', 'area', 'region'],
-          source:   ['utm', 'platform', 'campaign', 'source', 'channel'],
+          source: ['utm', 'platform', 'campaign', 'source', 'channel'],
         };
 
         Object.entries(fieldAliases).forEach(([field, aliases]) => {
@@ -1619,12 +1639,18 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       l.customFields?.qualifiedByAgentName ||
       l.customFields?.assignedByAgentName ||
       l.customFields?.agentName ||
-      (String(l.assignedAgentId) === '3' || String(l.assignedById) === '3' ? 'Naveen' : null) ||
-      (String(l.assignedAgentId) === '2' || String(l.assignedById) === '2' ? 'Vishnu' : null) ||
-      (user?.role?.code === 'sales_executive' ? user?.name : 'Naveen') ||
-      'Naveen';
+      (user?.role?.code === 'sales_executive' ? user?.name : null) ||
+      null;
 
-    return getAgentRoleInfo(assignedName, l.assignedAgentId || l.assignedById);
+    return getAgentRoleInfo(assignedName || 'Unassigned', l.assignedAgentId || l.assignedById);
+  };
+
+  // Returns true only when the lead has a real persisted assignment (not a preview/default)
+  const hasRealAssignment = (l: Lead): boolean => {
+    if (!l.assignedAgentId) return false;
+    // Exclude if the only agent is an admin (admin-owned = unassigned in GHL context)
+    if (adminIds.has(String(l.assignedAgentId))) return false;
+    return true;
   };
 
   const assignedAgentColumn: Column<Lead> = {
@@ -1751,11 +1777,12 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       },
     },
     ...(isIrm ? [assignedAgentColumn] : [statusColumn, sourceColumn]),
-    {
+    // Quick Call is hidden for Admin roles
+    ...(canPlaceCalls(user) ? [{
       key: 'quickCall',
       header: 'Quick Call',
-      align: 'center',
-      render: l => (
+      align: 'center' as const,
+      render: (l: Lead) => (
         <div className="lead-quick-call-cell">
           <button
             className="btn btn-call btn-sm btn-icon customer-list-call-btn"
@@ -1770,7 +1797,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           </button>
         </div>
       ),
-    },
+    } as Column<Lead>] : []),
   ];
 
   const rowActions: RowAction<Lead>[] = [
@@ -1797,7 +1824,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       icon: <Trash2 size={14} color="#ef4444" className="leads-action-icon" />,
       danger: true,
       onClick: l => handleDeleteLead(l),
-      hidden: () => isIrm,
+      // Hide Delete for Admin role (1.5) and IRM
+      hidden: () => isIrm || isGhlAdmin,
     },
   ];
 
@@ -1872,7 +1900,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   onChange: setHandoverFilter,
                   options: handoverOptions
                 }] : []),
-                ...(isGhlAdmin ? [] : [{
+                ...(isGhlAdmin || isIrm ? [] : [{
                   key: 'status',
                   label: 'Status',
                   value: statusFilter,
@@ -1883,7 +1911,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                     { value: 'No Response', label: 'No Response' },
                   ],
                 }]),
-                ...(!isExec ? [{
+                // 1.2: Agent filter hidden for GhlAdmin (they see all unassigned leads already)
+                ...(!isExec && !isGhlAdmin ? [{
                   key: 'agent',
                   label: 'Agent',
                   value: agentFilter,
@@ -1907,7 +1936,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 onChange: handleCustomDateChange,
               }}
               onClearAll={() => {
-                setStatusFilter('All');
+                if (!isIrm) setStatusFilter('All');
                 setAgentFilter('All');
                 setCapacityFilter('All');
                 setHandoverFilter('Mine');
@@ -1971,14 +2000,17 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             >
               <Edit size={14} /> Edit Record
             </button>
-            <button
-              className="btn btn-call"
-              onClick={() => {
-                if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined);
-              }}
-            >
-              <Phone size={14} /> Call Lead
-            </button>
+            {/* Call button hidden for Admin roles */}
+            {canPlaceCalls(user) && (
+              <button
+                className="btn btn-call"
+                onClick={() => {
+                  if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined);
+                }}
+              >
+                <Phone size={14} /> Call Lead
+              </button>
+            )}
           </>
         }
       >
@@ -2007,15 +2039,17 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
           return (
             <>
-              {/* ── Quick Info Banner (Assigned Agent) ── */}
-              <div className="lead-quick-banner">
-                <div className="lead-assigned-note" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {isIrm ? 'Assigned Sales Agent' : 'Assigned'} : <strong>{getLeadDisplayAgent(selectedLead).name}</strong>
-                  <span className={`badge-role-inline ${getLeadDisplayAgent(selectedLead).badgeClass}`}>
-                    {getLeadDisplayAgent(selectedLead).role}
-                  </span>
+              {/* ── Quick Info Banner (Assigned Agent) — only shown when lead has a real assignment (1.4) ── */}
+              {hasRealAssignment(selectedLead) && (
+                <div className="lead-quick-banner">
+                  <div className="lead-assigned-note" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {isIrm ? 'Assigned Sales Agent' : 'Assigned'} : <strong>{getLeadDisplayAgent(selectedLead).name}</strong>
+                    <span className={`badge-role-inline ${getLeadDisplayAgent(selectedLead).badgeClass}`}>
+                      {getLeadDisplayAgent(selectedLead).role}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {isLeadReturned(selectedLead) && (
                 <div style={{
@@ -2163,7 +2197,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 contactType="lead"
                 tenantId={tenant?.id}
                 tenantName={tenant?.name}
-                onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined)}
+                onCall={canPlaceCalls(user) ? () => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined) : undefined}
                 sectionsOnly={['callRecordings']}
               />
             </>

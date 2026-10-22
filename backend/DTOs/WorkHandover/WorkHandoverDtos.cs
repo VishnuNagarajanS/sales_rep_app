@@ -10,6 +10,8 @@ public class WorkHandoverCandidateDto
     public int OpenItemsCount { get; set; }
     public bool IsCovered { get; set; }
     public bool IsCovering { get; set; }
+    public bool OnLeave { get; set; }
+    public string? LeaveReason { get; set; }
     public int? ActiveHandoverId { get; set; }
 }
 

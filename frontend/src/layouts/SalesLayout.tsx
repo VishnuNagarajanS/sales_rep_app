@@ -12,6 +12,7 @@ import {
   InCallBar,
   DispositionModal,
 } from '../components/calling/CallCenterComponents';
+import { canPlaceCalls } from '../utils/agentRoleUtils';
 
 import { workHandoverService, WorkHandoverDto } from '../services/workHandoverService';
 import { Modal } from '../components/common/Modal';
@@ -312,9 +313,13 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
       </div>
 
       {/* Global Persistent Call Surfaces (Section 3.3 & 7.6) */}
-      <IncomingCallPopup />
-      <InCallBar />
-      {currentRoute !== 'customers' && <DispositionModal />}
+      {canPlaceCalls(user) && (
+        <>
+          <IncomingCallPopup />
+          <InCallBar />
+          {currentRoute !== 'customers' && <DispositionModal />}
+        </>
+      )}
 
       {/* Return Summary Panel */}
       {showEndedPanel && recentlyEnded && (

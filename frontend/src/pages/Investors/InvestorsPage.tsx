@@ -13,6 +13,7 @@ import { Modal } from '../../components/common/Modal';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import { Investor360Modal } from './Investor360Modal';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './InvestorsPage.css';
 
 // ─── Form state shape ────────────────────────────────────────────────────────
@@ -419,6 +420,7 @@ export const InvestorsPage: React.FC = () => {
       label: 'Call Customer',
       icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
       onClick: inv => initiateCall(inv.name, inv.phone, 'customer', inv.id, undefined, 'investor_360'),
+      hidden: () => !canPlaceCalls(user),
     },
     {
       label: 'View Investor 360',
@@ -473,9 +475,13 @@ export const InvestorsPage: React.FC = () => {
           onEditInvestor={inv => {
             openEditModal(inv);
           }}
-          onCallCustomer={(name, phone, entityId) => {
-            initiateCall(name, phone, 'customer', entityId, undefined, 'investor_360');
-          }}
+          onCallCustomer={
+            canPlaceCalls(user)
+              ? (name, phone, entityId) => {
+                  initiateCall(name, phone, 'customer', entityId, undefined, 'investor_360');
+                }
+              : undefined
+          }
         />
       ) : (
         <>

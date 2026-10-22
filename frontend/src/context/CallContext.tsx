@@ -17,6 +17,7 @@ import { storageService } from '../services/storageService';
 import { apiClient } from '../services/apiClient';
 import { useAuth } from './AuthContext';
 import { twilioVoiceService } from '../services/twilioVoiceService';
+import { canPlaceCalls } from '../utils/agentRoleUtils';
 import { Call } from '@twilio/voice-sdk';
 
 export type AgentAvailability = 'Available' | 'Busy' | 'Offline';
@@ -133,7 +134,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Register Twilio Voice device and incoming call listener
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id && canPlaceCalls(user)) {
       twilioVoiceService.initializeDevice().catch(err => {
         console.warn('[CallContext] Twilio Voice initialization notice:', err?.message || err);
       });
@@ -236,7 +237,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         unsubIncoming();
       };
     }
-  }, [user?.id, availability, leads]);
+  }, [user?.id, user?.role?.code, availability, leads]);
 
   // Timer for connected or simulated active calls
   useEffect(() => {
@@ -261,6 +262,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     callModule?: string,
     isFromOther?: boolean
   ) => {
+    if (!canPlaceCalls(user)) {
+      console.warn('[CallContext] Current user role is not permitted to initiate calls.');
+      return;
+    }
+
     const callId = `call-${Date.now()}`;
     const newCall: ActiveCall = {
       id: callId,
@@ -364,7 +370,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const simulateIncomingCall = (name = 'Kishore Varma', phone = '+91 98860 77112') => {
-    if (availability === 'Offline' || availability === 'Busy') {
+    if (!canPlaceCalls(user) || availability === 'Offline' || availability === 'Busy') {
       return;
     }
 

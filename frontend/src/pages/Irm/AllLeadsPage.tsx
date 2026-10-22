@@ -20,7 +20,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { DataTable, Column } from '../../components/common/DataTable';
 import { fetchIrmAllLeads, IrmAllLeadItem, IrmAllLeadsSummary } from '../../services/irmAllLeadsService';
-import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../../utils/agentRoleUtils';
+import { getAgentRoleInfo, getAssigningSalesAgentInfo, canPlaceCalls } from '../../utils/agentRoleUtils';
 import './AllLeadsPage.css';
 
 interface AllLeadsPageProps {
@@ -340,13 +340,15 @@ export const AllLeadsPage: React.FC<AllLeadsPageProps> = ({ onNavigate }) => {
       render: lead => (
         <div className="all-leads-action-group">
           {/* Direct Twilio Call */}
-          <button
-            onClick={() => initiateCall(lead.name, lead.phone, 'lead', String(lead.id), undefined, getLeadCallModule(lead.currentStage))}
-            title={`Call Investor (${lead.currentStage})`}
-            className="all-leads-call-action-btn"
-          >
-            <Phone size={14} />
-          </button>
+          {canPlaceCalls(user) && (
+            <button
+              onClick={() => initiateCall(lead.name, lead.phone, 'lead', String(lead.id), undefined, getLeadCallModule(lead.currentStage))}
+              title={`Call Investor (${lead.currentStage})`}
+              className="all-leads-call-action-btn"
+            >
+              <Phone size={14} />
+            </button>
+          )}
 
           {/* Jump to Stage */}
           <button

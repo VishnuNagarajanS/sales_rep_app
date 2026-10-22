@@ -515,7 +515,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
           title="Click to view Opportunities"
         >
           <div className="irm-kpi-header">
-            <span className="irm-kpi-label">DEAL PIPELINE</span>
+            <span className="irm-kpi-label">Opportunities</span>
             <div className="irm-kpi-icon deals"><Briefcase size={16} /></div>
           </div>
           <div className="irm-kpi-val">{activeOpportunitiesCount}</div>

@@ -1402,13 +1402,25 @@ export const DispositionModal: React.FC = () => {
       );
     } catch (err: any) {
       const errMsg = err?.message || '';
-      if (errMsg.includes('already booked') || errMsg.includes('time slot') || errMsg.includes('between calls')) {
+      const errorsArr: string[] = err?.errors || [];
+      const suggestedEntry = errorsArr.find((e: string) => e.startsWith('SUGGESTED_TIME:'));
+      if (suggestedEntry || errMsg.includes('already booked') || errMsg.includes('time slot') || errMsg.includes('between calls')) {
         const conflictDateObj = new Date(combinedDateTime);
         const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-        const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
         const pad = (n: number) => n.toString().padStart(2, '0');
-        const suggestedTimeValue = `${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
-        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+        let suggestedTimeValue: string;
+        let formattedSuggestedTime: string;
+        if (suggestedEntry) {
+          // Backend sent the authoritative next-free slot as ISO UTC
+          const suggestedUtc = new Date(suggestedEntry.replace('SUGGESTED_TIME:', ''));
+          suggestedTimeValue = `${pad(suggestedUtc.getHours())}:${pad(suggestedUtc.getMinutes())}`;
+          formattedSuggestedTime = suggestedUtc.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedUtc.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+        } else {
+          // Fallback: +20 from requested time (backend did not send SUGGESTED_TIME)
+          const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+          suggestedTimeValue = `${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+          formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+        }
 
         setSlotConflictData({
           conflictTime: formattedConflictTime,

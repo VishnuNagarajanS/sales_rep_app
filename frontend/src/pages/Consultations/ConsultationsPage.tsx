@@ -33,6 +33,7 @@ import { Modal } from '../../components/common/Modal';
 import { Drawer } from '../../components/common/Drawer';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import { formatSmartScheduleDate } from '../../utils/dateUtils';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './ConsultationsPage.css';
 
 // ─── Status Options ──────────────────────────────────────────────────────────
@@ -845,11 +846,15 @@ export const ConsultationsPage: React.FC = () => {
 
   // ── Row actions ───────────────────────────────────────────────────────────
   const rowActions: RowAction<Consultation>[] = [
-    {
-      label: 'Call Customer',
-      icon: <Phone size={14} color="#10b981" style={{ marginRight: 6 }} />,
-      onClick: c => initiateCall(c.investorName, c.investorPhone, 'customer', c.investorId),
-    },
+    ...(canPlaceCalls(user)
+      ? [
+          {
+            label: 'Call Customer',
+            icon: <Phone size={14} color="#10b981" style={{ marginRight: 6 }} />,
+            onClick: (c: Consultation) => initiateCall(c.investorName, c.investorPhone, 'customer', c.investorId),
+          },
+        ]
+      : []),
     {
       label: 'Reschedule',
       icon: <Clock size={14} color="#f59e0b" style={{ marginRight: 6 }} />,
@@ -1518,13 +1523,16 @@ export const ConsultationsPage: React.FC = () => {
               tenantName={tenant?.name}
               consultationReason={drawerConsultation.agenda}
               consultationHistory={consultationHistory}
-              onCall={() =>
-                initiateCall(
-                  drawerConsultation.investorName,
-                  drawerConsultation.investorPhone,
-                  'customer',
-                  drawerConsultation.investorId
-                )
+              onCall={
+                canPlaceCalls(user)
+                  ? () =>
+                      initiateCall(
+                        drawerConsultation.investorName,
+                        drawerConsultation.investorPhone,
+                        'customer',
+                        drawerConsultation.investorId
+                      )
+                  : undefined
               }
             />
           );
