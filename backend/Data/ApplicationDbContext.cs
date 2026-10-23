@@ -39,6 +39,22 @@ public class ApplicationDbContext : DbContext
     /// <summary>Immutable audit log of every create/update/delete action across all tenants.</summary>
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+    // ── Jamin Bazaar specific tables ─────────────────────────────────────────
+    /// <summary>Site visit requests and confirmations across properties.</summary>
+    public DbSet<SiteVisit> SiteVisits => Set<SiteVisit>();
+
+    /// <summary>Jamin land development projects (e.g. Jamin Garden — Shastri Nagar).</summary>
+    public DbSet<JaminProject> JaminProjects => Set<JaminProject>();
+
+    /// <summary>Individual plots within a Jamin project layout.</summary>
+    public DbSet<JaminPlot> JaminPlots => Set<JaminPlot>();
+
+    /// <summary>Plot booking/sale agreements with lifecycle tracking.</summary>
+    public DbSet<JaminBooking> JaminBookings => Set<JaminBooking>();
+
+    /// <summary>Payment ledger entries for plot bookings.</summary>
+    public DbSet<JaminPayment> JaminPayments => Set<JaminPayment>();
+
     // ── Super Admin Platform Management Entities ─────────────────────────────
     public DbSet<SubscriptionPackage> SubscriptionPackages => Set<SubscriptionPackage>();
     public DbSet<CarrierSettings> CarrierSettings => Set<CarrierSettings>();
@@ -118,6 +134,32 @@ public class ApplicationDbContext : DbContext
 
         // Apply entity configurations
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
+
+        modelBuilder.Entity<JaminBooking>(entity =>
+        {
+            entity.ToTable("jamin_bookings");
+            entity.HasIndex(b => new { b.CompanyId, b.PlotId })
+                .HasDatabaseName("IX_jamin_bookings_CompanyId_PlotId_Active")
+                .HasFilter("\"PlotId\" IS NOT NULL AND \"Status\" IN ('Hold', 'Pending Verification', 'Booking Pending Verification', 'Token Paid', 'Token Verified', 'Agreement Signed', 'Registration Completed')")
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<JaminPayment>(entity =>
+        {
+            entity.ToTable("jamin_payments");
+            entity.HasOne(p => p.Booking)
+                .WithMany(b => b.Payments)
+                .HasForeignKey(p => p.BookingId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(p => p.Customer)
+                .WithMany(c => c.Payments)
+                .HasForeignKey(p => p.CustomerId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(p => p.Company)
+                .WithMany()
+                .HasForeignKey(p => p.CompanyId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
 
         // Handover relationships on entities
         modelBuilder.Entity<Lead>(b =>

@@ -59,3 +59,121 @@
   gap: 10px;
   margin-top: 8px;
 }
+
+.visitor-source-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  background-color: var(--bg-surface-hover);
+  padding: 4px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-base);
+}
+
+.visitor-source-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.visitor-source-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-surface);
+}
+
+.visitor-source-btn.active {
+  background-color: var(--primary-600);
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.sitevisit-locked-input {
+  background-color: var(--bg-surface-hover) !important;
+  color: var(--text-primary) !important;
+  cursor: not-allowed;
+  font-weight: 500;
+}
+
+/* Status & Notes cell */
+.sitevisit-status-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 190px;
+  max-width: 280px;
+}
+
+.sitevisit-note-text {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted, #64748b);
+  font-style: italic;
+  word-break: break-word;
+  white-space: normal;
+}
+
+/* Modal visit summary card */
+.sitevisit-summary-card {
+  background-color: var(--bg-surface-hover, #f8fafc);
+  border: 1px solid var(--border-base, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.sitevisit-summary-row {
+  display: flex;
+  gap: 8px;
+}
+
+.sitevisit-summary-label {
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  min-width: 90px;
+}
+
+.sitevisit-summary-val {
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+}
+
+/* Modal status dynamic guidance banner */
+.sitevisit-manage-banner {
+  padding: 9px 13px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 12px;
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.sitevisit-manage-banner.rescheduled {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.sitevisit-manage-banner.completed {
+  background-color: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.sitevisit-manage-banner.cancelled {
+  background-color: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+

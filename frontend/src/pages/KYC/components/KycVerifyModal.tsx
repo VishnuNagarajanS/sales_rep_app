@@ -16,6 +16,8 @@ import {
   EyeOff,
   FileText,
   CheckCircle2,
+  Edit3,
+  Save,
 } from 'lucide-react';
 import { Modal } from '../../../components/common/Modal';
 import { Deal } from '../../../types';
@@ -629,13 +631,58 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [confirmVerify, setConfirmVerify] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
+  const [savingSection, setSavingSection] = useState<KycSectionKey | null>(null);
+  const [editingSections, setEditingSections] = useState<Record<KycSectionKey, boolean>>({
+    pan: false,
+    aadhaar: false,
+    bank: false,
+    demat: false,
+    nominee: false,
+    liveness: false,
+  });
+  const [editValues, setEditValues] = useState<Record<string, any>>({});
 
   useEffect(() => {
     if (isOpen) {
       setSections(initSections());
       setConfirmVerify(false);
+      setEditingSections({
+        pan: false,
+        aadhaar: false,
+        bank: false,
+        demat: false,
+        nominee: false,
+        liveness: false,
+      });
     }
   }, [isOpen, deal.id]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setEditValues({
+        panNumber: mergedData.panNumber || '',
+        nameAsPerPan: mergedData.nameAsPerPan || '',
+        fatherName: mergedData.fatherName || '',
+        aadhaarNumber: mergedData.aadhaarNumber || '',
+        dob: mergedData.dob || '',
+        address: mergedData.address || '',
+        city: mergedData.city || '',
+        pincode: mergedData.pincode || '',
+        bankName: mergedData.bankName || '',
+        accountHolderName: mergedData.accountHolderName || '',
+        accountNumber: mergedData.accountNumber || '',
+        ifscCode: mergedData.ifscCode || '',
+        accountType: mergedData.accountType || 'Savings Account',
+        branchName: mergedData.branchName || '',
+        hasNoDemat: Boolean(mergedData.hasNoDemat),
+        dematDepository: mergedData.dematDepository || 'CDSL',
+        dpId: mergedData.dpId || '',
+        dematClientId: mergedData.dematClientId || '',
+        dematAccountNumber: mergedData.dematAccountNumber || '',
+        nominees: Array.isArray(mergedData.nominees) ? mergedData.nominees : [],
+      });
+    }
+  }, [isOpen, deal.id, liveKycData]);
 
   const updateSection = (key: KycSectionKey, patch: Partial<SectionState>) =>
     setSections(prev => ({ ...prev, [key]: { ...prev[key], ...patch } }));
@@ -648,11 +695,16 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
     const newStatus: SectionStatus = sections[key].status === mark ? 'unchecked' : mark;
     updateSection(key, {
       viewedOnce: true,
+      expanded: newStatus === 'wrong' ? true : sections[key].expanded,
       status: newStatus,
       reason: newStatus !== 'wrong' ? '' : sections[key].reason,
       reviewedBy: user?.email || 'IRM Officer',
       reviewedAt: new Date().toISOString(),
     });
+    // If marked wrong, automatically open edit mode for this section
+    if (newStatus === 'wrong' && key !== 'liveness') {
+      setEditingSections(prev => ({ ...prev, [key]: true }));
+    }
   };
 
   const handleQuickVerifyAll = () => {
@@ -781,6 +833,375 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
     }
   };
 
+  const handleSaveSectionDetails = async (key: KycSectionKey) => {
+    setSavingSection(key);
+    try {
+      const payload: Record<string, any> = {
+        correctedSection: key,
+      };
+      if (key === 'pan') {
+        payload.panNumber = editValues.panNumber;
+        payload.nameAsPerPan = editValues.nameAsPerPan;
+        payload.fatherName = editValues.fatherName;
+      } else if (key === 'aadhaar') {
+        payload.aadhaarNumber = editValues.aadhaarNumber;
+        payload.dateOfBirth = editValues.dob;
+        payload.addressLine1 = editValues.address;
+        payload.city = editValues.city;
+        payload.pincode = editValues.pincode;
+        payload.nameAsPerPan = editValues.nameAsPerPan;
+      } else if (key === 'bank') {
+        payload.bankName = editValues.bankName;
+        payload.accountNumber = editValues.accountNumber;
+        payload.ifscCode = editValues.ifscCode;
+        payload.accountType = editValues.accountType;
+        payload.accountHolderName = editValues.accountHolderName;
+        payload.branchName = editValues.branchName;
+      } else if (key === 'demat') {
+        payload.hasNoDemat = editValues.hasNoDemat;
+        payload.dpId = editValues.dpId;
+        payload.dematClientId = editValues.dematClientId;
+        payload.dematAccountNumber = editValues.dematAccountNumber;
+        payload.dematDepository = editValues.dematDepository;
+      } else if (key === 'nominee') {
+        payload.nomineesJson = JSON.stringify(editValues.nominees || []);
+      }
+
+      if (!isMockMode() && resolvedKycId && (/^\d+$/.test(String(resolvedKycId)) || typeof resolvedKycId === 'number')) {
+        const res = await fetch(`/api/irm/kyc/${resolvedKycId}/details`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            setLiveKycData((prev: any) => ({ ...prev, ...json.data }));
+          }
+        }
+      }
+
+      // Also update local storage so it persists in offline/demo modes
+      const kycStorageKey = `nexus_kyc_data_${deal.id}`;
+      try {
+        const raw = localStorage.getItem(kycStorageKey);
+        const parsed = raw ? JSON.parse(raw) : {};
+        localStorage.setItem(kycStorageKey, JSON.stringify({ ...parsed, ...payload }));
+      } catch {}
+
+      window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
+      onShowToast(`${SECTION_LABELS[key]} details updated and saved successfully!`);
+      setEditingSections(prev => ({ ...prev, [key]: false }));
+    } catch (err: any) {
+      onShowToast(`Failed to update ${SECTION_LABELS[key]}: ${err.message || 'Unknown error'}`);
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const renderSectionEditForm = (key: KycSectionKey) => {
+    return (
+      <div className="kvm-edit-card">
+        <div className="kvm-edit-title">
+          <Edit3 size={13} /> Edit &amp; Correct {SECTION_LABELS[key]}
+        </div>
+
+        {key === 'pan' && (
+          <div className="kvm-edit-grid">
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">PAN Number *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                maxLength={10}
+                placeholder="ABCDE1234F"
+                value={editValues.panNumber || ''}
+                onChange={e => setEditValues(p => ({ ...p, panNumber: e.target.value.toUpperCase() }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Name as per PAN *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Full Name on PAN"
+                value={editValues.nameAsPerPan || ''}
+                onChange={e => setEditValues(p => ({ ...p, nameAsPerPan: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Father's Name</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Father's Name"
+                value={editValues.fatherName || ''}
+                onChange={e => setEditValues(p => ({ ...p, fatherName: e.target.value }))}
+              />
+            </div>
+          </div>
+        )}
+
+        {key === 'aadhaar' && (
+          <div className="kvm-edit-grid">
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Aadhaar Number *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                maxLength={14}
+                placeholder="12 digit Aadhaar"
+                value={editValues.aadhaarNumber || ''}
+                onChange={e => setEditValues(p => ({ ...p, aadhaarNumber: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Date of Birth</label>
+              <input
+                type="date"
+                className="kvm-edit-input"
+                value={editValues.dob || ''}
+                onChange={e => setEditValues(p => ({ ...p, dob: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group" style={{ gridColumn: 'span 2' }}>
+              <label className="kvm-edit-label">Permanent Address</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="House / Street / Area"
+                value={editValues.address || ''}
+                onChange={e => setEditValues(p => ({ ...p, address: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">City</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="City"
+                value={editValues.city || ''}
+                onChange={e => setEditValues(p => ({ ...p, city: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Pincode</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                maxLength={6}
+                placeholder="Pincode"
+                value={editValues.pincode || ''}
+                onChange={e => setEditValues(p => ({ ...p, pincode: e.target.value }))}
+              />
+            </div>
+          </div>
+        )}
+
+        {key === 'bank' && (
+          <div className="kvm-edit-grid">
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Account Holder Name *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Account Holder Name"
+                value={editValues.accountHolderName || ''}
+                onChange={e => setEditValues(p => ({ ...p, accountHolderName: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Bank Name *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Bank Name (e.g. HDFC Bank)"
+                value={editValues.bankName || ''}
+                onChange={e => setEditValues(p => ({ ...p, bankName: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Account Number *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Bank Account Number"
+                value={editValues.accountNumber || ''}
+                onChange={e => setEditValues(p => ({ ...p, accountNumber: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">IFSC Code *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                maxLength={11}
+                placeholder="e.g. HDFC0001234"
+                value={editValues.ifscCode || ''}
+                onChange={e => setEditValues(p => ({ ...p, ifscCode: e.target.value.toUpperCase() }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Account Type</label>
+              <select
+                className="kvm-edit-input"
+                value={editValues.accountType || 'Savings Account'}
+                onChange={e => setEditValues(p => ({ ...p, accountType: e.target.value }))}
+              >
+                <option value="Savings Account">Savings Account</option>
+                <option value="Current Account">Current Account</option>
+                <option value="NRE / NRO">NRE / NRO Account</option>
+              </select>
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Branch Name</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Branch / Location"
+                value={editValues.branchName || ''}
+                onChange={e => setEditValues(p => ({ ...p, branchName: e.target.value }))}
+              />
+            </div>
+          </div>
+        )}
+
+        {key === 'demat' && (
+          <div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(editValues.hasNoDemat)}
+                  onChange={e => setEditValues(p => ({ ...p, hasNoDemat: e.target.checked }))}
+                />
+                <span>Waive Demat (Investor has no Demat Account — Mutual Funds / Direct Only)</span>
+              </label>
+            </div>
+            {!editValues.hasNoDemat && (
+              <div className="kvm-edit-grid">
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Depository</label>
+                  <select
+                    className="kvm-edit-input"
+                    value={editValues.dematDepository || 'CDSL'}
+                    onChange={e => setEditValues(p => ({ ...p, dematDepository: e.target.value }))}
+                  >
+                    <option value="CDSL">CDSL</option>
+                    <option value="NSDL">NSDL</option>
+                  </select>
+                </div>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">DP ID</label>
+                  <input
+                    type="text"
+                    className="kvm-edit-input"
+                    placeholder="DP ID (e.g. 12081600)"
+                    value={editValues.dpId || ''}
+                    onChange={e => setEditValues(p => ({ ...p, dpId: e.target.value }))}
+                  />
+                </div>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Client ID / Demat A/C No.</label>
+                  <input
+                    type="text"
+                    className="kvm-edit-input"
+                    placeholder="Client ID (8 digits)"
+                    value={editValues.dematClientId || editValues.dematAccountNumber || ''}
+                    onChange={e => setEditValues(p => ({ ...p, dematClientId: e.target.value, dematAccountNumber: e.target.value }))}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {key === 'nominee' && (
+          <div>
+            {(editValues.nominees || []).map((nom: any, nIdx: number) => (
+              <div key={nIdx} className="kvm-edit-grid" style={{ marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid #f1f5f9' }}>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Nominee #{nIdx + 1} Name</label>
+                  <input
+                    type="text"
+                    className="kvm-edit-input"
+                    value={nom.name || ''}
+                    onChange={e => {
+                      const updated = [...(editValues.nominees || [])];
+                      updated[nIdx] = { ...updated[nIdx], name: e.target.value };
+                      setEditValues(p => ({ ...p, nominees: updated }));
+                    }}
+                  />
+                </div>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Relationship</label>
+                  <input
+                    type="text"
+                    className="kvm-edit-input"
+                    value={nom.relationship || ''}
+                    onChange={e => {
+                      const updated = [...(editValues.nominees || [])];
+                      updated[nIdx] = { ...updated[nIdx], relationship: e.target.value };
+                      setEditValues(p => ({ ...p, nominees: updated }));
+                    }}
+                  />
+                </div>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Date of Birth</label>
+                  <input
+                    type="date"
+                    className="kvm-edit-input"
+                    value={nom.dob || ''}
+                    onChange={e => {
+                      const updated = [...(editValues.nominees || [])];
+                      updated[nIdx] = { ...updated[nIdx], dob: e.target.value };
+                      setEditValues(p => ({ ...p, nominees: updated }));
+                    }}
+                  />
+                </div>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Share %</label>
+                  <input
+                    type="number"
+                    className="kvm-edit-input"
+                    value={nom.allocationPercentage ?? 100}
+                    onChange={e => {
+                      const updated = [...(editValues.nominees || [])];
+                      updated[nIdx] = { ...updated[nIdx], allocationPercentage: Number(e.target.value) };
+                      setEditValues(p => ({ ...p, nominees: updated }));
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="kvm-edit-actions">
+          <button
+            type="button"
+            className="btn-cancel"
+            onClick={() => setEditingSections(prev => ({ ...prev, [key]: false }))}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-save"
+            disabled={savingSection === key}
+            onClick={() => handleSaveSectionDetails(key)}
+          >
+            <Save size={13} />
+            <span>{savingSection === key ? 'Saving...' : 'Save Correction'}</span>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderSection = (key: KycSectionKey) => {
     const s = sections[key];
     const tickActive = s.status === 'verified';
@@ -801,6 +1222,34 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
             <span className="kvm-section-label">{SECTION_LABELS[key]}</span>
             {tickActive && <span className="kvm-status-chip kvm-status-chip--ok">Correct</span>}
             {crossActive && <span className="kvm-status-chip kvm-status-chip--wrong">Wrong</span>}
+            {canVerify && key !== 'liveness' && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 11,
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                  marginLeft: 'auto',
+                  marginRight: 6,
+                  color: editingSections[key] ? '#dc2626' : 'var(--text-secondary)',
+                  border: editingSections[key] ? '1px solid rgba(239, 68, 68, 0.4)' : undefined,
+                  backgroundColor: editingSections[key] ? 'rgba(239, 68, 68, 0.08)' : undefined,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  updateSection(key, { expanded: true });
+                  setEditingSections(prev => ({ ...prev, [key]: !prev[key] }));
+                }}
+                title={editingSections[key] ? 'Close editor' : 'Edit details for this section'}
+              >
+                <Edit3 size={11} />
+                <span>{editingSections[key] ? 'Cancel Edit' : 'Edit Details'}</span>
+              </button>
+            )}
           </div>
 
           {!s.expanded && (
@@ -834,6 +1283,9 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
               {key === 'demat' && <DematDetails data={mergedData} onViewDoc={handleViewDoc} />}
               {key === 'nominee' && <NomineeDetails data={mergedData} />}
               {key === 'liveness' && <LivenessDetails data={mergedData} onViewDoc={handleViewDoc} />}
+
+              {/* Editable form when editing is toggled or marked wrong */}
+              {editingSections[key] && key !== 'liveness' && renderSectionEditForm(key)}
             </>
           )}
 

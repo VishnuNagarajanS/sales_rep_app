@@ -18,6 +18,7 @@ import {
   AlertCircle,
   Info,
   Lock,
+  Edit3,
 } from 'lucide-react';
 import { Deal } from '../../../types';
 import { normalizeLegacyKycStatus } from '../../../services/kycService';
@@ -39,6 +40,7 @@ interface KycReviewDrawerProps {
   ) => Promise<void>;
   onShowToast: (msg: string) => void;
   isReadOnly?: boolean;
+  onEditKyc?: (deal: Deal) => void;
 }
 
 function maskAadhaar(v?: string | null): string {
@@ -61,6 +63,7 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
   onShowToast,
   onChangeKycStatus,
   isReadOnly = false,
+  onEditKyc,
 }) => {
   const [showCorrectionModal, setShowCorrectionModal] = useState<boolean>(false);
   const [correctionNote, setCorrectionNote] = useState<string>(
@@ -369,10 +372,10 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
   const handleSendCorrection = async () => {
     if (liveKyc?.id) {
       try {
-        const res = await fetch(`/api/irm/kyc/${liveKyc.id}/review`, {
-          method: 'POST',
+        const res = await fetch(`/api/irm/kyc/${liveKyc.id}/status`, {
+          method: 'PATCH',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ action: 'ReuploadRequested', remarks: correctionNote }),
+          body: JSON.stringify({ status: 'Wrong', comment: correctionNote }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -1036,14 +1039,37 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
             </button>
           ) : (
             <>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setShowCorrectionModal(true)}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              >
-                <AlertTriangle size={14} color="#f59e0b" /> Request Correction
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowCorrectionModal(true)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  <AlertTriangle size={14} color="#f59e0b" /> Request Correction
+                </button>
+                {onEditKyc && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      onClose();
+                      onEditKyc(deal);
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      color: '#7c3aed',
+                      borderColor: 'rgba(124, 58, 237, 0.4)',
+                      fontWeight: 600,
+                    }}
+                    title="Open Assisted KYC Form to edit details directly"
+                  >
+                    <Edit3 size={14} color="#7c3aed" /> Edit Details
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 className="btn btn-primary"

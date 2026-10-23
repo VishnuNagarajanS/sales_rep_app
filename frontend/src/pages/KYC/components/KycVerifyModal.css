@@ -671,3 +671,132 @@
     align-items: flex-start;
   }
 }
+
+/* ── Inline Edit Card for Wrong Details ── */
+.kvm-edit-card {
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: rgba(239, 68, 68, 0.05);
+  border: 1.5px solid rgba(239, 68, 68, 0.4);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+
+.kvm-edit-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ef4444;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.kvm-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.kvm-edit-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.kvm-edit-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.kvm-edit-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  border-radius: 6px;
+  border: 1.5px solid var(--border-base, #334155);
+  background: var(--bg-surface, #1e293b) !important;
+  color: var(--text-primary, #f8fafc) !important;
+  outline: none;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.kvm-edit-input:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25) !important;
+}
+
+.kvm-edit-input::placeholder {
+  color: var(--text-muted, #64748b) !important;
+  opacity: 0.8;
+}
+
+select.kvm-edit-input {
+  cursor: pointer;
+}
+
+select.kvm-edit-input option {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+.kvm-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-base, rgba(255, 255, 255, 0.12));
+}
+
+.kvm-edit-actions .btn-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-base, #334155);
+  color: var(--text-secondary, #94a3b8);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.kvm-edit-actions .btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+.kvm-edit-actions .btn-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+  background: #dc2626;
+  border: 1px solid #dc2626;
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(220, 38, 38, 0.35);
+  transition: all 0.15s ease;
+}
+
+.kvm-edit-actions .btn-save:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.kvm-edit-actions .btn-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

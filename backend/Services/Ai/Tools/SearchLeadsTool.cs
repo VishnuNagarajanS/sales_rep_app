@@ -34,6 +34,11 @@ namespace backend.Services.Ai.Tools
 
             var query = db.Leads.AsNoTracking().Where(l => l.CompanyId == scope.CompanyId);
 
+            if (!scope.IsAdmin)
+            {
+                query = query.Where(l => l.AssignedAgentId == scope.UserId);
+            }
+
             if (!string.IsNullOrEmpty(args.DateFrom) || !string.IsNullOrEmpty(args.DateTo))
             {
                 var clock = services.GetRequiredService<backend.Services.Interfaces.ICompanyClock>();

@@ -22,6 +22,7 @@ import {
   Layers,
   Users,
   Edit2,
+  Edit3,
   Send,
   RefreshCw,
   UserCheck,
@@ -1213,6 +1214,27 @@ const GhlIrmKycView: React.FC = () => {
     startKycFlow(deal, targetStep, true);
   };
 
+  const handleCorrectKycDetails = (deal: Deal) => {
+    // Determine the flagged step from flaggedSections or remarks
+    const flagged = (deal.flaggedSections || []).map(s => String(s).toLowerCase());
+    const remarks = String(deal.remarks || '').toLowerCase();
+    let targetStep: 1 | 2 | 3 | 4 | 5 = 2; // Default to identity (PAN/Aadhaar)
+
+    if (flagged.some(s => s.includes('bank')) || remarks.includes('bank') || remarks.includes('ifsc') || remarks.includes('account')) {
+      targetStep = 3;
+    } else if (flagged.some(s => s.includes('demat')) || remarks.includes('demat') || remarks.includes('dp')) {
+      targetStep = 4;
+    } else if (flagged.some(s => s.includes('nominee')) || remarks.includes('nominee')) {
+      targetStep = 5;
+    } else if (flagged.some(s => s.includes('pan') || s.includes('aadhaar') || s.includes('identity')) || remarks.includes('pan') || remarks.includes('aadhaar')) {
+      targetStep = 2;
+    } else if (flagged.some(s => s.includes('basic') || s.includes('personal'))) {
+      targetStep = 1;
+    }
+
+    startAssistedKycFlow(deal, targetStep);
+  };
+
   /** Uploads a KYC document file to the server (once) and returns its stored URL. */
   const uploadKycDoc = async (
     doc: KycDoc | null,
@@ -2220,18 +2242,53 @@ const GhlIrmKycView: React.FC = () => {
       header: 'KYC Status',
       width: '160px',
       render: deal => {
-        const custStatus = resolveCustomerKycStatus(deal);
+        const displayStatus = normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy);
+        const isVerified = displayStatus === 'Verified';
+        const isWrong = displayStatus === 'Wrong';
+        const isPending = !isVerified && !isWrong;
+
         return (
-          <KycStatusDropdown
-            deal={deal}
-            customerKycStatus={custStatus}
-            hideArrow={isGhlAdmin}
-            disablePopup={isGhlAdmin}
-            onChange={(status, comment, flaggedSections, checklist) =>
-              handleStatusChange(deal, status, comment, flaggedSections, checklist)
-            }
-            onShowToast={(msg) => showToast(msg)}
-          />
+          <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 10px',
+                borderRadius: 12,
+                fontSize: 11,
+                fontWeight: 700,
+                background: isVerified
+                  ? 'rgba(16, 185, 129, 0.15)'
+                  : isWrong
+                  ? 'rgba(239, 68, 68, 0.15)'
+                  : 'rgba(245, 158, 11, 0.15)',
+                color: isVerified
+                  ? '#10B981'
+                  : isWrong
+                  ? '#EF4444'
+                  : '#F59E0B',
+                border: isVerified
+                  ? '1px solid rgba(16, 185, 129, 0.35)'
+                  : isWrong
+                  ? '1px solid rgba(239, 68, 68, 0.35)'
+                  : '1px solid rgba(245, 158, 11, 0.35)',
+                whiteSpace: 'nowrap',
+                cursor: 'default',
+              }}
+              title={`KYC Status: ${displayStatus}`}
+            >
+              {isVerified && <ShieldCheck size={12} />}
+              {isWrong && <AlertCircle size={12} />}
+              {isPending && <Clock size={12} />}
+              <span>{displayStatus}</span>
+            </span>
+            {isVerified && deal.verifiedBy && (
+              <span style={{ fontSize: 9.5, color: 'var(--text-muted, #94a3b8)', marginTop: 1 }}>
+                by {deal.verifiedBy.split('@')[0]}
+              </span>
+            )}
+          </div>
         );
       },
     },
@@ -2392,26 +2449,22 @@ const GhlIrmKycView: React.FC = () => {
           );
         }
 
-        // IRM-verified: show professional Verified badge with checkmark
+        // IRM-verified: show prominent "Move to Opportunity" action button directly in the row
         if (status === 'Verified') {
           return (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '3px 10px',
-                borderRadius: 20,
-                fontSize: 12,
-                fontWeight: 600,
-                backgroundColor: 'rgba(16,185,129,0.1)',
-                color: '#059669',
-                border: '1px solid rgba(16,185,129,0.3)',
+            <button
+              type="button"
+              className="kyc-advance-btn"
+              title="KYC Verified — Click to advance investor to Investment Opportunities stage"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                handleAdvanceStage(deal);
               }}
-              title="KYC verified by IRM"
             >
-              <CheckCircle size={12} /> Verified
-            </span>
+              <span>Move to Opportunity</span>
+              <ArrowRight size={13} />
+            </button>
           );
         }
 
@@ -2536,6 +2589,45 @@ const GhlIrmKycView: React.FC = () => {
           );
         }
 
+        // Needs Correction / Wrong: show prominent "Correct Details" button so it can be edited
+        if (status === 'Needs Correction' || deal.kycStatus === 'Wrong') {
+          return (
+            <div
+              className="kyc-stage-action-group"
+              onClick={e => e.stopPropagation()}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <button
+                type="button"
+                className="kyc-advance-btn"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '5px 12px',
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  color: '#dc2626',
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+                title="KYC marked Wrong — Click to edit and correct flagged details"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  handleCorrectKycDetails(deal);
+                }}
+              >
+                <Edit3 size={13} color="#dc2626" />
+                <span>Correct Details</span>
+              </button>
+            </div>
+          );
+        }
+
         const isResend = ['Link Sent', 'In Progress', 'Needs Correction', 'Rejected'].includes(status);
         const isIrmRole = user?.role?.code === 'irm';
 
@@ -2562,15 +2654,23 @@ const GhlIrmKycView: React.FC = () => {
       align: 'center',
       render: deal => {
         const kycStatus = getDynamicKycStatus(deal);
+        const resolvedCustomerStatus = resolveCustomerKycStatus(deal);
+        const isVerified =
+          normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' ||
+          resolvedCustomerStatus === 'Verified' ||
+          deal.kycStatus === 'Verified';
+
         return (
           <KycRowActionsMenu
             deal={deal}
             isGhlAdmin={isGhlAdmin}
+            isVerified={isVerified}
             onShowToast={msg => showToast(msg)}
-            onAssistedKyc={isGhlAdmin ? undefined : (d => startAssistedKycFlow(d))}
+            onEditKyc={isGhlAdmin || isVerified ? undefined : (d => handleCorrectKycDetails(d))}
+            onAssistedKyc={isGhlAdmin || isVerified ? undefined : (d => startAssistedKycFlow(d))}
             onCallInvestor={canPlaceCalls(user) ? d => initiateCall(d.customerName, d.phone || '', 'customer', d.customerId || d.id, undefined, 'kyc') : undefined}
-            // Only show "Advance to Opportunity" after KYC is fully completed (not available in Admin oversight mode)
-            onAdvanceStage={!isGhlAdmin && normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' ? d => handleAdvanceStage(d) : undefined}
+            // Also available in menu as fallback (not available in Admin oversight mode)
+            onAdvanceStage={!isGhlAdmin && isVerified ? d => handleAdvanceStage(d) : undefined}
           />
         );
       },
@@ -2774,15 +2874,42 @@ const GhlIrmKycView: React.FC = () => {
                       </span>
                     </div>
                     <div className="kyc-glass-status-row">
-                      <KycStatusDropdown
-                        deal={deal}
-                        customerKycStatus={resolveCustomerKycStatus(deal)}
-                        disablePopup={true}
-                        onChange={(status, comment, flaggedSections, checklist) =>
-                          handleStatusChange(deal, status, comment, flaggedSections, checklist)
-                        }
-                        onShowToast={showToast}
-                      />
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          padding: '4px 10px',
+                          borderRadius: 12,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          background:
+                            normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified'
+                              ? 'rgba(16, 185, 129, 0.15)'
+                              : normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Wrong'
+                              ? 'rgba(239, 68, 68, 0.15)'
+                              : 'rgba(245, 158, 11, 0.15)',
+                          color:
+                            normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified'
+                              ? '#10B981'
+                              : normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Wrong'
+                              ? '#EF4444'
+                              : '#F59E0B',
+                          border:
+                            normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified'
+                              ? '1px solid rgba(16, 185, 129, 0.35)'
+                              : normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Wrong'
+                              ? '1px solid rgba(239, 68, 68, 0.35)'
+                              : '1px solid rgba(245, 158, 11, 0.35)',
+                          whiteSpace: 'nowrap',
+                          cursor: 'default',
+                        }}
+                      >
+                        {normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Verified' && <ShieldCheck size={12} />}
+                        {normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Wrong' && <AlertCircle size={12} />}
+                        {normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy) === 'Pending' && <Clock size={12} />}
+                        <span>{normalizeLegacyKycStatus(deal.kycStatus, deal.verifiedBy)}</span>
+                      </span>
                       {deal.kycStatus === 'Verified' && (deal.verifiedBy || deal.verifiedAt) && (
                         <span className="kyc-glass-verified-stamp">
                           <CheckCircle size={12} /> Verified by {deal.verifiedBy ? deal.verifiedBy.split('@')[0] : 'IRM'}
@@ -4790,7 +4917,15 @@ const GhlIrmKycView: React.FC = () => {
       />
 
       {/* Review Customer KYC Drawer */}
-      <KycReviewDrawer isOpen={!!reviewDeal} onClose={() => setReviewDeal(null)} deal={reviewDeal} onShowToast={showToast} onChangeKycStatus={handleStatusChange} isReadOnly={isGhlAdmin} />
+      <KycReviewDrawer
+        isOpen={!!reviewDeal}
+        onClose={() => setReviewDeal(null)}
+        deal={reviewDeal}
+        onShowToast={showToast}
+        onChangeKycStatus={handleStatusChange}
+        isReadOnly={isGhlAdmin}
+        onEditKyc={handleCorrectKycDetails}
+      />
 
       {/* ── Assisted KYC Review & Consent Confirmation Modal ── */}
       <Modal

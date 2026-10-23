@@ -325,12 +325,42 @@ export const IrmReportsView: React.FC = () => {
     return deals.filter(d => d.stage === 'qualified_investor' && isMyRecord(d.assignedAgentId, d.assignedAgentName));
   }, [deals, isMyRecord]);
 
-  const totalKycTargetCount = qualifiedKycDeals.length > 0 ? qualifiedKycDeals.length : (scopedKycs.length || 0);
+  // Collect keys of investors/leads that have graduated/moved forward past KYC (Opportunities, Converted, etc.)
+  const movedKycKeys = useMemo(() => {
+    const keys = new Set<string>();
+    deals
+      .filter(d => isMyRecord(d.assignedAgentId, d.assignedAgentName))
+      .forEach(d => {
+        const stage = (d.stage || '').toLowerCase().trim();
+        if (stage === 'investment_opportunity' || stage === 'opportunity' || stage === 'term_sheet' || stage === 'committed' || stage === 'converted' || stage === 'won' || stage === 'lost') {
+          const ph = (d.phone || '').replace(/\D/g, '').slice(-10);
+          if (ph) keys.add(ph);
+          if (d.customerId) keys.add(`cid:${d.customerId}`);
+        }
+      });
+    (scopedInvestors || []).forEach(i => {
+      const ph = (i.phone || '').replace(/\D/g, '').slice(-10);
+      if (ph) keys.add(ph);
+      if (i.id) keys.add(`cid:${i.id}`);
+    });
+    return keys;
+  }, [deals, scopedInvestors, isMyRecord]);
+
+  const activeScopedKycs = useMemo(() => {
+    return scopedKycs.filter(k => {
+      const ph = (k.phone || '').replace(/\D/g, '').slice(-10);
+      const invId = k.investorId ? `cid:${k.investorId}` : '';
+      if ((ph && movedKycKeys.has(ph)) || (invId && movedKycKeys.has(invId))) return false;
+      return true;
+    });
+  }, [scopedKycs, movedKycKeys]);
+
+  const totalKycTargetCount = qualifiedKycDeals.length > 0 ? qualifiedKycDeals.length : (activeScopedKycs.length || 0);
 
   // 2. KYC Compliance & Clearance Health
   const kycVerified = useMemo(() => {
     const verifiedDbIds = new Set(
-      scopedKycs
+      activeScopedKycs
         .filter(k => (k.status || '').toLowerCase() === 'verified' || (k.status || '').toLowerCase() === 'approved')
         .map(k => String(k.investorId || k.id))
     );
@@ -338,31 +368,31 @@ export const IrmReportsView: React.FC = () => {
       const status = ((d as any).kycStatus || (d as any).customerKycStatus || '').toLowerCase();
       return status === 'verified' || status === 'approved' || verifiedDbIds.has(String(d.customerId || d.id));
     });
-    return verifiedDeals.length > 0 ? verifiedDeals : scopedKycs.filter(k => (k.status || '').toLowerCase() === 'verified');
-  }, [scopedKycs, qualifiedKycDeals]);
+    return verifiedDeals.length > 0 ? verifiedDeals : activeScopedKycs.filter(k => (k.status || '').toLowerCase() === 'verified' || (k.status || '').toLowerCase() === 'approved');
+  }, [activeScopedKycs, qualifiedKycDeals]);
 
   const kycInReview = useMemo(() => {
-    return scopedKycs.filter(k => {
+    return activeScopedKycs.filter(k => {
       const s = (k.status || '').toLowerCase();
       return s === 'in_review' || s === 'under_review' || s === 'in-review' || s === 'submitted';
     });
-  }, [scopedKycs]);
+  }, [activeScopedKycs]);
 
   const kycRejected = useMemo(() => {
-    return scopedKycs.filter(k => (k.status || '').toLowerCase() === 'rejected');
-  }, [scopedKycs]);
+    return activeScopedKycs.filter(k => (k.status || '').toLowerCase() === 'rejected');
+  }, [activeScopedKycs]);
 
   const kycPending = useMemo(() => {
     const pendingDeals = qualifiedKycDeals.filter(d => !kycVerified.some(v => v.id === d.id));
-    return pendingDeals.length > 0 ? pendingDeals : scopedKycs.filter(k => {
+    return pendingDeals.length > 0 ? pendingDeals : activeScopedKycs.filter(k => {
       const s = (k.status || '').toLowerCase();
       return s === 'initiated' || s === 'draft' || s === 'pending' || !s;
     });
-  }, [scopedKycs, qualifiedKycDeals, kycVerified]);
+  }, [activeScopedKycs, qualifiedKycDeals, kycVerified]);
 
   const kycClearanceRate = totalKycTargetCount > 0
     ? Math.round((kycVerified.length / totalKycTargetCount) * 100)
-    : 100;
+    : 0;
 
   // 3. Active Pipeline Opportunities
   const activeOpps = useMemo(() => {

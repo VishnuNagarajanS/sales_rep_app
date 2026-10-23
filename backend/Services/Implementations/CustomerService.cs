@@ -381,7 +381,7 @@ public class CustomerService : ICustomerService
         {
             Id = c.Id,
             CompanyId = c.CompanyId,
-            AssignedAgentId = c.AssignedAgentId,
+            AssignedAgentId = c.AssignedAgentId ?? 0,
             AssignedAgentName = c.AssignedAgent?.Name,
             Name = c.Name,
             Phone = c.Phone,

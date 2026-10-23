@@ -580,10 +580,46 @@ export const CustomersPage: React.FC = () => {
     return { tier: 'Normal', label: raw || (totalVal > 0 ? formatCurrency(totalVal) : 'Standard Ticket') };
   };
 
+  const getIrmAssignedWorkload = (irm: IrmProfile) => {
+    const irmIdStr = String(irm.id);
+    const irmNameLower = (irm.name || '').trim().toLowerCase();
+
+    const assignedLeads = (leads || []).filter(l =>
+      (l.assignedAgentId && String(l.assignedAgentId) === irmIdStr) ||
+      (l.assignedIrmId && String(l.assignedIrmId) === irmIdStr) ||
+      (l.assignedAgentName && l.assignedAgentName.trim().toLowerCase() === irmNameLower) ||
+      (l.assignedIrmName && l.assignedIrmName.trim().toLowerCase() === irmNameLower) ||
+      (l.customFields?.assignedIrmId && String(l.customFields.assignedIrmId) === irmIdStr) ||
+      (l.customFields?.assignedIrmName && String(l.customFields.assignedIrmName).trim().toLowerCase() === irmNameLower)
+    );
+
+    const assignedCustomers = (allCustomers || []).filter(c =>
+      (c.assignedIrmId && String(c.assignedIrmId) === irmIdStr) ||
+      (c.assignedIrmName && c.assignedIrmName.trim().toLowerCase() === irmNameLower) ||
+      (c.assignedAgentId && String(c.assignedAgentId) === irmIdStr && (c as any).assignedAgentRole === 'irm')
+    );
+
+    const convertedCount = assignedLeads.filter(l => (l.status || '').toLowerCase() === 'converted').length;
+    const activeLeadsCount = assignedLeads.filter(l => (l.status || '').toLowerCase() !== 'converted').length;
+    const totalCount = assignedLeads.length + assignedCustomers.length;
+
+    const workload: 'Low' | 'Medium' | 'High' =
+      totalCount === 0 ? 'Low' : totalCount <= 3 ? 'Medium' : 'High';
+
+    return {
+      totalCount,
+      assignedLeadsCount: assignedLeads.length,
+      activeLeadsCount,
+      convertedCount,
+      customersCount: assignedCustomers.length,
+      workload,
+    };
+  };
+
   const runAutoAssignmentAlgorithm = (custs: Customer[], activeIrms = irms): AutoRecommendation[] => {
     const liveCountMap: Record<string, number> = {};
     activeIrms.forEach((irm: IrmProfile) => {
-      liveCountMap[irm.id] = allCustomers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
+      liveCountMap[irm.id] = getIrmAssignedWorkload(irm).totalCount;
     });
 
     const tierPriority = { Premium: 5, 'Very High': 4, High: 3, Medium: 2, Normal: 1 };
@@ -1986,8 +2022,7 @@ export const CustomersPage: React.FC = () => {
               </div>
             ) : (
               irms.map((irm: IrmProfile) => {
-                const currentCount = allCustomers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
-                const workload = currentCount <= 2 ? 'Low' : currentCount <= 5 ? 'Medium' : 'High';
+                const workloadInfo = getIrmAssignedWorkload(irm);
                 const isSelected = selectedIrmId === irm.id;
 
                 return (
@@ -2012,15 +2047,24 @@ export const CustomersPage: React.FC = () => {
                     {/* Col 2 – IRM Info */}
                     <div className="irm-col-info">
                       <div className="irm-item-name">{irm.name}</div>
-                      <div className="irm-item-meta-row">Experience: <strong>{irm.experience}</strong> ({irm.experienceLevel})</div>
-                      <div className="irm-item-meta-row">Performance: <strong>{irm.performance}%</strong></div>
-                      <div className="irm-item-meta-row">Customers: <strong>{currentCount}</strong></div>
+                      <div className="irm-item-meta-row">Specialization: <strong>{irm.experience || 'Wealth & Private Advisory'}</strong></div>
+                      <div className="irm-item-meta-row">
+                        Assigned Load: <strong>{workloadInfo.totalCount}</strong>
+                        {workloadInfo.totalCount > 0
+                          ? ` (${workloadInfo.assignedLeadsCount} Leads · ${workloadInfo.customersCount} Customers)`
+                          : ' (Available for new prospects)'}
+                      </div>
+                      {workloadInfo.convertedCount > 0 && (
+                        <div className="irm-item-meta-row" style={{ color: '#10b981' }}>
+                          Converted Deals: <strong>{workloadInfo.convertedCount}</strong>
+                        </div>
+                      )}
                     </div>
 
                     {/* Col 3 – Workload */}
                     <div className="irm-col-pill">
-                      <span className={`irm-pill workload-${workload.toLowerCase()}`}>
-                        Workload: {workload}
+                      <span className={`irm-pill workload-${workloadInfo.workload.toLowerCase()}`}>
+                        Workload: {workloadInfo.workload}
                       </span>
                     </div>
 

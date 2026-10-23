@@ -34,26 +34,71 @@ namespace backend.Services.Ai
             _tools[tool.Name] = tool;
         }
 
+        private static bool IsToolAllowedForRole(string toolName, string roleCode)
+        {
+            var role = (roleCode ?? "").ToLowerInvariant();
+            bool isAdmin = role == "company_admin" || role == "super_admin" || role == "admin" || role == "ghl_admin";
+            if (isAdmin) return true;
+
+            if (role == "sales_executive")
+            {
+                return toolName switch
+                {
+                    "search_leads" => true,
+                    "search_followups" => true,
+                    "search_calls" => true,
+                    "search_customers" => true,
+                    "search_company_knowledge" => true,
+                    "search_leave_requests" => true,
+                    "search_work_handovers" => true,
+                    "search_notifications" => true,
+                    "decline_out_of_scope" => true,
+                    _ => false
+                };
+            }
+
+            if (role == "irm")
+            {
+                return toolName switch
+                {
+                    "search_investors" => true,
+                    "search_deals" => true,
+                    "search_consultations" => true,
+                    "search_followups" => true,
+                    "search_calls" => true,
+                    "search_company_knowledge" => true,
+                    "search_leave_requests" => true,
+                    "search_work_handovers" => true,
+                    "search_notifications" => true,
+                    "decline_out_of_scope" => true,
+                    _ => false
+                };
+            }
+
+            return false;
+        }
+
         public List<LlmTool> GetToolsForRole(string roleCode)
         {
-            // For now, only admin tools
-            return _tools.Values.Select(t => new LlmTool
-            {
-                Type = "function",
-                Function = new LlmFunction
+            return _tools.Values
+                .Where(t => IsToolAllowedForRole(t.Name, roleCode))
+                .Select(t => new LlmTool
                 {
-                    Name = t.Name,
-                    Description = t.Description,
-                    Parameters = t.Parameters
-                }
-            }).ToList();
+                    Type = "function",
+                    Function = new LlmFunction
+                    {
+                        Name = t.Name,
+                        Description = t.Description,
+                        Parameters = t.Parameters
+                    }
+                }).ToList();
         }
 
         public async Task<string> ExecuteToolAsync(string name, string arguments, AiDataScope scope, IServiceProvider services, CancellationToken ct)
         {
-            if (!_tools.TryGetValue(name, out var tool))
+            if (!_tools.TryGetValue(name, out var tool) || !IsToolAllowedForRole(name, scope.RoleCode))
             {
-                return "{\"error\":\"Tool not found or forbidden\"}";
+                return "{\"error\":\"Tool not found or forbidden for your role\"}";
             }
 
             try

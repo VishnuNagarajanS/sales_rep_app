@@ -96,14 +96,14 @@ Content-Type: application/json
   "isFinalSubmit": true
 }
 
-### Review KYC (Approve / Reject / ReuploadRequested)
-POST {{host}}/api/irm/kyc/1/review
+### Update KYC Status (Verified / Wrong / Pending)
+PATCH {{host}}/api/irm/kyc/1/status
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "action": "Approved",
-  "remarks": "PAN & Bank verified successfully. Investor cleared for Category II AIF."
+  "status": "Verified",
+  "comment": "PAN & Bank verified successfully. Investor cleared for Category II AIF."
 }
 
 ### ─────────────────────────────────────────────────────────────

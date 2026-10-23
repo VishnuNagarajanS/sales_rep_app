@@ -285,12 +285,14 @@ export const KycStatusDropdown: React.FC<Props> = ({
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
         <button
           type="button"
-          disabled={!canVerify || loading}
+          disabled={!canVerify || loading || disablePopup}
           onClick={() => {
-            if (canVerify && !loading) setIsOpen(!isOpen);
+            if (canVerify && !loading && !disablePopup) setIsOpen(!isOpen);
           }}
           title={
-            !canVerify
+            disablePopup
+              ? `KYC Status: ${displayStatus}`
+              : !canVerify
               ? 'Read-only: You do not have permission to verify KYC'
               : 'Click to change KYC status'
           }
@@ -305,13 +307,13 @@ export const KycStatusDropdown: React.FC<Props> = ({
             background: C.bg,
             color: C.text,
             border: `1px solid ${C.border}`,
-            cursor: canVerify && !loading ? 'pointer' : 'not-allowed',
+            cursor: canVerify && !loading && !disablePopup ? 'pointer' : 'default',
             opacity: loading ? 0.7 : 1,
             transition: 'all 0.15s ease',
           }}
         >
           <Icon size={12} /> {displayStatus}
-          {canVerify && !hideArrow && <ChevronDown size={12} style={{ marginLeft: 2, opacity: 0.8 }} />}
+          {canVerify && !hideArrow && !disablePopup && <ChevronDown size={12} style={{ marginLeft: 2, opacity: 0.8 }} />}
         </button>
       </div>
 

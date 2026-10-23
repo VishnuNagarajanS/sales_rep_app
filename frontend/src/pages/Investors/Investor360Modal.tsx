@@ -609,7 +609,19 @@ export const Investor360Modal: React.FC<Investor360ModalProps> = ({
                   </div>
                   <div className="iv-grid-item">
                     <span>Preferred Asset Class</span>
-                    <b>{investor.preferredAssetClass && investor.preferredAssetClass !== '—' ? investor.preferredAssetClass : <span className="not-specified-badge">Not Specified</span>}</b>
+                    <b>{(() => {
+                      const raw = (investor.preferredAssetClass || '').trim();
+                      if (raw) {
+                        const l = raw.toLowerCase();
+                        if (l.includes('debenture')) return 'Debenture';
+                        if (l.includes('direct') || l === 'aif') return 'Direct AIF';
+                        return raw;
+                      }
+                      const mandate = (investor.investmentMandate || '').toLowerCase();
+                      if (mandate.includes('debenture')) return 'Debenture';
+                      if (mandate.includes('direct')) return 'Direct AIF';
+                      return <span className="not-specified-badge">Not Specified</span>;
+                    })()}</b>
                   </div>
                   <div className="iv-grid-item">
                     <span>Investment Mandate</span>

@@ -34,6 +34,11 @@ namespace backend.Services.Ai.Tools
 
             var query = db.LeaveRequests.AsNoTracking().Where(l => l.CompanyId == scope.CompanyId);
 
+            if (!scope.IsAdmin)
+            {
+                query = query.Where(l => l.UserId == scope.UserId);
+            }
+
             if (!string.IsNullOrEmpty(args.Status))
             {
                 var lowerStatus = args.Status.ToLower();

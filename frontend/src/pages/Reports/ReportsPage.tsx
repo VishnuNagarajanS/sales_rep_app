@@ -89,7 +89,7 @@ export const ReportsPage: React.FC = () => {
   };
 
   // Filter leads by selected period using lead.createdAt
-  const isWithinPeriod = (dateStr: string, p: 'week' | 'month' | 'quarter'): boolean => {
+  const isWithinPeriod = (dateStr?: string | null, p: 'week' | 'month' | 'quarter' = 'month'): boolean => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return false;

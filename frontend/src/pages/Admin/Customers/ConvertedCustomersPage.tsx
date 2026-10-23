@@ -719,10 +719,10 @@ export const ConvertedCustomersPage: React.FC<ConvertedCustomersPageProps> = ({ 
           <div className="cc-pagination">
             <div className="cc-page-info">
               Showing{' '}
-              <strong style={{ color: '#f1f5f9' }}>
+              <strong style={{ color: 'var(--cc-text-main, currentColor)' }}>
                 {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalCount)}
               </strong>{' '}
-              of <strong style={{ color: '#f1f5f9' }}>{totalCount}</strong> converted customers
+              of <strong style={{ color: 'var(--cc-text-main, currentColor)' }}>{totalCount}</strong> converted customers
             </div>
 
             <div className="cc-page-controls">

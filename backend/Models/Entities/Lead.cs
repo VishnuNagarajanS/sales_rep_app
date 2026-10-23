@@ -9,6 +9,12 @@ public class Lead
 
     public int? AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
+    public string? AssignedAgentName { get; set; }
+
+    // Multi-tenant compatibility
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public int TenantId { get => CompanyId; set => CompanyId = value; }
+
     public DateTime? AssignedAt { get; set; }
     public int? AssignedById { get; set; }
     public User? AssignedBy { get; set; }
@@ -31,10 +37,26 @@ public class Lead
     public string Priority { get; set; } = "Medium"; // Low, Medium, High, Urgent
     public string Notes { get; set; } = string.Empty;
 
+    // Jamin Bazaar / Website intake fields
+    public string? TargetDevelopment { get; set; }
+    public string? PreferredVisitDate { get; set; }
+    public string? PreferredTimeSlot { get; set; }
+    public string? AnythingWeShouldKnow { get; set; }
+    public string? WhatAreYouLookingFor { get; set; }
+    public string? BudgetRange { get; set; }
+    public string? ReadyToRegister { get; set; }
+    public string? InvestmentCapacity { get; set; }
+    public string? AssetClass { get; set; }
+    public string? Horizon { get; set; }
+    public string? InvestorType { get; set; }
+
     // GHL Custom Fields (e.g. investmentCapacity, assetClass, preferredAssetClass, horizon, dispositionReason)
     public string? CustomFieldsJson { get; set; }
 
     public DateTime? NextFollowupDate { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
+
+    public ICollection<SiteVisit> SiteVisits { get; set; } = new List<SiteVisit>();
+    public ICollection<JaminBooking> Bookings { get; set; } = new List<JaminBooking>();
 }

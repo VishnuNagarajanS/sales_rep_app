@@ -291,7 +291,7 @@ export const PlatformDashboardPage: React.FC<PlatformDashboardPageProps> = ({ on
           </div>
         </div>
 
-        <div className="card platform-telemetry-card">
+        <div className="card platform-telemetry-card" onClick={() => onNavigate('admin-leads')} style={{ cursor: 'pointer' }} title="Click to view all Platform Leads">
           <div className="telemetry-card-top">
             <span className="platform-telemetry-label">TOTAL LEADS MANAGED</span>
             <div className="telemetry-icon-box bg-emerald-glow">

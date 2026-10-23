@@ -33,6 +33,7 @@ import {
   getOpportunities,
   getIrmOtherRecords,
 } from '../../../services/ghlApiService';
+import { fetchIrmAllLeads, IrmAllLeadsSummary } from '../../../services/irmAllLeadsService';
 import { apiUrl } from '../../../utils/apiUrl';
 import { getAuthHeaders } from '../../../utils/authHeaders';
 import { formatSmartScheduleDate, isDateToday, isDateOverdue, isDateDueTodayOrOverdue } from '../../../utils/dateUtils';
@@ -71,6 +72,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
   const [opportunities, setOpportunities] = useState<InvestmentOpportunity[]>([]);
   const [kycs, setKycs] = useState<any[]>([]);
   const [otherRecords, setOtherRecords] = useState<IrmOtherRecord[]>([]);
+  const [irmSummary, setIrmSummary] = useState<IrmAllLeadsSummary | null>(null);
 
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -112,7 +114,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
     else setRefreshing(true);
 
     try {
-      const [l, d, c, f, con, inv, opp, oth] = await Promise.allSettled([
+      const [l, d, c, f, con, inv, opp, oth, allLeadsSum] = await Promise.allSettled([
         getLeads(tenant?.id),
         getDeals(tenant?.id),
         getCalls(tenant?.id),
@@ -121,6 +123,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
         getInvestors(tenant?.id),
         getOpportunities(tenant?.id),
         getIrmOtherRecords(),
+        fetchIrmAllLeads(user?.id, undefined, user?.name, tenant?.id),
       ]);
 
       const getVal = <T,>(res: PromiseSettledResult<T>, fb: T): T =>
@@ -134,6 +137,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
       setInvestors(getVal(inv, []));
       setOpportunities(getVal(opp, []));
       setOtherRecords(getVal(oth, []));
+      setIrmSummary(getVal(allLeadsSum, null));
 
       // Fetch live KYC records from backend
       try {
@@ -157,7 +161,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
       setLoading(false);
       setRefreshing(false);
     }
-  }, [tenant?.id]);
+  }, [tenant?.id, user?.id, user?.name]);
 
   useEffect(() => {
     loadData();
@@ -165,18 +169,25 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
     const handleUpdate = () => loadData(true);
     window.addEventListener('nexus_storage_updated', handleUpdate);
     window.addEventListener('nexus_call_logged', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
 
     return () => {
       window.removeEventListener('nexus_storage_updated', handleUpdate);
       window.removeEventListener('nexus_call_logged', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
     };
   }, [loadData]);
 
   // ── Role Scoping Helper ──────────────────────────────────────────────────────
   const isMine = useCallback((id?: string | number, name?: string) => {
     if (!user) return false;
-    if (id && String(id) === String(user.id)) return true;
-    if (name && user.name && name.trim().toLowerCase() === user.name.trim().toLowerCase()) return true;
+    const uId = String(user.id);
+    const uName = (user.name || '').trim().toLowerCase();
+    if (id && String(id) === uId) return true;
+    if (name) {
+      const n = name.trim().toLowerCase();
+      if (n === uName || n.includes(uName) || uName.includes(n)) return true;
+    }
     return false;
   }, [user]);
 
@@ -185,14 +196,19 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
     if (!user) return false;
     const uId = String(user.id);
     const uName = (user.name || '').trim().toLowerCase();
-    return (
-      (l.assignedIrmId && String(l.assignedIrmId) === uId) ||
-      (l.assignedIrmName && l.assignedIrmName.trim().toLowerCase() === uName) ||
-      (l.customFields?.assignedIrmId && String(l.customFields.assignedIrmId) === uId) ||
-      (l.customFields?.assignedIrmName && String(l.customFields.assignedIrmName).trim().toLowerCase() === uName) ||
-      (l.assignedAgentId && String(l.assignedAgentId) === uId) ||
-      (!!l.assignedAgentName && l.assignedAgentName.trim().toLowerCase() === uName)
-    );
+    const lAgentId = l.assignedAgentId != null ? String(l.assignedAgentId) : '';
+    const lIrmId = l.assignedIrmId != null ? String(l.assignedIrmId) : '';
+    const lAgentName = (l.assignedAgentName || '').trim().toLowerCase();
+    const lIrmName = (l.assignedIrmName || '').trim().toLowerCase();
+
+    if (uId && (lAgentId === uId || lIrmId === uId || String(l.customFields?.assignedIrmId || '') === uId)) return true;
+    if (uName && (
+      lAgentName === uName || lAgentName.includes(uName) || uName.includes(lAgentName) ||
+      lIrmName === uName || lIrmName.includes(uName) || uName.includes(lIrmName) ||
+      String(l.customFields?.assignedIrmName || '').trim().toLowerCase().includes(uName)
+    )) return true;
+
+    return false;
   }, [user]);
 
   // Scoped datasets for the logged-in IRM
@@ -204,11 +220,6 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
   const scopedCalls = useMemo(() => calls.filter(c => isMine(c.agentId, c.agentName)), [calls, isMine]);
   const scopedOther = useMemo(() => otherRecords.filter(o => isMine(o.agentId, o.agentName)), [otherRecords, isMine]);
 
-  // KYC pipeline deals (matching KYCPage stage === 'qualified_investor')
-  const qualifiedKycDeals = useMemo(() => {
-    return deals.filter(d => d.stage === 'qualified_investor' && isMine(d.assignedAgentId, d.assignedAgentName));
-  }, [deals, isMine]);
-
   const scopedKycs = useMemo(() => {
     return kycs.filter(k => {
       if (k.irmId && String(k.irmId) === String(user?.id)) return true;
@@ -219,111 +230,276 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
     });
   }, [kycs, user?.id, scopedInvestors, scopedLeads]);
 
-  // ── Calculated Metrics ───────────────────────────────────────────────────────
-  // AUM Calculation — Includes Opportunities, Converted Deals, and Investor 360 inputs
+  // ── Calculated Metrics (Real-Time Synced) ────────────────────────────────────
+  // 1. AUM Calculation — Aggregates Won Opportunities, Converted Deals, and Converted Leads
   const wonOpps = useMemo(() => {
     return scopedOpportunities.filter(o => o.stage === 'Committed' || o.stage === 'Closed Won');
   }, [scopedOpportunities]);
 
   const totalCommittedAUM = useMemo(() => {
-    const oppAum = wonOpps.reduce((s, o) => s + (Number(o.committedAmount) || 0), 0);
+    const seenPhones = new Set<string>();
+    let sum = 0;
 
-    // Converted / Won deals scoped to this IRM
-    const dealAum = deals
-      .filter(d => (d.stage === 'converted' || d.stage === 'won' || d.stage === 'investment_opportunity') && isMine(d.assignedAgentId, d.assignedAgentName))
-      .reduce((s, d) => s + (Number(d.value) || 0), 0);
-
-    // Investors in Investor 360 with entered amount or matching deal value
-    const invAum = scopedInvestors.reduce((s, inv) => {
-      const fDigits = (inv.phone || '').replace(/\D/g, '').slice(-10);
-      const match = deals.find(d => {
-        if (d.customerId && String(d.customerId) === String(inv.id)) return true;
-        const dDigits = (d.phone || '').replace(/\D/g, '').slice(-10);
-        return fDigits && dDigits && dDigits === fDigits;
+    // A. From won/converted deals scoped to this IRM
+    deals
+      .filter(d => (d.stage === 'converted' || d.stage === 'won') && isMine(d.assignedAgentId, d.assignedAgentName))
+      .forEach(d => {
+        const ph = (d.phone || '').replace(/\D/g, '').slice(-10);
+        if (ph) seenPhones.add(ph);
+        sum += Number(d.value) || 0;
       });
-      const dealVal = match?.value ? Number(match.value) : 0;
-      const parsedInv = parseAumToNumber(inv.committedAUM || inv.investmentCapacity);
-      return s + Math.max(dealVal, parsedInv);
-    }, 0);
 
-    return Math.max(oppAum, dealAum, invAum);
-  }, [wonOpps, deals, scopedInvestors, isMine]);
+    // B. From won opportunities
+    wonOpps.forEach(o => {
+      sum += Number(o.committedAmount) || 0;
+    });
+
+    // C. From converted leads in IRM summary
+    (irmSummary?.leads || [])
+      .filter(l => l.currentStage === 'Converted')
+      .forEach(l => {
+        const ph = (l.phone || '').replace(/\D/g, '').slice(-10);
+        if (!ph || !seenPhones.has(ph)) {
+          if (ph) seenPhones.add(ph);
+          sum += Number(l.dealValue) || parseAumToNumber(l.investmentCapacity) || 0;
+        }
+      });
+
+    // D. From scoped investors not already counted
+    scopedInvestors.forEach(inv => {
+      const ph = (inv.phone || '').replace(/\D/g, '').slice(-10);
+      if (!ph || !seenPhones.has(ph)) {
+        if (ph) seenPhones.add(ph);
+        sum += parseAumToNumber(inv.committedAUM || inv.investmentCapacity);
+      }
+    });
+
+    return sum;
+  }, [wonOpps, deals, irmSummary, scopedInvestors, isMine]);
 
   const targetAum = Number((user as any)?.targetAum) || 25000000; // 2.5 Cr
-  const aumProgress = Math.min(Math.round((totalCommittedAUM / targetAum) * 100), 100);
+  const aumProgress = targetAum > 0 ? Math.min(Math.round((totalCommittedAUM / targetAum) * 100), 100) : 0;
 
-  // KYC Metrics — Synced with KYC Page UI (deals at stage qualified_investor)
-  const totalKycTargetCount = qualifiedKycDeals.length > 0 ? qualifiedKycDeals.length : (scopedKycs.length || 0);
+  // 2. KYC Metrics — Synced with KYC Page UI (deals at stage qualified_investor + leads in KYC)
+  const allKycTargets = useMemo(() => {
+    const map = new Map<string, { name: string; phone?: string; verified: boolean; inReview: boolean }>();
 
-  const verifiedKycs = useMemo(() => {
-    const verifiedDbIds = new Set(
-      scopedKycs
-        .filter(k => (k.status || '').toLowerCase() === 'verified' || (k.status || '').toLowerCase() === 'approved')
-        .map(k => String(k.investorId || k.id))
-    );
-    const verifiedDeals = qualifiedKycDeals.filter(d => {
-      const status = ((d as any).kycStatus || (d as any).customerKycStatus || '').toLowerCase();
-      return status === 'verified' || status === 'approved' || verifiedDbIds.has(String(d.customerId || d.id));
+    // Collect keys of investors/leads that have graduated/moved forward past KYC (Opportunities, Converted, etc.)
+    const movedKeys = new Set<string>();
+
+    deals
+      .filter(d => isMine(d.assignedAgentId, d.assignedAgentName))
+      .forEach(d => {
+        const stage = (d.stage || '').toLowerCase().trim();
+        if (stage === 'investment_opportunity' || stage === 'opportunity' || stage === 'term_sheet' || stage === 'committed' || stage === 'converted' || stage === 'won' || stage === 'lost') {
+          const ph = (d.phone || '').replace(/\D/g, '').slice(-10);
+          if (ph) movedKeys.add(ph);
+          if (d.customerId) movedKeys.add(`cid:${d.customerId}`);
+        }
+      });
+
+    (irmSummary?.leads || []).forEach(l => {
+      const stage = (l.currentStage || '').toLowerCase().trim();
+      const status = (l.status || '').toLowerCase().trim();
+      if (stage === 'opportunities' || stage === 'converted' || stage === 'investor 360' || stage === 'archived' || status === 'converted') {
+        const ph = (l.phone || '').replace(/\D/g, '').slice(-10);
+        if (ph) movedKeys.add(ph);
+      }
     });
-    return verifiedDeals.length > 0 ? verifiedDeals : scopedKycs.filter(k => (k.status || '').toLowerCase() === 'verified');
-  }, [scopedKycs, qualifiedKycDeals]);
 
-  const inReviewKycs = useMemo(() => {
-    return scopedKycs.filter(k => {
+    scopedInvestors.forEach(i => {
+      const ph = (i.phone || '').replace(/\D/g, '').slice(-10);
+      if (ph) movedKeys.add(ph);
+      if (i.id) movedKeys.add(`cid:${i.id}`);
+    });
+
+    // From qualified KYC deals (only those currently active in qualified_investor stage)
+    deals
+      .filter(d => d.stage === 'qualified_investor' && isMine(d.assignedAgentId, d.assignedAgentName))
+      .forEach(d => {
+        const ph = (d.phone || '').replace(/\D/g, '').slice(-10);
+        const cid = d.customerId ? `cid:${d.customerId}` : '';
+        if ((ph && movedKeys.has(ph)) || (cid && movedKeys.has(cid))) return;
+
+        const key = ph || String(d.id);
+        const status = ((d as any).kycStatus || (d as any).customerKycStatus || '').toLowerCase();
+        const isVer = status === 'verified' || status === 'approved';
+        const isRev = status.includes('review') || status.includes('submitted');
+        map.set(key, { name: d.customerName, phone: d.phone, verified: isVer, inReview: isRev });
+      });
+
+    // From IRM leads in KYC stage (only those currently active in KYC stage)
+    (irmSummary?.leads || [])
+      .filter(l => l.currentStage === 'KYC')
+      .forEach(l => {
+        const ph = (l.phone || '').replace(/\D/g, '').slice(-10);
+        if (ph && movedKeys.has(ph)) return;
+
+        const key = ph || String(l.id);
+        const kStatus = (l.kycStatus || '').toLowerCase();
+        const isVer = kStatus === 'verified' || kStatus === 'approved';
+        const isRev = kStatus.includes('review') || kStatus.includes('submitted') || kStatus === 'in_progress';
+        if (!map.has(key)) {
+          map.set(key, { name: l.name, phone: l.phone, verified: isVer, inReview: isRev });
+        } else if (isVer) {
+          const existing = map.get(key)!;
+          existing.verified = true;
+        }
+      });
+
+    // From live DB KYC records (ONLY if NOT moved forward past KYC)
+    scopedKycs.forEach(k => {
+      const ph = (k.phone || '').replace(/\D/g, '').slice(-10);
+      const invId = k.investorId ? `cid:${k.investorId}` : '';
+      if ((ph && movedKeys.has(ph)) || (invId && movedKeys.has(invId))) return;
+
+      const key = ph || String(k.investorId || k.id);
       const s = (k.status || '').toLowerCase();
-      return s === 'in_review' || s === 'under_review' || s === 'in-review' || s === 'submitted';
+      const isVer = s === 'verified' || s === 'approved';
+      const isRev = s.includes('review') || s.includes('submitted');
+      if (!map.has(key)) {
+        map.set(key, { name: k.investorName, phone: k.phone, verified: isVer, inReview: isRev });
+      } else if (isVer) {
+        const existing = map.get(key)!;
+        existing.verified = true;
+      }
     });
-  }, [scopedKycs]);
 
+    return Array.from(map.values());
+  }, [deals, irmSummary, scopedKycs, scopedInvestors, isMine]);
+
+  const totalKycTargetCount = allKycTargets.length;
+  const verifiedKycsCount = allKycTargets.filter(k => k.verified).length;
+  const inReviewKycsCount = allKycTargets.filter(k => k.inReview).length;
   const kycClearanceRate = totalKycTargetCount > 0
-    ? Math.round((verifiedKycs.length / totalKycTargetCount) * 100)
-    : 100;
+    ? Math.round((verifiedKycsCount / totalKycTargetCount) * 100)
+    : 0;
 
-  // Active Opportunities (matches OpportunitiesPage irmDeals + scopedOpportunities)
-  const irmOpportunitiesDeals = useMemo(() => {
-    return deals.filter(d => (d.stage === 'investment_opportunity' || d.stage === 'opportunity') && isMine(d.assignedAgentId, d.assignedAgentName));
-  }, [deals, isMine]);
+  // 3. Active Opportunities (matches OpportunitiesPage Deals + IRM Leads in Opportunities stage)
+  const allOpportunities = useMemo(() => {
+    const map = new Map<string, { title: string; corpus: number }>();
 
-  const activeOpportunities = useMemo(() => {
-    return scopedOpportunities.filter(o => o.stage !== 'Closed Lost');
-  }, [scopedOpportunities]);
+    // From deals in opportunity stages
+    deals
+      .filter(d => (d.stage === 'investment_opportunity' || d.stage === 'opportunity') && isMine(d.assignedAgentId, d.assignedAgentName))
+      .forEach(d => {
+        const key = (d.phone || '').replace(/\D/g, '').slice(-10) || String(d.id);
+        map.set(key, { title: d.title || d.customerName, corpus: Number(d.value) || 0 });
+      });
 
-  const activeOpportunitiesCount = useMemo(() => {
-    return activeOpportunities.length + irmOpportunitiesDeals.length;
-  }, [activeOpportunities, irmOpportunitiesDeals]);
+    // From scoped opportunities
+    scopedOpportunities
+      .filter(o => o.stage !== 'Closed Lost')
+      .forEach(o => {
+        const key = `opp-${o.id}`;
+        map.set(key, { title: o.title, corpus: Number(o.targetAmount) || Number(o.committedAmount) || 0 });
+      });
 
-  const totalPipelineCorpus = useMemo(() => {
-    const oppCorpus = activeOpportunities.reduce((s, o) => s + (Number(o.targetAmount) || 0), 0);
-    const dealCorpus = irmOpportunitiesDeals.reduce((s, d) => s + (Number(d.value) || 0), 0);
-    return oppCorpus + dealCorpus;
-  }, [activeOpportunities, irmOpportunitiesDeals]);
+    // From IRM leads in Opportunities stage (e.g. Dr Raja Selvarajan)
+    (irmSummary?.leads || [])
+      .filter(l => l.currentStage === 'Opportunities')
+      .forEach(l => {
+        const key = (l.phone || '').replace(/\D/g, '').slice(-10) || String(l.id);
+        if (!map.has(key)) {
+          map.set(key, { title: l.name, corpus: Number(l.dealValue) || parseAumToNumber(l.investmentCapacity) || 0 });
+        }
+      });
 
-  // Follow-ups
-  const pendingFollowups = useMemo(() => {
-    return scopedFollowups.filter(f => f.status === 'Pending');
-  }, [scopedFollowups]);
+    return Array.from(map.values());
+  }, [deals, scopedOpportunities, irmSummary, isMine]);
 
-  const overdueFollowups = useMemo(() => {
-    return pendingFollowups.filter(f => isDateOverdue(f.scheduledAt));
-  }, [pendingFollowups]);
+  const activeOpportunitiesCount = allOpportunities.length;
+  const totalPipelineCorpus = allOpportunities.reduce((s, o) => s + (o.corpus || 0), 0);
+  const targetOpportunities = Number((user as any)?.targetOpportunities) || 5;
+  const opportunitiesProgress = targetOpportunities > 0
+    ? Math.min(Math.round((activeOpportunitiesCount / targetOpportunities) * 100), 100)
+    : 0;
 
-  // Today's Follow-ups
-  const todaysFollowups = useMemo(() => {
-    return pendingFollowups.filter(f => isDateToday(f.scheduledAt));
-  }, [pendingFollowups]);
+  // 4. Follow-ups
+  const allPendingFollowups = useMemo(() => {
+    const map = new Map<string, Followup>();
 
-  // Actionable Due Follow-ups (Due Today + Overdue)
-  const dueFollowups = useMemo(() => {
-    return pendingFollowups.filter(f => isDateDueTodayOrOverdue(f.scheduledAt));
-  }, [pendingFollowups]);
+    scopedFollowups.filter(f => f.status === 'Pending').forEach(f => {
+      const key = (f.contactPhone || '').replace(/\D/g, '').slice(-10) || String(f.id);
+      map.set(key, f);
+    });
 
-  // Client Tiers
-  const tier1Count = useMemo(() => {
-    return scopedInvestors.filter(inv => {
-      const parsed = parseAumToNumber(inv.investmentCapacity || inv.committedAUM);
-      return parsed >= 10000000; // >= 1 Cr
-    }).length;
-  }, [scopedInvestors]);
+    (irmSummary?.leads || [])
+      .filter(l => l.currentStage === 'Follow-up' && l.nextFollowupDate)
+      .forEach(l => {
+        const key = (l.phone || '').replace(/\D/g, '').slice(-10) || String(l.id);
+        if (!map.has(key)) {
+          map.set(key, {
+            id: `lead-flw-${l.id}`,
+            companyId: String(l.companyId || ''),
+            contactId: String(l.id),
+            contactName: l.name,
+            contactPhone: l.phone,
+            contactEmail: l.email,
+            contactType: 'lead',
+            scheduledAt: l.nextFollowupDate!,
+            status: 'Pending',
+            priority: (l.priority as any) || 'Medium',
+            notes: l.stageDetails || 'Follow-up scheduled',
+            assignedAgentId: String(l.assignedAgentId || ''),
+            assignedAgentName: l.assignedAgentName || '',
+          });
+        }
+      });
+
+    return Array.from(map.values());
+  }, [scopedFollowups, irmSummary]);
+
+  const pendingFollowups = allPendingFollowups;
+  const overdueFollowups = useMemo(() => pendingFollowups.filter(f => isDateOverdue(f.scheduledAt)), [pendingFollowups]);
+  const todaysFollowups = useMemo(() => pendingFollowups.filter(f => isDateToday(f.scheduledAt)), [pendingFollowups]);
+  const dueFollowups = useMemo(() => pendingFollowups.filter(f => isDateDueTodayOrOverdue(f.scheduledAt)), [pendingFollowups]);
+
+  // 5. Assigned HNW Clients (Investors + Converted Deals + Converted Leads)
+  const allHnwClients = useMemo(() => {
+    const map = new Map<string, { name: string; phone?: string; capacity: number }>();
+
+    scopedInvestors.forEach(inv => {
+      const key = (inv.phone || '').replace(/\D/g, '').slice(-10) || String(inv.id);
+      const cap = parseAumToNumber(inv.investmentCapacity || inv.committedAUM);
+      map.set(key, { name: inv.name, phone: inv.phone, capacity: cap });
+    });
+
+    deals
+      .filter(d => (d.stage === 'converted' || d.stage === 'won') && isMine(d.assignedAgentId, d.assignedAgentName))
+      .forEach(d => {
+        const key = (d.phone || '').replace(/\D/g, '').slice(-10) || String(d.customerId || d.id);
+        const val = Number(d.value) || 0;
+        if (!map.has(key)) {
+          map.set(key, { name: d.customerName, phone: d.phone, capacity: val });
+        } else {
+          const existing = map.get(key)!;
+          existing.capacity = Math.max(existing.capacity, val);
+        }
+      });
+
+    (irmSummary?.leads || [])
+      .filter(l => l.currentStage === 'Converted')
+      .forEach(l => {
+        const key = (l.phone || '').replace(/\D/g, '').slice(-10) || String(l.id);
+        const val = Number(l.dealValue) || parseAumToNumber(l.investmentCapacity) || 0;
+        if (!map.has(key)) {
+          map.set(key, { name: l.name, phone: l.phone, capacity: val });
+        } else {
+          const existing = map.get(key)!;
+          existing.capacity = Math.max(existing.capacity, val);
+        }
+      });
+
+    return Array.from(map.values());
+  }, [scopedInvestors, deals, irmSummary, isMine]);
+
+  const totalHnwClientsCount = allHnwClients.length;
+  const tier1Count = useMemo(() => allHnwClients.filter(c => c.capacity >= 10000000).length, [allHnwClients]);
+  const targetHnwClients = Number((user as any)?.targetHnwClients) || 10;
+  const clientsProgress = targetHnwClients > 0
+    ? Math.min(Math.round((totalHnwClientsCount / targetHnwClients) * 100), 100)
+    : 0;
 
   // Seven days delta
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -435,7 +611,7 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
           </h1>
           <p className="irm-banner-subtitle">
             You have <strong>{dueFollowups.length} follow-up{dueFollowups.length === 1 ? '' : 's'}</strong> due today and{' '}
-            <strong>{totalKycTargetCount - verifiedKycs.length} investor KYC cases</strong> awaiting compliance verification.
+            <strong>{Math.max(0, totalKycTargetCount - verifiedKycsCount)} investor KYC case{Math.max(0, totalKycTargetCount - verifiedKycsCount) === 1 ? '' : 's'}</strong> awaiting compliance verification.
           </p>
         </div>
 
@@ -498,13 +674,13 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
             <div className="irm-kpi-icon kyc"><FileCheck size={16} /></div>
           </div>
           <div className="irm-kpi-val">
-            {verifiedKycs.length} <span className="irm-kpi-sub-num">/ {totalKycTargetCount}</span>
+            {verifiedKycsCount} <span className="irm-kpi-sub-num">/ {totalKycTargetCount}</span>
           </div>
           <div className="irm-kpi-progress-track">
             <div className="irm-kpi-progress-fill kyc" style={{ width: `${kycClearanceRate}%` }} />
           </div>
           <div className="irm-kpi-sub" style={{ color: '#8b5cf6' }}>
-            <CheckCircle2 size={13} /> {kycClearanceRate}% clearance ({inReviewKycs.length} in review)
+            <CheckCircle2 size={13} /> {kycClearanceRate}% clearance ({inReviewKycsCount} in review)
           </div>
         </div>
 
@@ -520,10 +696,10 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
           </div>
           <div className="irm-kpi-val">{activeOpportunitiesCount}</div>
           <div className="irm-kpi-progress-track">
-            <div className="irm-kpi-progress-fill deals" style={{ width: '75%' }} />
+            <div className="irm-kpi-progress-fill deals" style={{ width: `${opportunitiesProgress}%` }} />
           </div>
           <div className="irm-kpi-sub" style={{ color: '#0284c7' }}>
-            <TrendingUp size={13} /> Corpus: {formatCurrency(totalPipelineCorpus)}
+            <TrendingUp size={13} /> {opportunitiesProgress}% of target • Corpus: {formatCurrency(totalPipelineCorpus)}
           </div>
         </div>
 
@@ -573,12 +749,12 @@ export const IrmDashboardView: React.FC<IrmDashboardViewProps> = ({
             <span className="irm-kpi-label">ASSIGNED HNW CLIENTS</span>
             <div className="irm-kpi-icon investors"><Users size={16} /></div>
           </div>
-          <div className="irm-kpi-val">{scopedInvestors.length}</div>
+          <div className="irm-kpi-val">{totalHnwClientsCount}</div>
           <div className="irm-kpi-progress-track">
-            <div className="irm-kpi-progress-fill investors" style={{ width: '85%' }} />
+            <div className="irm-kpi-progress-fill investors" style={{ width: `${clientsProgress}%` }} />
           </div>
           <div className="irm-kpi-sub" style={{ color: '#3b82f6' }}>
-            <Shield size={13} /> {tier1Count} Tier 1 Ultra-HNW clients
+            <Shield size={13} /> {tier1Count} Tier 1 Ultra-HNW • {clientsProgress}% of target
           </div>
         </div>
       </div>

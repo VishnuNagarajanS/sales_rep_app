@@ -48,20 +48,34 @@ function forEachKycKey(fn: (key: string) => void): void {
   }
 }
 
+const SANITIZED_FLAG_KEY = 'nexus_storage_kyc_sanitized_v1';
+
 /** One-time clean-up for data written by older versions: strips sensitive fields from existing entries. */
 export function sanitizeStoredKycData(): void {
-  forEachKycKey(key => {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        localStorage.setItem(key, JSON.stringify(stripSensitiveKycFields(parsed)));
-      }
-    } catch {
-      localStorage.removeItem(key); // unreadable entry: drop it
+  if (typeof window === 'undefined') return;
+  try {
+    // O(1) instantaneous bailout: skip expensive scan if already migrated
+    if (localStorage.getItem(SANITIZED_FLAG_KEY) === 'true') {
+      return;
     }
-  });
+
+    forEachKycKey(key => {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          localStorage.setItem(key, JSON.stringify(stripSensitiveKycFields(parsed)));
+        }
+      } catch {
+        localStorage.removeItem(key); // unreadable entry: drop it
+      }
+    });
+
+    localStorage.setItem(SANITIZED_FLAG_KEY, 'true');
+  } catch (err) {
+    console.warn('[kycStorage] could not sanitize local KYC cache:', err);
+  }
 }
 
 /** Removes all locally cached KYC keys (drafts, forms, assisted metadata, statuses) across the app. */

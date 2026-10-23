@@ -11,6 +11,7 @@ interface ModalProps {
   size?: 'sm' | 'md' | 'lg' | 'xl' | string;
   maxWidth?: string | number;
   footer?: React.ReactNode;
+  headerActions?: React.ReactNode;
   className?: string;
   closeOnBackdrop?: boolean;
   closeOnEscape?: boolean;
@@ -33,6 +34,7 @@ export const Modal: React.FC<ModalProps> = ({
   size,
   maxWidth,
   footer,
+  headerActions,
   className = '',
   closeOnBackdrop = true,
   closeOnEscape = true,
@@ -82,11 +84,14 @@ export const Modal: React.FC<ModalProps> = ({
               </p>
             )}
           </div>
-          {!hideCloseButton && (
-            <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose} aria-label="Close modal">
-              <X size={18} />
-            </button>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {headerActions}
+            {!hideCloseButton && (
+              <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose} aria-label="Close modal">
+                <X size={18} />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Content */}

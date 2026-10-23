@@ -16,6 +16,7 @@ using backend.Models.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
 namespace backend.Controllers.SuperAdmin;
@@ -62,13 +63,9 @@ public class PlatformSystemController : ControllerBase
     public async Task<ActionResult<ApiResponse<List<AnnouncementResponseDto>>>> GetActiveAnnouncements(
         [FromQuery] string? tenantId,
         [FromQuery] string? role,
+        [FromServices] Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null,
         CancellationToken ct = default)
     {
-        var now = DateTime.UtcNow;
-        var query = _context.BroadcastAnnouncements
-            .AsNoTracking()
-            .Where(a => a.IsActive && (!a.ExpiresAt.HasValue || a.ExpiresAt.Value > now));
-
         int? effectiveTenantId = null;
         if (!string.IsNullOrWhiteSpace(tenantId) && int.TryParse(tenantId, out var tid))
         {
@@ -79,14 +76,25 @@ public class PlatformSystemController : ControllerBase
             effectiveTenantId = _currentUser.CompanyId.Value;
         }
 
+        string? effectiveRole = !string.IsNullOrWhiteSpace(role)
+            ? role.ToLowerInvariant()
+            : (_currentUser.IsAuthenticated ? _currentUser.Role?.ToLowerInvariant() : null);
+
+        var cacheKey = $"announcements_active_{effectiveTenantId?.ToString() ?? "all"}_{effectiveRole ?? "all"}";
+        if (cache != null && cache.TryGetValue(cacheKey, out List<AnnouncementResponseDto>? cached) && cached != null)
+        {
+            return Ok(ApiResponse<List<AnnouncementResponseDto>>.SuccessResult(cached));
+        }
+
+        var now = DateTime.UtcNow;
+        var query = _context.BroadcastAnnouncements
+            .AsNoTracking()
+            .Where(a => a.IsActive && (!a.ExpiresAt.HasValue || a.ExpiresAt.Value > now));
+
         if (effectiveTenantId.HasValue)
         {
             query = query.Where(a => !a.TargetTenantId.HasValue || a.TargetTenantId.Value == effectiveTenantId.Value);
         }
-
-        string? effectiveRole = !string.IsNullOrWhiteSpace(role)
-            ? role.ToLowerInvariant()
-            : (_currentUser.IsAuthenticated ? _currentUser.Role?.ToLowerInvariant() : null);
 
         if (!string.IsNullOrEmpty(effectiveRole) && effectiveRole != "super_admin")
         {
@@ -107,6 +115,12 @@ public class PlatformSystemController : ControllerBase
             .ToListAsync(ct);
 
         var dtos = announcements.Select(MapToAnnouncementDto).ToList();
+
+        if (cache != null)
+        {
+            cache.Set(cacheKey, dtos, TimeSpan.FromSeconds(30));
+        }
+
         return Ok(ApiResponse<List<AnnouncementResponseDto>>.SuccessResult(dtos));
     }
 

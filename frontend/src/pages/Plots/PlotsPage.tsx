@@ -1,134 +1,536 @@
-import React, { useState, useEffect } from 'react';
-import { Grid } from 'lucide-react';
-import { Plot, PropertyProject } from '../../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Grid, RefreshCw, Plus, Map, Maximize2, Minimize2, ZoomIn, ZoomOut, RotateCcw, RotateCw, X, Image as ImageIcon, Compass, Layers, ShieldCheck, Edit3, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
+import { jaminApiService } from '../../services/jaminApiService';
+import { getCustomers, getLeads } from '../../services/ghlApiService';
+import { storageService } from '../../services/storageService';
 import './PlotsPage.css';
 
-const getStoredPlots = (): Plot[] => {
-  try {
-    const raw = localStorage.getItem('nexus_plots');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-};
-
-const getStoredProjects = (): PropertyProject[] => {
-  try {
-    const raw = localStorage.getItem('nexus_projects');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveStoredPlot = (plot: Plot) => {
-  try {
-    const raw = localStorage.getItem('nexus_plots');
-    const all: Plot[] = raw ? JSON.parse(raw) : [];
-    const idx = all.findIndex(p => p.id === plot.id);
-    if (idx >= 0) all[idx] = plot;
-    else all.push(plot);
-    localStorage.setItem('nexus_plots', JSON.stringify(all));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch {}
-};
-
-const addStoredAuditLog = (log: any) => {
-  try {
-    const raw = localStorage.getItem('nexus_audit_logs');
-    const all = raw ? JSON.parse(raw) : [];
-    all.unshift(log);
-    localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
-    window.dispatchEvent(new Event('nexus_storage_updated'));
-  } catch {}
+const comparePlotNumbers = (left: any, right: any): number => {
+  const leftNumber = Number.parseInt(String(left.plotNumber ?? ''), 10);
+  const rightNumber = Number.parseInt(String(right.plotNumber ?? ''), 10);
+  const leftIsNumber = Number.isFinite(leftNumber);
+  const rightIsNumber = Number.isFinite(rightNumber);
+  if (leftIsNumber && rightIsNumber && leftNumber !== rightNumber) return leftNumber - rightNumber;
+  if (leftIsNumber !== rightIsNumber) return leftIsNumber ? -1 : 1;
+  return String(left.plotNumber ?? '').localeCompare(String(right.plotNumber ?? ''), undefined, { numeric: true });
 };
 
 export const PlotsPage: React.FC = () => {
   const { tenant, user } = useAuth();
-  const [plots, setPlots] = useState<Plot[]>([]);
-  const [projects, setProjects] = useState<PropertyProject[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>('proj-01');
-  const [selectedPlot, setSelectedPlot] = useState<Plot | null>(null);
+  const [plots, setPlots] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
+  const [selectedProject, setSelectedProject] = useState<string>('');
+  const [selectedPlot, setSelectedPlot] = useState<any | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isMasterLayoutModalOpen, setIsMasterLayoutModalOpen] = useState(false);
+  const [blueprintZoom, setBlueprintZoom] = useState<number>(1);
+  const [blueprintRotation, setBlueprintRotation] = useState<number>(0);
+  const [isBlueprintFullScreen, setIsBlueprintFullScreen] = useState<boolean>(false);
+  const [statusFilter, setStatusFilter] = useState<'All' | 'Available' | 'Hold' | 'Sold'>('All');
+  const canManagePlots = user?.role?.code === 'company_admin' || user?.role?.code === 'super_admin';
 
   // Hold action state
   const [isHoldModalOpen, setIsHoldModalOpen] = useState(false);
-  const [holdCustomer, setHoldCustomer] = useState('');
-  const [holdDays, setHoldDays] = useState('7');
+  const [holdSourceType, setHoldSourceType] = useState<'customer' | 'lead' | 'custom'>('customer');
+  const [customersList, setCustomersList] = useState<any[]>([]);
+  const [leadsList, setLeadsList] = useState<any[]>([]);
 
-  const loadData = () => {
-    setPlots(getStoredPlots());
-    setProjects(getStoredProjects());
+  // Effective customers list: includes all customers from CRM database, PLUS any converted leads who are already customers
+  const effectiveCustomersList = useMemo(() => {
+    const list = [...customersList];
+    leadsList.forEach(l => {
+      if ((l.status || '').toLowerCase() === 'converted') {
+        const exists = list.some(c => String(c.id) === String(l.id));
+        if (!exists) {
+          list.push({
+            id: l.id,
+            name: l.name,
+            phone: l.phone,
+            status: 'Active',
+            email: l.email,
+            location: l.location,
+          });
+        }
+      }
+    });
+    return list;
+  }, [customersList, leadsList]);
+
+  // Active unconverted leads ONLY (leads who are already converted are customers and excluded here)
+  const availableLeadsList = useMemo(() => {
+    return leadsList.filter(l => (l.status || '').toLowerCase() !== 'converted');
+  }, [leadsList]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [selectedLeadId, setSelectedLeadId] = useState('');
+  const [holdCustomer, setHoldCustomer] = useState('');
+  const [holdPhone, setHoldPhone] = useState('');
+  const [holdDays, setHoldDays] = useState('7');
+  const [submittingHold, setSubmittingHold] = useState(false);
+
+  // Booking action state
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [bookingSourceType, setBookingSourceType] = useState<'customer' | 'lead' | 'custom'>('customer');
+  const [selectedBookingCustomerId, setSelectedBookingCustomerId] = useState('');
+  const [selectedBookingLeadId, setSelectedBookingLeadId] = useState('');
+  const [bookingCustomerName, setBookingCustomerName] = useState('');
+  const [bookingCustomerPhone, setBookingCustomerPhone] = useState('');
+  const [bookingTokenAmount, setBookingTokenAmount] = useState<number | undefined>(undefined);
+  const [bookingTotalAgreementValue, setBookingTotalAgreementValue] = useState<number | undefined>(undefined);
+  const [bookingPaymentMode, setBookingPaymentMode] = useState('');
+  const [bookingPaymentTerms, setBookingPaymentTerms] = useState('');
+  const [bookingNotes, setBookingNotes] = useState('');
+  const [submittingBooking, setSubmittingBooking] = useState(false);
+
+  // Add Plot Modal State
+  const [isAddPlotModalOpen, setIsAddPlotModalOpen] = useState(false);
+  const [newPlotProjectId, setNewPlotProjectId] = useState<string>('');
+  const [newPlotNumber, setNewPlotNumber] = useState('');
+  const [newPlotDimensions, setNewPlotDimensions] = useState('');
+  const [newPlotAreaSqFt, setNewPlotAreaSqFt] = useState<number>(0);
+  const [newPlotFacing, setNewPlotFacing] = useState('East');
+  const [newPlotPrice, setNewPlotPrice] = useState<number>(0);
+  const [newPlotNotes, setNewPlotNotes] = useState('');
+  const [submittingPlot, setSubmittingPlot] = useState(false);
+
+  // Edit Plot Modal State
+  const [isEditPlotModalOpen, setIsEditPlotModalOpen] = useState(false);
+  const [editPlotNumber, setEditPlotNumber] = useState('');
+  const [editPlotDimensions, setEditPlotDimensions] = useState('');
+  const [editPlotAreaSqFt, setEditPlotAreaSqFt] = useState<number>(0);
+  const [editPlotFacing, setEditPlotFacing] = useState('East');
+  const [editPlotPrice, setEditPlotPrice] = useState<number>(0);
+  const [editPlotStatus, setEditPlotStatus] = useState('Available');
+  const [editPlotNotes, setEditPlotNotes] = useState('');
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+
+  // Delete Plot Modal State
+  const [isDeletePlotModalOpen, setIsDeletePlotModalOpen] = useState(false);
+  const [submittingDelete, setSubmittingDelete] = useState(false);
+
+  const loadData = async (projId?: string) => {
+    setLoading(true);
+    try {
+      const [projList, plotList] = await Promise.all([
+        jaminApiService.getProjects(),
+        jaminApiService.getPlots(projId || undefined),
+      ]);
+      setProjects(projList);
+      if (projList.length > 0 && (!selectedProject || !projList.some(p => String(p.id) === String(selectedProject))) && !projId) {
+        setSelectedProject(String(projList[0].id));
+      }
+      setPlots([...plotList].sort(comparePlotNumbers));
+    } catch (err) {
+      console.error('Failed to load plots/projects from backend', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     loadData();
-    const handleUpdate = () => loadData();
-    window.addEventListener('nexus_storage_updated', handleUpdate);
-    return () => window.removeEventListener('nexus_storage_updated', handleUpdate);
+    loadHoldEntities();
   }, []);
 
-  const projectPlots = plots.filter(p => !selectedProject || p.projectId === selectedProject);
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isBlueprintFullScreen) {
+        setIsBlueprintFullScreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isBlueprintFullScreen]);
+
+  const handleProjectChange = async (projId: string) => {
+    setSelectedProject(projId);
+    setStatusFilter('All');
+    setLoading(true);
+    try {
+      const plotList = await jaminApiService.getPlots(projId || undefined);
+      setPlots([...plotList].sort(comparePlotNumbers));
+    } catch (err) {
+      console.error('Failed to filter plots', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const currentProjectId = selectedProject || (projects[0]?.id ? String(projects[0].id) : '');
+
+  const projectPlots = currentProjectId
+    ? plots.filter(p => String(p.projectId) === String(currentProjectId)).sort(comparePlotNumbers)
+    : [...plots].sort(comparePlotNumbers);
 
   const availableCount = projectPlots.filter(p => p.status === 'Available').length;
   const holdCount = projectPlots.filter(p => p.status === 'Hold').length;
-  const soldCount = projectPlots.filter(p => p.status === 'Sold').length;
+  const soldCount = projectPlots.filter(p => p.status === 'Booked' || p.status === 'Registered' || p.status === 'Sold').length;
 
-  const handleOpenHold = (plot: Plot) => {
-    setSelectedPlot(plot);
-    setHoldCustomer('');
-    setIsHoldModalOpen(true);
+  const displayedPlots = useMemo(() => {
+    if (statusFilter === 'Available') return projectPlots.filter(p => p.status === 'Available');
+    if (statusFilter === 'Hold') return projectPlots.filter(p => p.status === 'Hold');
+    if (statusFilter === 'Sold') return projectPlots.filter(p => p.status === 'Booked' || p.status === 'Registered' || p.status === 'Sold');
+    return projectPlots;
+  }, [projectPlots, statusFilter]);
+
+  const handleToggleStatusFilter = (status: 'All' | 'Available' | 'Hold' | 'Sold') => {
+    if (status === 'All') {
+      setStatusFilter('All');
+    } else {
+      setStatusFilter(prev => (prev === status ? 'All' : status));
+    }
   };
 
-  const handleConfirmHold = () => {
-    if (selectedPlot && holdCustomer) {
-      const expiryDate = new Date();
-      expiryDate.setDate(expiryDate.getDate() + parseInt(holdDays, 10));
+  const currentProjectObj = projects.find(p => String(p.id) === String(currentProjectId)) || projects[0];
+  const hasMasterLayout = Boolean(currentProjectObj?.imageUrl && currentProjectObj.imageUrl.trim() !== '');
 
-      const updatedPlot: Plot = {
-        ...selectedPlot,
-        status: 'Hold',
-        holdByCustomer: holdCustomer,
-        holdByAgent: user?.name || 'Pooja Hegde',
-        holdExpiry: expiryDate.toISOString().split('T')[0],
-      };
+  const getProjectMasterLayout = () => {
+    if (hasMasterLayout) {
+      return currentProjectObj!.imageUrl;
+    }
+    return '';
+  };
 
-      saveStoredPlot(updatedPlot);
+  const loadHoldEntities = async () => {
+    try {
+      const [custs, lds] = await Promise.all([
+        getCustomers(tenant?.id).catch(() => []),
+        getLeads(tenant?.id).catch(() => storageService.getLeads(tenant?.id) || []),
+      ]);
+      setCustomersList(custs || []);
+      setLeadsList(lds || []);
+      return { custs: custs || [], lds: lds || [] };
+    } catch (err) {
+      console.error('Failed to load customers/leads for hold modal', err);
+      return { custs: [], lds: [] };
+    }
+  };
 
-      addStoredAuditLog({
-        id: `aud-${Date.now()}`,
-        timestamp: 'Just now',
-        actorName: user?.name || 'Agent',
-        actorEmail: user?.email || 'agent@jamin.com',
-        action: 'PLOT_HOLD_CREATED',
-        entityType: 'Plot',
-        entityId: selectedPlot.id,
-        companyId: tenant?.id,
-        companyName: tenant?.name,
-        details: `Placed ${selectedPlot.plotNumber} on ${holdDays}-day hold for ${holdCustomer}.`,
+  const handleOpenHold = (plot: any) => {
+    setSelectedPlot(plot);
+    setHoldSourceType('customer');
+    setSelectedCustomerId('');
+    setSelectedLeadId('');
+    setHoldCustomer('');
+    setHoldPhone('');
+    setIsHoldModalOpen(true);
+    loadHoldEntities();
+  };
+
+  const handleSourceTypeChange = (type: 'customer' | 'lead' | 'custom') => {
+    setHoldSourceType(type);
+    setSelectedCustomerId('');
+    setSelectedLeadId('');
+    setHoldCustomer('');
+    setHoldPhone('');
+  };
+
+  const handleCustomerChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const custId = e.target.value;
+    setSelectedCustomerId(custId);
+    const found = effectiveCustomersList.find(c => String(c.id) === String(custId));
+    if (found) {
+      setHoldCustomer(found.name || '');
+      setHoldPhone(found.phone || '');
+    } else {
+      setHoldCustomer('');
+      setHoldPhone('');
+    }
+  };
+
+  const handleLeadChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const leadId = e.target.value;
+    setSelectedLeadId(leadId);
+    const found = availableLeadsList.find(l => String(l.id) === String(leadId));
+    if (found) {
+      setHoldCustomer(found.name || '');
+      setHoldPhone(found.phone || '');
+    } else {
+      setHoldCustomer('');
+      setHoldPhone('');
+    }
+  };
+
+  const handleConfirmHold = async () => {
+    if (!selectedPlot) return;
+    if (!holdCustomer.trim()) {
+      alert(holdSourceType === 'customer' ? 'Please select a customer.' : holdSourceType === 'lead' ? 'Please select a lead.' : 'Client name is required.');
+      return;
+    }
+    if (!holdPhone.trim()) {
+      alert('Phone number is required.');
+      return;
+    }
+    setSubmittingHold(true);
+    try {
+      const success = await jaminApiService.holdPlot(
+        String(selectedPlot.id),
+        holdCustomer.trim(),
+        holdPhone.trim(),
+        parseInt(holdDays, 10),
+        undefined,
+        user?.name || undefined,
+        holdSourceType === 'customer' && selectedCustomerId ? selectedCustomerId : undefined
+      );
+      if (success) {
+        setIsHoldModalOpen(false);
+        setSelectedPlot(null);
+        await loadData(selectedProject);
+      } else {
+        alert('Failed to place plot on hold. Please check plot status.');
+      }
+    } catch (err) {
+      console.error('Hold plot error', err);
+      alert('Error communicating with server.');
+    } finally {
+      setSubmittingHold(false);
+    }
+  };
+
+  const handleReleaseHold = async (plot: any) => {
+    if (confirm(`Release hold on ${plot.plotNumber} back to Available status?`)) {
+      try {
+        const success = await jaminApiService.releasePlot(String(plot.id));
+        if (success) {
+          setSelectedPlot(null);
+          await loadData(selectedProject);
+        } else {
+          alert('Failed to release plot hold.');
+        }
+      } catch (err) {
+        console.error('Release hold error', err);
+      }
+    }
+  };
+
+  const handleOpenBooking = async (plot: any) => {
+    setSelectedPlot(plot);
+    const { custs, lds } = await loadHoldEntities();
+
+    const heldPhone = (plot.heldByCustomerPhone || plot.holdPhone || '').trim();
+    const heldName = (plot.heldByCustomerName || plot.holdCustomer || '').trim();
+
+    if (plot.heldByCustomerId) {
+      setBookingSourceType('customer');
+      setSelectedBookingCustomerId(String(plot.heldByCustomerId));
+      setSelectedBookingLeadId('');
+      const matched = effectiveCustomersList.find((c: any) => String(c.id) === String(plot.heldByCustomerId));
+      setBookingCustomerName(matched?.name || heldName);
+      setBookingCustomerPhone(matched?.phone || heldPhone);
+    } else if (heldName || heldPhone) {
+      setBookingSourceType('custom');
+      setSelectedBookingCustomerId('');
+      setSelectedBookingLeadId('');
+      setBookingCustomerName(heldName);
+      setBookingCustomerPhone(heldPhone);
+    } else {
+      setBookingSourceType('customer');
+      setSelectedBookingCustomerId('');
+      setSelectedBookingLeadId('');
+      setBookingCustomerName('');
+      setBookingCustomerPhone('');
+    }
+
+    const price = plot.price || plot.totalPrice || 0;
+    setBookingTotalAgreementValue(price);
+    setBookingTokenAmount(undefined);
+    setBookingPaymentMode('');
+    setBookingPaymentTerms('');
+    setBookingNotes('');
+    setIsBookingModalOpen(true);
+  };
+
+  const handleBookingSourceTypeChange = (type: 'customer' | 'lead' | 'custom') => {
+    setBookingSourceType(type);
+    setSelectedBookingCustomerId('');
+    setSelectedBookingLeadId('');
+    setBookingCustomerName('');
+    setBookingCustomerPhone('');
+  };
+
+  const handleBookingCustomerChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const custId = e.target.value;
+    setSelectedBookingCustomerId(custId);
+    const found = effectiveCustomersList.find(c => String(c.id) === String(custId));
+    if (found) {
+      setBookingCustomerName(found.name || '');
+      setBookingCustomerPhone(found.phone || '');
+    } else {
+      setBookingCustomerName('');
+      setBookingCustomerPhone('');
+    }
+  };
+
+  const handleBookingLeadChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const leadId = e.target.value;
+    setSelectedBookingLeadId(leadId);
+    const found = availableLeadsList.find(l => String(l.id) === String(leadId));
+    if (found) {
+      setBookingCustomerName(found.name || '');
+      setBookingCustomerPhone(found.phone || '');
+    } else {
+      setBookingCustomerName('');
+      setBookingCustomerPhone('');
+    }
+  };
+
+  const handleConfirmBooking = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!selectedPlot) return;
+    if (!bookingCustomerName.trim()) {
+      alert(bookingSourceType === 'customer' ? 'Please select a customer.' : bookingSourceType === 'lead' ? 'Please select a lead.' : 'Buyer / Customer name is required to confirm booking.');
+      return;
+    }
+    if (!bookingCustomerPhone.trim()) {
+      alert('Buyer / Customer phone number is required.');
+      return;
+    }
+
+    setSubmittingBooking(true);
+    try {
+      const price = bookingTotalAgreementValue ?? (selectedPlot.price || selectedPlot.totalPrice || 0);
+      const result = await jaminApiService.createBooking({
+        plotId: selectedPlot.id,
+        projectId: selectedPlot.projectId,
+        customerId: bookingSourceType === 'customer' && selectedBookingCustomerId ? parseInt(selectedBookingCustomerId, 10) : (selectedPlot?.heldByCustomerId ? parseInt(String(selectedPlot.heldByCustomerId), 10) : undefined),
+        leadId: bookingSourceType === 'lead' && selectedBookingLeadId ? parseInt(selectedBookingLeadId, 10) : undefined,
+        customerName: bookingCustomerName.trim(),
+        customerPhone: bookingCustomerPhone.trim(),
+        totalPlotPrice: price,
+        tokenAmountPaid: bookingTokenAmount || 0,
+        paymentMode: bookingPaymentMode,
+        paymentTerms: bookingPaymentTerms.trim(),
+        notes: bookingNotes.trim(),
+        plotNumber: selectedPlot.plotNumber,
+        projectName: currentProjectObj?.name || '',
       });
 
-      setIsHoldModalOpen(false);
-      setSelectedPlot(null);
+      if (result.success) {
+        setIsBookingModalOpen(false);
+        setSelectedPlot(null);
+        await loadData(selectedProject);
+        alert(`✓ Plot ${selectedPlot.plotNumber} successfully reserved! The token payment of ₹${(bookingTokenAmount || 0).toLocaleString('en-IN')} is awaiting finance verification. The prospect will be officially confirmed in Customer 360 once the payment is verified.`);
+      } else {
+        alert(result.message || 'Failed to confirm booking. The plot may already be held or booked by another transaction.');
+      }
+    } catch (err: any) {
+      console.error('Error confirming booking', err);
+      alert(err?.message || 'Error communicating with server.');
+    } finally {
+      setSubmittingBooking(false);
     }
   };
 
-  const handleReleaseHold = (plot: Plot) => {
-    if (confirm(`Release hold on ${plot.plotNumber} back to Available status?`)) {
-      const updatedPlot: Plot = {
-        ...plot,
-        status: 'Available',
-        holdByCustomer: undefined,
-        holdByAgent: undefined,
-        holdExpiry: undefined,
-      };
-      saveStoredPlot(updatedPlot);
+  const handleOpenEditPlot = (plot: any) => {
+    setSelectedPlot(plot);
+    setEditPlotNumber(plot.plotNumber || '');
+    setEditPlotDimensions(plot.dimensions || '');
+    setEditPlotAreaSqFt(plot.areaSqFt || 1200);
+    setEditPlotFacing(plot.facing || 'East');
+    setEditPlotPrice(plot.price || 0);
+    setEditPlotStatus(plot.status || 'Available');
+    setEditPlotNotes(plot.notes || '');
+    setIsEditPlotModalOpen(true);
+  };
+
+  const handleSaveEditPlot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPlot || !editPlotNumber.trim()) {
+      alert('Plot number is required.');
+      return;
+    }
+    setSubmittingEdit(true);
+    try {
+      const success = await jaminApiService.updatePlot(selectedPlot.id, {
+        plotNumber: editPlotNumber.trim(),
+        dimensions: editPlotDimensions.trim(),
+        areaSqFt: Number(editPlotAreaSqFt) || 1200,
+        facing: editPlotFacing,
+        price: Number(editPlotPrice) || 0,
+        ...(editPlotStatus === 'Available' ? { status: editPlotStatus } : {}),
+        notes: editPlotNotes.trim(),
+      });
+      if (success) {
+        setIsEditPlotModalOpen(false);
+        setSelectedPlot(null);
+        await loadData(selectedProject);
+      } else {
+        alert('Failed to update plot. Please verify inputs.');
+      }
+    } catch (err) {
+      console.error('Error updating plot', err);
+      alert('Error communicating with server.');
+    } finally {
+      setSubmittingEdit(false);
     }
   };
 
-  const formatCurrency = (val: number) => {
+  const handleOpenDeletePlot = (plot: any) => {
+    setSelectedPlot(plot);
+    setIsDeletePlotModalOpen(true);
+  };
+
+  const handleConfirmDeletePlot = async () => {
+    if (!selectedPlot) return;
+    setSubmittingDelete(true);
+    try {
+      const success = await jaminApiService.deletePlot(selectedPlot.id);
+      if (success) {
+        setIsDeletePlotModalOpen(false);
+        setSelectedPlot(null);
+        await loadData(selectedProject);
+      } else {
+        alert('Failed to delete plot. It may have active bookings.');
+      }
+    } catch (err) {
+      console.error('Error deleting plot', err);
+      alert('Error communicating with server.');
+    } finally {
+      setSubmittingDelete(false);
+    }
+  };
+
+  const handleCreatePlot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const projId = newPlotProjectId || selectedProject;
+    if (!projId || !newPlotNumber.trim()) {
+      alert('Project and Plot Number are required.');
+      return;
+    }
+
+    setSubmittingPlot(true);
+    try {
+      const success = await jaminApiService.createPlot({
+        projectId: parseInt(projId, 10),
+        plotNumber: newPlotNumber.trim(),
+        dimensions: newPlotDimensions.trim(),
+        areaSqFt: Number(newPlotAreaSqFt) || 1200,
+        facing: newPlotFacing,
+        price: Number(newPlotPrice) || 0,
+        notes: newPlotNotes.trim(),
+      });
+
+      if (success) {
+        setIsAddPlotModalOpen(false);
+        setNewPlotNumber('');
+        setNewPlotNotes('');
+        await loadData(selectedProject);
+      } else {
+        alert('Failed to add plot. Please verify plot number is unique for this project.');
+      }
+    } catch (err) {
+      console.error('Error creating plot', err);
+      alert('Error communicating with server.');
+    } finally {
+      setSubmittingPlot(false);
+    }
+  };
+
+  const formatCurrency = (val?: number) => {
+    if (!val) return '₹0';
+    if (val >= 10000000) return `₹${(val / 10000000).toFixed(2)} Cr`;
     if (val >= 100000) return `₹${(val / 100000).toFixed(2)} L`;
     return `₹${val.toLocaleString('en-IN')}`;
   };
@@ -136,149 +538,326 @@ export const PlotsPage: React.FC = () => {
   return (
     <div className="plots-page-container">
       {/* Header */}
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1 className="page-title">
             <Grid size={24} color="#059669" /> Interactive Plot Inventory
           </h1>
           <p className="page-subtitle">
-            Visual plot layout grid, availability statuses, and plot reservation management for {tenant?.name}.
+            Visual plot layout, availability status, and reservation management.
           </p>
         </div>
 
-        {/* Project Selector */}
+        {/* Project Selector, Refresh, Add Plot */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <label htmlFor="plots-project-selector" style={{ fontSize: 13, fontWeight: 600 }}>Project:</label>
-          <select
-            id="plots-project-selector"
-            name="selectedProject"
-            className="form-select plots-project-selector"
-            value={selectedProject}
-            onChange={e => setSelectedProject(e.target.value)}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <label htmlFor="plots-project-selector" style={{ fontSize: 13, fontWeight: 600 }}>Project:</label>
+            <select
+              id="plots-project-selector"
+              name="selectedProject"
+              className="form-select plots-project-selector"
+              value={currentProjectId || selectedProject}
+              onChange={e => handleProjectChange(e.target.value)}
+            >
+              <option value="" disabled>-- Select Project --</option>
+              {projects.map(p => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => loadData(selectedProject || currentProjectId)}
+            disabled={loading}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
           >
-            {projects.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
+
+          {canManagePlots && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => {
+                setNewPlotProjectId(selectedProject || (projects[0]?.id ? String(projects[0].id) : ''));
+                setIsAddPlotModalOpen(true);
+              }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              <Plus size={15} /> Add Plot
+            </button>
+          )}
         </div>
       </div>
 
       {/* Status Legend & Telemetry Bar */}
       <div className="card plots-legend-bar">
         <div className="plots-legend-group">
-          <div className="plots-legend-item">
+          <div
+            className={`plots-legend-item ${statusFilter === 'All' ? 'active all' : ''}`}
+            onClick={() => handleToggleStatusFilter('All')}
+            role="button"
+            tabIndex={0}
+            title="Click to show all plots"
+          >
+            <span className="plots-legend-dot all" />
+            <span className="plots-legend-label">All Plots: </span>
+            <strong style={{ color: '#334155' }}>{projectPlots.length}</strong>
+          </div>
+
+          <div
+            className={`plots-legend-item ${statusFilter === 'Available' ? 'active avail' : ''}`}
+            onClick={() => handleToggleStatusFilter('Available')}
+            role="button"
+            tabIndex={0}
+            title="Click to filter by Available plots"
+          >
             <span className="plots-legend-dot avail" />
             <span className="plots-legend-label">Available: </span>
             <strong style={{ color: '#059669' }}>{availableCount}</strong>
           </div>
 
-          <div className="plots-legend-item">
+          <div
+            className={`plots-legend-item ${statusFilter === 'Hold' ? 'active hold' : ''}`}
+            onClick={() => handleToggleStatusFilter('Hold')}
+            role="button"
+            tabIndex={0}
+            title="Click to filter by On Hold plots"
+          >
             <span className="plots-legend-dot hold" />
             <span className="plots-legend-label">On Hold: </span>
             <strong style={{ color: '#d97706' }}>{holdCount}</strong>
           </div>
 
-          <div className="plots-legend-item">
+          <div
+            className={`plots-legend-item ${statusFilter === 'Sold' ? 'active sold' : ''}`}
+            onClick={() => handleToggleStatusFilter('Sold')}
+            role="button"
+            tabIndex={0}
+            title="Click to filter by Booked & Sold plots"
+          >
             <span className="plots-legend-dot sold" />
-            <span className="plots-legend-label">Sold: </span>
+            <span className="plots-legend-label">Booked / Sold: </span>
             <strong style={{ color: '#dc2626' }}>{soldCount}</strong>
           </div>
         </div>
 
-        <div className="plots-legend-hint">
-          Click any plot below to inspect specifications or initiate a client hold
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* {statusFilter !== 'All' && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setStatusFilter('All')}
+              style={{ fontSize: 12, color: '#64748b' }}
+            >
+              Reset Filter
+            </button>
+          )} */}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              setBlueprintZoom(1);
+              setBlueprintRotation(0);
+              setIsBlueprintFullScreen(false);
+              setIsMasterLayoutModalOpen(true);
+            }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontWeight: 600 }}
+          >
+            <Map size={15} /> View Master Layout Blueprint
+          </button>
+          <div className="plots-legend-hint">
+            Click status headings above to filter plots
+          </div>
         </div>
       </div>
 
-      {/* Visual Plot Layout Grid (Blueprint Section 7.19) */}
-      <div className="plots-grid-container">
-        {projectPlots.map(plot => {
-          const isAvailable = plot.status === 'Available';
-          const isHold = plot.status === 'Hold';
-          const isSold = plot.status === 'Sold';
-          const statusClass = isAvailable ? 'available' : isHold ? 'hold' : 'sold';
+      {/* Visual Plot Layout Grid */}
+      {loading && projectPlots.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px', color: '#64748b' }}>
+          Loading plots for selected project...
+        </div>
+      ) : projectPlots.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px', color: '#64748b' }}>
+          <p style={{ fontSize: '1.1rem', marginBottom: '16px' }}>No plots have been added to this project yet.</p>
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              setNewPlotProjectId(selectedProject || (projects[0]?.id ? String(projects[0].id) : ''));
+              setIsAddPlotModalOpen(true);
+            }}
+          >
+            <Plus size={16} /> Add Plot
+          </button>
+        </div>
+      ) : displayedPlots.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px', color: '#64748b' }}>
+          <p style={{ fontSize: '1.1rem', marginBottom: '16px' }}>
+            No plots found with status <strong>{statusFilter === 'Sold' ? 'Booked / Sold' : statusFilter}</strong> in this project.
+          </p>
+          <button className="btn btn-secondary btn-sm" onClick={() => setStatusFilter('All')}>
+            Show All Plots ({projectPlots.length})
+          </button>
+        </div>
+      ) : (
+        <div className="plots-grid-container">
+          {displayedPlots.map(plot => {
+            const isAvailable = plot.status === 'Available';
+            const isHold = plot.status === 'Hold';
+            const isSold = plot.status === 'Booked' || plot.status === 'Registered' || plot.status === 'Sold';
+            const statusClass = isAvailable ? 'available' : isHold ? 'hold' : 'sold';
 
-          return (
-            <div
-              key={plot.id}
-              className={`card card-hover plot-item-card ${statusClass}`}
-              onClick={() => setSelectedPlot(plot)}
-            >
-              <div className="plot-card-header">
-                <span className="plot-number-title">
-                  {plot.plotNumber}
-                </span>
-                <StatusChip status={plot.status} size="sm" />
-              </div>
+            const price = plot.price || plot.totalPrice || 0;
+            const area = plot.areaSqFt || plot.sizeSqft || 0;
+            const rate = area > 0 ? Math.round(price / area) : (plot.pricePerSqft || 0);
 
-              <div className="plot-dimensions">
-                {plot.dimension && <span>{plot.dimension} ft • </span>}
-                <strong>{plot.sizeSqft} sq.ft</strong>
-              </div>
-
-              {plot.facing && (
-                <div className="plot-facing">
-                  Facing: {plot.facing}
+            return (
+              <div
+                key={plot.id}
+                className={`card card-hover plot-item-card ${statusClass}`}
+                onClick={() => setSelectedPlot(plot)}
+                style={{ position: 'relative' }}
+              >
+                <div className="plot-card-header">
+                  <span className="plot-number-title">
+                    {plot.plotNumber}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <StatusChip status={plot.status} size="sm" />
+                  </div>
                 </div>
-              )}
 
-              <div className="plot-pricing-footer">
-                <span className="plot-price-highlight">
-                  {formatCurrency(plot.totalPrice)}
-                </span>
-                <span className="plot-sqft-rate">
-                  @ ₹{plot.pricePerSqft}/sqft
-                </span>
+                <div className="plot-dimensions">
+                  {plot.dimensions && <span>{plot.dimensions} ft • </span>}
+                  <strong>{area} sq.ft</strong>
+                </div>
+
+                {plot.facing && (
+                  <div className="plot-facing">
+                    Facing: {plot.facing}
+                  </div>
+                )}
+
+                <div className="plot-pricing-footer">
+                  <span className="plot-price-highlight">
+                    {price > 0 ? formatCurrency(price) : '—'}
+                  </span>
+                  {rate > 0 && (
+                    <span className="plot-sqft-rate">
+                      @ ₹{rate}/sqft
+                    </span>
+                  )}
+                </div>
+
+                {isHold && (
+                  <div className="plot-hold-badge">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                      <span>🔒 Held for <strong>{plot.heldByCustomerName || '—'}</strong></span>
+                      <button
+                        title="Confirm Booking"
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleOpenBooking(plot);
+                        }}
+                        style={{
+                          background: '#10b981',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: 4,
+                          padding: '2px 8px',
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Book
+                      </button>
+                    </div>
+                    {plot.holdExpiresAt && (
+                      <div style={{ marginTop: 2 }}>Expiry: {new Date(plot.holdExpiresAt).toLocaleDateString()}</div>
+                    )}
+                  </div>
+                )}
+
+                {isSold && (
+                  <div className="plot-sold-badge">
+                    ✓ Booked / Sold {plot.heldByCustomerName ? `to ${plot.heldByCustomerName}` : ''}
+                  </div>
+                )}
               </div>
-
-              {isHold && (
-                <div className="plot-hold-badge">
-                  🔒 Held for <strong>{plot.holdByCustomer}</strong>
-                  {plot.holdExpiry && <div>Expiry: {plot.holdExpiry}</div>}
-                </div>
-              )}
-
-              {isSold && (
-                <div className="plot-sold-badge">
-                  ✓ Registered to <strong>{plot.holdByCustomer || 'Client'}</strong>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Plot Detail Modal */}
       <Modal
-        isOpen={!!selectedPlot && !isHoldModalOpen}
+        isOpen={!!selectedPlot && !isHoldModalOpen && !isBookingModalOpen && !isEditPlotModalOpen && !isDeletePlotModalOpen}
         onClose={() => setSelectedPlot(null)}
         title={`${selectedPlot?.plotNumber} Specifications`}
-        subtitle={`${selectedPlot?.projectName}`}
+        subtitle={`${currentProjectObj?.name || 'Project Layout'}`}
         footer={
           <>
             {selectedPlot?.status === 'Available' && (
-              <button
-                className="btn btn-primary plot-hold-btn-gold"
-                onClick={() => handleOpenHold(selectedPlot)}
-              >
-                Put Plot on 7-Day Hold
-              </button>
+              <>
+                <button
+                  className="btn btn-primary plot-hold-btn-gold"
+                  onClick={() => handleOpenHold(selectedPlot)}
+                >
+                  Put Plot on Hold
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => handleOpenBooking(selectedPlot)}
+                  style={{ backgroundColor: '#10b981', borderColor: '#059669', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  ✓ Confirm Booking
+                </button>
+              </>
             )}
 
             {selectedPlot?.status === 'Hold' && (
-              <button
-                className="btn btn-secondary plot-release-btn"
-                onClick={() => handleReleaseHold(selectedPlot)}
-              >
-                Release Hold to Available
-              </button>
+              <>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => handleOpenBooking(selectedPlot)}
+                  style={{ backgroundColor: '#10b981', borderColor: '#059669', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  ✓ Confirm to Book
+                </button>
+                <button
+                  className="btn btn-secondary plot-release-btn"
+                  onClick={() => handleReleaseHold(selectedPlot)}
+                >
+                  Release Hold to Available
+                </button>
+              </>
             )}
 
-            <button className="btn btn-secondary" onClick={() => setSelectedPlot(null)}>
-              Close
-            </button>
+            {canManagePlots && selectedPlot && (
+              <>
+                <button
+                  className="btn btn-secondary"
+                  title="Edit Plot"
+                  aria-label="Edit Plot"
+                  onClick={() => handleOpenEditPlot(selectedPlot)}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '8px 10px' }}
+                >
+                  <Edit3 size={14} />
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  title="Delete Plot"
+                  aria-label="Delete Plot"
+                  onClick={() => handleOpenDeletePlot(selectedPlot)}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '8px 10px', color: '#b91c1c' }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </>
+            )}
+
           </>
         }
       >
@@ -292,22 +871,42 @@ export const PlotsPage: React.FC = () => {
             <div className="plot-detail-grid">
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Plot Dimension:</span>
-                <div className="plot-detail-val">{selectedPlot.dimension || 'Standard'}</div>
+                <div className="plot-detail-val">{selectedPlot.dimensions || '—'}</div>
               </div>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Total Area:</span>
-                <div className="plot-detail-val">{selectedPlot.sizeSqft} sq.ft</div>
+                <div className="plot-detail-val">
+                  {(selectedPlot.areaSqFt || selectedPlot.sizeSqft) ? `${selectedPlot.areaSqFt || selectedPlot.sizeSqft} sq.ft` : '—'}
+                </div>
               </div>
               <div>
-                <span style={{ color: 'var(--text-muted)' }}>Rate per sq.ft:</span>
-                <div className="plot-detail-val">₹{selectedPlot.pricePerSqft}</div>
+                <span style={{ color: 'var(--text-muted)' }}>Facing:</span>
+                <div className="plot-detail-val">{selectedPlot.facing || '—'}</div>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-muted)' }}>Price per Sq.Ft:</span>
+                <div className="plot-detail-val">
+                  {selectedPlot.pricePerSqft
+                    ? `₹${Number(selectedPlot.pricePerSqft).toLocaleString('en-IN')}/sq.ft`
+                    : selectedPlot.areaSqFt > 0 && selectedPlot.price > 0
+                      ? `₹${Math.round(selectedPlot.price / selectedPlot.areaSqFt).toLocaleString('en-IN')}/sq.ft`
+                      : '—'}
+                </div>
               </div>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Total Plot Price:</span>
                 <div className="plot-detail-price">
-                  {formatCurrency(selectedPlot.totalPrice)}
+                  {(selectedPlot.price || selectedPlot.totalPrice) > 0
+                    ? formatCurrency(selectedPlot.price || selectedPlot.totalPrice)
+                    : '—'}
                 </div>
               </div>
+              {selectedPlot.notes && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Notes:</span>
+                  <div className="plot-detail-val">{selectedPlot.notes}</div>
+                </div>
+              )}
             </div>
 
             {selectedPlot.status === 'Hold' && (
@@ -315,9 +914,10 @@ export const PlotsPage: React.FC = () => {
                 <div className="plot-hold-detail-title">
                   Active Hold Reservation Details
                 </div>
-                <div>Customer: <strong>{selectedPlot.holdByCustomer}</strong></div>
-                <div>Agent: <strong>{selectedPlot.holdByAgent}</strong></div>
-                <div>Expiry Date: <strong>{selectedPlot.holdExpiry}</strong></div>
+                <div>Customer: <strong>{selectedPlot.heldByCustomerName || '—'}</strong></div>
+                <div>Phone: <strong>{selectedPlot.heldByCustomerPhone || '—'}</strong></div>
+                {selectedPlot.holdByAgent && <div>Held By Agent: <strong>{selectedPlot.holdByAgent}</strong></div>}
+                <div>Expiry: <strong>{selectedPlot.holdExpiresAt ? new Date(selectedPlot.holdExpiresAt).toLocaleDateString() : '—'}</strong></div>
               </div>
             )}
           </div>
@@ -328,34 +928,138 @@ export const PlotsPage: React.FC = () => {
       <Modal
         isOpen={isHoldModalOpen && !!selectedPlot}
         onClose={() => setIsHoldModalOpen(false)}
-        title={`Place ${selectedPlot?.plotNumber} on Client Hold`}
-        subtitle="Temporarily reserve plot to prevent duplicate bookings during diligence"
+        title={`Place ${selectedPlot?.plotNumber} on Hold`}
+        subtitle="Reserve plot for a Customer, Lead, or Custom contact"
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setIsHoldModalOpen(false)}>
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleConfirmHold}>
-              Confirm Hold Reservation
+            <button className="btn btn-primary" onClick={handleConfirmHold} disabled={submittingHold}>
+              {submittingHold ? 'Saving Reservation...' : 'Confirm Hold Reservation'}
             </button>
           </>
         }
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="form-group">
-            <label htmlFor="plot-hold-customer" className="form-label">Client / Prospect Name *</label>
-            <input
-              id="plot-hold-customer"
-              name="holdCustomer"
-              type="text"
-              autoComplete="name"
-              className="form-input"
-              required
-              value={holdCustomer}
-              onChange={e => setHoldCustomer(e.target.value)}
-              placeholder="e.g. Brigadier H.S. Rathore"
-            />
+            <label className="form-label">Link Reservation To</label>
+            <div className="hold-source-tabs">
+              <button
+                type="button"
+                className={`hold-source-tab ${holdSourceType === 'customer' ? 'active' : ''}`}
+                onClick={() => handleSourceTypeChange('customer')}
+              >
+                Customer
+              </button>
+              <button
+                type="button"
+                className={`hold-source-tab ${holdSourceType === 'lead' ? 'active' : ''}`}
+                onClick={() => handleSourceTypeChange('lead')}
+              >
+                Lead
+              </button>
+              <button
+                type="button"
+                className={`hold-source-tab ${holdSourceType === 'custom' ? 'active' : ''}`}
+                onClick={() => handleSourceTypeChange('custom')}
+              >
+                Custom
+              </button>
+            </div>
           </div>
+
+          {holdSourceType === 'customer' && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Select Customer *</label>
+                <select
+                  className="form-select"
+                  value={selectedCustomerId}
+                  onChange={handleCustomerChange}
+                >
+                  <option value="">-- Choose Existing Customer --</option>
+                  {effectiveCustomersList.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.phone ? `(${c.phone})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {holdCustomer && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Customer Name</label>
+                    <input type="text" className="form-input" value={holdCustomer} readOnly />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Customer Phone</label>
+                    <input type="text" className="form-input" value={holdPhone} readOnly />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {holdSourceType === 'lead' && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Select Lead *</label>
+                <select
+                  className="form-select"
+                  value={selectedLeadId}
+                  onChange={handleLeadChange}
+                >
+                  <option value="">-- Choose Existing Lead --</option>
+                  {availableLeadsList.map(l => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} {l.phone ? `(${l.phone})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {holdCustomer && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Lead Name</label>
+                    <input type="text" className="form-input" value={holdCustomer} readOnly />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Lead Phone</label>
+                    <input type="text" className="form-input" value={holdPhone} readOnly />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {holdSourceType === 'custom' && (
+            <>
+              <div className="form-group">
+                <label htmlFor="plot-hold-customer" className="form-label">Client Name *</label>
+                <input
+                  id="plot-hold-customer"
+                  name="holdCustomer"
+                  type="text"
+                  className="form-input"
+                  required
+                  value={holdCustomer}
+                  onChange={e => setHoldCustomer(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Client Phone Number *</label>
+                <input
+                  type="tel"
+                  className="form-input"
+                  required
+                  value={holdPhone}
+                  onChange={e => setHoldPhone(e.target.value)}
+                />
+              </div>
+            </>
+          )}
 
           <div className="form-group">
             <label htmlFor="plot-hold-days" className="form-label">Hold Validity Duration</label>
@@ -373,6 +1077,742 @@ export const PlotsPage: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Confirm Booking Modal */}
+      <Modal
+        isOpen={isBookingModalOpen && !!selectedPlot}
+        onClose={() => setIsBookingModalOpen(false)}
+        title={`Confirm Booking — ${selectedPlot?.plotNumber}`}
+        subtitle={`Confirm plot sale & register customer into CRM for ${currentProjectObj?.name || 'Project'}`}
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setIsBookingModalOpen(false)}>
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={handleConfirmBooking}
+              disabled={submittingBooking}
+              style={{ backgroundColor: '#10b981', borderColor: '#059669' }}
+            >
+              {submittingBooking ? 'Confirming Booking...' : '✓ Confirm & Book Plot'}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.25)', borderRadius: 8, padding: '12px 16px', fontSize: 13 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ color: 'var(--text-muted)' }}>Plot:</span>
+              <strong>{selectedPlot?.plotNumber} ({selectedPlot?.areaSqFt || selectedPlot?.sizeSqft || 0} sq.ft)</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Total Plot Price:</span>
+              <strong style={{ color: '#059669' }}>{formatCurrency(selectedPlot?.price || selectedPlot?.totalPrice)}</strong>
+            </div>
+          </div>
+
+          {/* Buyer selection tabs: Customer, Lead, Custom */}
+          <div className="form-group">
+            <label className="form-label">Link Buyer To</label>
+            <div className="hold-source-tabs">
+              <button
+                type="button"
+                className={`hold-source-tab ${bookingSourceType === 'customer' ? 'active' : ''}`}
+                onClick={() => handleBookingSourceTypeChange('customer')}
+              >
+                Customer
+              </button>
+              <button
+                type="button"
+                className={`hold-source-tab ${bookingSourceType === 'lead' ? 'active' : ''}`}
+                onClick={() => handleBookingSourceTypeChange('lead')}
+              >
+                Lead
+              </button>
+              <button
+                type="button"
+                className={`hold-source-tab ${bookingSourceType === 'custom' ? 'active' : ''}`}
+                onClick={() => handleBookingSourceTypeChange('custom')}
+              >
+                Custom
+              </button>
+            </div>
+          </div>
+
+          {bookingSourceType === 'customer' && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Select Customer *</label>
+                <select
+                  className="form-select"
+                  value={selectedBookingCustomerId}
+                  onChange={handleBookingCustomerChange}
+                >
+                  <option value="">-- Choose Existing Customer --</option>
+                  {effectiveCustomersList.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.phone ? `(${c.phone})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {bookingCustomerName && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Customer Name</label>
+                    <input type="text" className="form-input" value={bookingCustomerName} readOnly />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Customer Phone</label>
+                    <input type="text" className="form-input" value={bookingCustomerPhone} readOnly />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {bookingSourceType === 'lead' && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Select Lead *</label>
+                <select
+                  className="form-select"
+                  value={selectedBookingLeadId}
+                  onChange={handleBookingLeadChange}
+                >
+                  <option value="">-- Choose Existing Lead --</option>
+                  {availableLeadsList.map(l => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} {l.phone ? `(${l.phone})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {bookingCustomerName && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Lead Name</label>
+                    <input type="text" className="form-input" value={bookingCustomerName} readOnly />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Lead Phone</label>
+                    <input type="text" className="form-input" value={bookingCustomerPhone} readOnly />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {bookingSourceType === 'custom' && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Buyer Name *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  value={bookingCustomerName}
+                  onChange={e => setBookingCustomerName(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Buyer Phone Number *</label>
+                <input
+                  type="tel"
+                  className="form-input"
+                  required
+                  value={bookingCustomerPhone}
+                  onChange={e => setBookingCustomerPhone(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="form-group">
+              <label className="form-label">Token Advance (₹) <span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: 'var(--text-muted)' }}></span></label>
+              <input
+                type="number"
+                className="form-input"
+                min={0}
+                value={bookingTokenAmount ?? ''}
+                onChange={e => setBookingTokenAmount(e.target.value ? Number(e.target.value) : undefined)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Total Agreement Value (₹) <span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: 'var(--text-muted)' }}></span></label>
+              <input
+                type="number"
+                className="form-input"
+                min={0}
+                value={bookingTotalAgreementValue ?? ''}
+                onChange={e => setBookingTotalAgreementValue(e.target.value ? Number(e.target.value) : undefined)}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Payment Mode</label>
+            <select
+              className="form-select"
+              value={bookingPaymentMode}
+              onChange={e => setBookingPaymentMode(e.target.value)}
+            >
+              <option value="">-- Select Payment Mode --</option>
+              <option value="Bank Transfer / NEFT">Bank Transfer / NEFT</option>
+              <option value="RTGS">RTGS</option>
+              <option value="Cheque / DD">Cheque / Demand Draft</option>
+              <option value="UPI / Online">UPI / Online Gateway</option>
+              <option value="Cash">Cash</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Payment Terms / Milestone Schedule <span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: 'var(--text-muted)' }}></span></label>
+            <input
+              type="text"
+              className="form-input"
+              value={bookingPaymentTerms}
+              onChange={e => setBookingPaymentTerms(e.target.value)}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">General Notes & Remarks</label>
+            <textarea
+              className="form-textarea"
+              rows={2}
+              value={bookingNotes}
+              onChange={e => setBookingNotes(e.target.value)}
+            />
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit Plot Modal */}
+      <Modal
+        isOpen={isEditPlotModalOpen && !!selectedPlot}
+        onClose={() => setIsEditPlotModalOpen(false)}
+        title={`Edit Plot — ${selectedPlot?.plotNumber}`}
+        subtitle="Update plot specifications and inventory details"
+      >
+        <form onSubmit={handleSaveEditPlot}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="form-group">
+                <label className="form-label">Plot Number *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  value={editPlotNumber}
+                  onChange={e => setEditPlotNumber(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Dimensions</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editPlotDimensions}
+                  onChange={e => setEditPlotDimensions(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="form-group">
+                <label className="form-label">Area (sq.ft) *</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  required
+                  min={100}
+                  value={editPlotAreaSqFt}
+                  onChange={e => setEditPlotAreaSqFt(Number(e.target.value))}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Facing Direction</label>
+                <select
+                  className="form-select"
+                  value={editPlotFacing}
+                  onChange={e => setEditPlotFacing(e.target.value)}
+                >
+                  <option value="East">East</option>
+                  <option value="North">North</option>
+                  <option value="North-East">North-East (Corner)</option>
+                  <option value="West">West</option>
+                  <option value="South">South</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="form-group">
+                <label className="form-label">Total Plot Price (₹) *</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  required
+                  min={1}
+                  value={editPlotPrice}
+                  onChange={e => setEditPlotPrice(Number(e.target.value))}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Status</label>
+                <select
+                  className="form-select"
+                  value={editPlotStatus}
+                  onChange={e => setEditPlotStatus(e.target.value)}
+                  disabled={editPlotStatus !== 'Available'}
+                >
+                  <option value="Available">Available</option>
+                  {editPlotStatus !== 'Available' && (
+                    <option value={editPlotStatus}>{editPlotStatus} (booking controlled)</option>
+                  )}
+                </select>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Notes</label>
+              <input
+                type="text"
+                className="form-input"
+                value={editPlotNotes}
+                onChange={e => setEditPlotNotes(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setIsEditPlotModalOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={submittingEdit}>
+                {submittingEdit ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete Plot Confirmation Modal */}
+      <Modal
+        isOpen={isDeletePlotModalOpen && !!selectedPlot}
+        onClose={() => setIsDeletePlotModalOpen(false)}
+        title="Delete Plot"
+        subtitle="This action cannot be undone"
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setIsDeletePlotModalOpen(false)}>
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={handleConfirmDeletePlot}
+              disabled={submittingDelete}
+              style={{ background: '#dc2626', borderColor: '#dc2626' }}
+            >
+              {submittingDelete ? 'Deleting...' : 'Yes, Delete Plot'}
+            </button>
+          </>
+        }
+      >
+        <div style={{ textAlign: 'center', padding: '16px 0' }}>
+          <Trash2 size={48} style={{ color: '#dc2626', margin: '0 auto 16px auto' }} />
+          <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8 }}>
+            Delete <strong>{selectedPlot?.plotNumber}</strong>?
+          </p>
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: 0 }}>
+            This will permanently remove the plot from the project inventory.
+            Plots with active bookings cannot be deleted.
+          </p>
+        </div>
+      </Modal>
+
+      {/* Add New Plot Modal */}
+      <Modal
+        isOpen={isAddPlotModalOpen}
+        onClose={() => setIsAddPlotModalOpen(false)}
+        title="Add New Plot to Inventory"
+        subtitle="Add an individual plot to the project inventory"
+      >
+        <form onSubmit={handleCreatePlot}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div className="form-group">
+              <label className="form-label">Project *</label>
+              <select
+                className="form-select"
+                required
+                value={newPlotProjectId}
+                onChange={e => setNewPlotProjectId(e.target.value)}
+              >
+                <option value="">-- Select Project --</option>
+                {projects.map(p => (
+                  <option key={p.id} value={String(p.id)}>
+                    {p.name} ({p.location})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="form-group">
+                <label className="form-label">Plot Number *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  value={newPlotNumber}
+                  onChange={e => setNewPlotNumber(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Dimensions</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={newPlotDimensions}
+                  onChange={e => setNewPlotDimensions(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="form-group">
+                <label className="form-label">Area (sq.ft) *</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  required
+                  min={100}
+                  value={newPlotAreaSqFt}
+                  onChange={e => setNewPlotAreaSqFt(Number(e.target.value))}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Facing Direction</label>
+                <select
+                  className="form-select"
+                  value={newPlotFacing}
+                  onChange={e => setNewPlotFacing(e.target.value)}
+                >
+                  <option value="East">East</option>
+                  <option value="North">North</option>
+                  <option value="North-East">North-East (Corner)</option>
+                  <option value="West">West</option>
+                  <option value="South">South</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Total Plot Price (₹) *</label>
+              <input
+                type="number"
+                className="form-input"
+                required
+                min={1}
+                value={newPlotPrice}
+                onChange={e => setNewPlotPrice(Number(e.target.value))}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Notes</label>
+              <input
+                type="text"
+                className="form-input"
+                value={newPlotNotes}
+                onChange={e => setNewPlotNotes(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setIsAddPlotModalOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={submittingPlot}>
+                {submittingPlot ? 'Adding Plot...' : 'Add Plot'}
+              </button>
+            </div>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Master Layout Blueprint Modal */}
+      <Modal
+        isOpen={isMasterLayoutModalOpen && !isBlueprintFullScreen}
+        onClose={() => {
+          setIsMasterLayoutModalOpen(false);
+          setIsBlueprintFullScreen(false);
+        }}
+        title={`${currentProjectObj?.name || 'Project'} — Master Layout Blueprint`}
+        subtitle={`Master layout diagram and community plan for ${currentProjectObj?.location || ''}`}
+        size="xl"
+        headerActions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: 'var(--text-secondary, #475569)', marginRight: '4px' }}>
+              <span>Zoom: <strong style={{ color: 'var(--text-primary, #0f172a)' }}>{Math.round(blueprintZoom * 100)}%</strong></span>
+              {blueprintRotation > 0 && (
+                <span>• <strong>{blueprintRotation}°</strong></span>
+              )}
+              <span>•</span>
+              <span style={{ color: '#059669', fontWeight: 600 }}>{availableCount} Available</span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setBlueprintZoom(prev => Math.max(0.25, parseFloat((prev - 0.25).toFixed(2))))}
+                disabled={blueprintZoom <= 0.25}
+                title="Zoom Out (-25%)"
+                style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', height: '32px' }}
+              >
+                <ZoomOut size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setBlueprintZoom(prev => Math.min(3.5, parseFloat((prev + 0.25).toFixed(2))))}
+                disabled={blueprintZoom >= 3.5}
+                title="Zoom In (+25%)"
+                style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', height: '32px' }}
+              >
+                <ZoomIn size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setBlueprintRotation(prev => (prev + 90) % 360)}
+                title="Rotate 90° Clockwise"
+                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 500, height: '32px' }}
+              >
+                <RotateCw size={14} /> Rotate
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => { setBlueprintZoom(1); setBlueprintRotation(0); }}
+                title="Reset Zoom (100%) and Rotation (0°)"
+                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', height: '32px' }}
+              >
+                <RotateCcw size={14} /> Reset
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setIsBlueprintFullScreen(true)}
+                title="Open Full Screen View"
+                style={{ padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600, color: 'var(--primary-600, #4f46e5)', height: '32px' }}
+              >
+                <Maximize2 size={14} /> Full Screen
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {/* Blueprint Canvas Container - sized strictly to the image with no harsh background color */}
+          <div style={{
+            width: '100%',
+            maxHeight: '68vh',
+            minHeight: '220px',
+            overflow: 'auto',
+            background: 'transparent',
+            borderRadius: '8px',
+            border: '1px solid var(--border-base, #e2e8f0)',
+            position: 'relative',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '12px',
+          }}>
+            {getProjectMasterLayout() ? (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transform: `scale(${blueprintZoom}) rotate(${blueprintRotation}deg)`,
+                  transformOrigin: 'center center',
+                  transition: 'transform 0.2s ease',
+                }}
+              >
+                <img
+                  src={getProjectMasterLayout()}
+                  alt={`${currentProjectObj?.name || 'Project'} Master Layout Blueprint`}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '62vh',
+                    width: 'auto',
+                    height: 'auto',
+                    display: 'block',
+                    objectFit: 'contain',
+                    borderRadius: '4px',
+                  }}
+                />
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted, #94a3b8)', padding: '32px' }}>
+                <ImageIcon size={48} style={{ margin: '0 auto 12px auto', opacity: 0.5 }} />
+                <p style={{ fontSize: '1rem', color: 'var(--text-primary, #1e293b)', margin: '0 0 8px 0', fontWeight: 600 }}>
+                  No Master Layout Blueprint uploaded for this project.
+                </p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary, #64748b)', margin: 0 }}>
+                  Upload a community layout map or CAD blueprint when creating or editing the project in the Projects page.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Fullscreen Overlay Viewer */}
+      {isMasterLayoutModalOpen && isBlueprintFullScreen && getProjectMasterLayout() && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 99999,
+            backgroundColor: '#0b0f19',
+            display: 'flex',
+            flexDirection: 'column',
+            width: '100vw',
+            height: '100vh',
+          }}
+        >
+          {/* Fullscreen Top Bar */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '12px 24px',
+              background: 'rgba(15, 23, 42, 0.95)',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+              color: '#ffffff',
+              flexWrap: 'wrap',
+              gap: '12px',
+            }}
+          >
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600, color: '#f8fafc' }}>
+                {currentProjectObj?.name || 'Project'} — Master Layout Blueprint
+              </h3>
+              <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+                {currentProjectObj?.location || ''} • Zoom: {Math.round(blueprintZoom * 100)}% {blueprintRotation > 0 ? `• ${blueprintRotation}°` : ''} • Press ESC to exit
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setBlueprintZoom(prev => Math.max(0.25, parseFloat((prev - 0.25).toFixed(2))))}
+                disabled={blueprintZoom <= 0.25}
+                title="Zoom Out (-25%)"
+                style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)' }}
+              >
+                <ZoomOut size={16} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setBlueprintZoom(prev => Math.min(4.0, parseFloat((prev + 0.25).toFixed(2))))}
+                disabled={blueprintZoom >= 4.0}
+                title="Zoom In (+25%)"
+                style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)' }}
+              >
+                <ZoomIn size={16} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setBlueprintRotation(prev => (prev + 90) % 360)}
+                title="Rotate 90° Clockwise"
+                style={{ padding: '6px 14px', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <RotateCw size={16} /> Rotate 90°
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => { setBlueprintZoom(1); setBlueprintRotation(0); }}
+                title="Reset (100% Zoom & 0°)"
+                style={{ padding: '6px 14px', background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <RotateCcw size={16} /> Reset
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setIsBlueprintFullScreen(false)}
+                title="Exit Full Screen"
+                style={{ padding: '6px 16px', display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}
+              >
+                <Minimize2 size={16} /> Exit Full Screen
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBlueprintFullScreen(false);
+                  setIsMasterLayoutModalOpen(false);
+                }}
+                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' }}
+                title="Close Viewer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+
+          {/* Fullscreen Body - clean display centered to the image */}
+          <div
+            style={{
+              flex: 1,
+              overflow: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '24px',
+            }}
+          >
+            <div
+              style={{
+                transform: `scale(${blueprintZoom}) rotate(${blueprintRotation}deg)`,
+                transformOrigin: 'center center',
+                transition: 'transform 0.2s ease',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <img
+                src={getProjectMasterLayout()}
+                alt={`${currentProjectObj?.name || 'Project'} Blueprint`}
+                style={{
+                  maxWidth: '92vw',
+                  maxHeight: '85vh',
+                  width: 'auto',
+                  height: 'auto',
+                  objectFit: 'contain',
+                  borderRadius: '6px',
+                  display: 'block',
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

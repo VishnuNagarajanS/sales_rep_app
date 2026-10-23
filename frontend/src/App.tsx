@@ -29,6 +29,8 @@ export const routeToPath = (route: string, isSuperAdmin: boolean): string => {
         return '/tickets';
       case 'admin-system':
         return '/system-health';
+      case 'admin-leads':
+        return '/leads';
       default:
         return '/dashboard';
     }
@@ -92,6 +94,8 @@ export const pathToRoute = (pathname: string, isSuperAdmin: boolean): string => 
       case '/system-health':
       case '/system':
         return 'admin-system';
+      case '/leads':
+        return 'admin-leads';
       default:
         return 'admin-dashboard';
     }
@@ -191,6 +195,7 @@ import { PlatformSystemPage } from './pages/Admin/System/PlatformSystemPage';
 import { PlatformSecurityPage } from './pages/Admin/Security/PlatformSecurityPage';
 import { PlatformTicketsPage } from './pages/Admin/Tickets/PlatformTicketsPage';
 import { ConvertedCustomersPage } from './pages/Admin/Customers/ConvertedCustomersPage';
+import { PlatformLeadsPage } from './pages/Admin/Leads/PlatformLeadsPage';
 import { TenantSupportPage } from './pages/Support/TenantSupportPage';
 import { signalRService } from './services/signalRService';
 
@@ -737,6 +742,8 @@ export const App: React.FC = () => {
             <PlatformTicketsPage />
           ) : currentRoute === 'admin-converted-customers' || currentRoute === 'converted-customers' ? (
             <ConvertedCustomersPage onNavigate={navigate} />
+          ) : currentRoute === 'admin-leads' ? (
+            <PlatformLeadsPage onNavigate={navigate} />
           ) : currentRoute === 'admin-system' ? (
             <PlatformSystemPage />
           ) : currentRoute === 'admin-security' ? (

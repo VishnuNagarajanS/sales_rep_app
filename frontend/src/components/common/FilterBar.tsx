@@ -45,6 +45,10 @@ export interface FilterBarProps {
    * or when a date range value is non-empty.
    */
   onClearAll?: () => void;
+  /** Whether to show the leading 'Filters:' badge (defaults to true) */
+  showLabel?: boolean;
+  /** Whether to hide individual select item labels (defaults to false) */
+  hideItemLabels?: boolean;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -53,6 +57,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   filters,
   dateRange,
   onClearAll,
+  showLabel = true,
+  hideItemLabels = false,
 }) => {
   const isDateActive = dateRange
     ? (Boolean(dateRange.preset) && dateRange.preset !== 'all' && dateRange.preset !== 'All') ||
@@ -76,20 +82,24 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   return (
     <div className="filterbar-container">
       {/* Label */}
-      <span className="filterbar-label">
-        <Filter size={13} />
-        Filters:
-      </span>
+      {showLabel && (
+        <span className="filterbar-label">
+          <Filter size={13} />
+          Filters:
+        </span>
+      )}
 
       {/* Select Dropdowns */}
       {filters.map(filter => (
         <div key={filter.key} className="filterbar-item">
-          <label
-            htmlFor={`filter-${filter.key}`}
-            className="filterbar-item-label"
-          >
-            {filter.label}:
-          </label>
+          {!hideItemLabels && (
+            <label
+              htmlFor={`filter-${filter.key}`}
+              className="filterbar-item-label"
+            >
+              {filter.label}:
+            </label>
+          )}
           <select
             id={`filter-${filter.key}`}
             name={`filter-${filter.key}`}

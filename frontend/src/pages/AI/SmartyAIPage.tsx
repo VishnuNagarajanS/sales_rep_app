@@ -13,16 +13,61 @@ export const SmartyAIPage: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const roleCode = (user?.role?.code || '').toLowerCase();
+  const allowedRoles = ['company_admin', 'sales_executive', 'irm', 'super_admin', 'admin', 'ghl_admin'];
+  const isAllowed = allowedRoles.includes(roleCode);
+  const isSalesExec = roleCode === 'sales_executive';
+  const isIrm = roleCode === 'irm';
+
+  const defaultGreeting = isSalesExec
+    ? 'Hi! I am **Smarty AI**, your personal sales assistant.\n\nI can help you review your assigned leads, upcoming follow-ups, calls, customer conversions, and GHL products. Let me know what you need!'
+    : isIrm
+    ? 'Hi! I am **Smarty AI**, your investor relations assistant.\n\nI can help you manage your investor portfolio, track active opportunities & deals, view upcoming consultations, and verify KYC statuses. How can I assist you today?'
+    : 'Hi! I am **Smarty AI**, your built-in assistant for NexusSales.\n\nI can help you view and manage company leads, team follow-ups, customers, deals, investors, and reports. Let me know what you\'d like to do today!';
+
+  const suggestions = isSalesExec
+    ? [
+        "What leads are assigned to me today?",
+        "Show my pending follow-ups for today",
+        "Which of my leads are in Interested status?",
+        "Tell me about GHL company products and schemes"
+      ]
+    : isIrm
+    ? [
+        "Which of my clients have KYC pending review?",
+        "List my active investment opportunities",
+        "What is my total committed AUM?",
+        "What are the Direct AIF vs Debenture investment limits?"
+      ]
+    : [
+        "Show company lead overview",
+        "Which leads came in yesterday?",
+        "Show team performance summary",
+        "Tell me about GHL company products and schemes"
+      ];
+
+  const placeholderText = isSalesExec
+    ? "Ask about your leads, follow-ups, calls, or GHL products..."
+    : isIrm
+    ? "Ask about your investors, opportunities, KYC, or consultations..."
+    : "Ask Smarty anything about your CRM...";
+
+  const subtitleText = isSalesExec
+    ? "Your personal Sales Assistant"
+    : isIrm
+    ? "Your personal Investor Relations Assistant"
+    : "Ask anything about your CRM data";
+
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
         {
           role: 'assistant',
-          content: 'Hi! I am **Smarty AI**, your built-in assistant for NexusSales.\n\nI can help you view and manage leads, follow-ups, customers, deals, and reports. Let me know what you\'d like to do today!'
+          content: defaultGreeting
         }
       ]);
     }
-  }, [messages.length]);
+  }, [messages.length, defaultGreeting]);
 
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -84,24 +129,17 @@ export const SmartyAIPage: React.FC = () => {
     }
   };
 
-  if (user?.role?.code !== 'company_admin') {
+  if (!isAllowed) {
     return (
       <div style={{ padding: '24px', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', background: 'var(--bg-app)' }}>
         <div style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
           <Sparkles size={48} style={{ margin: '0 auto 16px', opacity: 0.5 }} />
           <h2>Smarty AI</h2>
-          <p>This module is currently only available for administrators.</p>
+          <p>This module is currently not available for your role.</p>
         </div>
       </div>
     );
   }
-
-  const suggestions = [
-    "Show user details",
-    "Filter by status",
-    "Which leads came in yesterday?",
-    "Export to Excel"
-  ];
 
   return (
     <div className="premium-chat-container">
@@ -109,7 +147,7 @@ export const SmartyAIPage: React.FC = () => {
       <div className="premium-header">
         <div className="premium-header-text">
           <h1>Smarty AI Assistant</h1>
-          <p><span className="online-dot"></span> Ask anything about your CRM data</p>
+          <p><span className="online-dot"></span> {subtitleText}</p>
         </div>
       </div>
 
@@ -167,7 +205,7 @@ export const SmartyAIPage: React.FC = () => {
             value={input}
             onChange={handleInput}
             onKeyDown={onKeyDown}
-            placeholder="Ask Smarty anything about your CRM..."
+            placeholder={placeholderText}
             disabled={loading}
             rows={1}
           />

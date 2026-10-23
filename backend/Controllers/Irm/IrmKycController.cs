@@ -396,112 +396,6 @@ public class IrmKycController : ControllerBase
     }
 
 
-    [HttpPost("{id:int}/review")]
-    [Authorize]
-    public async Task<IActionResult> ReviewKyc(int id, [FromBody] KycReviewDto dto, CancellationToken ct)
-    {
-        if (User.IsGhlAdmin())
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM KYC records."));
-        }
-
-        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
-        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
-        var companyId = User.GetCompanyId(0);
-        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
-        if (companyId <= 0)
-            return Unauthorized();
-
-        var userId = User.GetUserId();
-        if (userId <= 0)
-            return Unauthorized();
-
-        // Server-side permission check: user must have kyc.verify
-        var hasKycVerifyClaim = User.Claims.Any(c => c.Type == "permission" && c.Value == "kyc.verify");
-        if (!hasKycVerifyClaim)
-        {
-            var dbUser = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Id == userId && u.CompanyId == companyId, ct);
-            if (dbUser?.Role?.Permissions == null || !dbUser.Role.Permissions.Contains("kyc.verify"))
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Forbidden: User lacks kyc.verify permission."));
-            }
-        }
-
-        if (!isPlatformAdmin)
-        {
-            var kycRec = await _db.InvestorKycs.FirstOrDefaultAsync(k => k.Id == id && k.CompanyId == companyId, ct);
-            if (kycRec == null) return NotFound(ApiResponse<KycDto>.ErrorResponse("KYC record not found"));
-            if (kycRec.IrmId.HasValue && kycRec.IrmId.Value != userId)
-                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<KycDto>.ErrorResponse("Access denied: You can only review KYC records assigned to you."));
-        }
-
-        var result = await _kycService.ReviewKycAsync(id, companyId, dto, ct);
-        if (!result.Success)
-            return BadRequest(result);
-
-        var currentDbUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
-        var actorEmail = User.FindFirst(ClaimTypes.Email)?.Value
-            ?? User.FindFirst("email")?.Value
-            ?? currentDbUser?.Email
-            ?? "irm@ghl.com";
-        var actorName = User.FindFirst(ClaimTypes.Name)?.Value
-            ?? User.FindFirst("name")?.Value
-            ?? currentDbUser?.Name
-            ?? actorEmail;
-
-        // Write AuditLog
-        var audit = new AuditLog
-        {
-            CompanyId = companyId,
-            Timestamp = DateTime.UtcNow,
-            ActorName = actorName,
-            ActorEmail = actorEmail,
-            Action = "KYC_REVIEW",
-            EntityType = "InvestorKyc",
-            EntityId = id.ToString(),
-            Details = $"KYC review completed with action: {dto.Action}. Remarks: {dto.Remarks}",
-            Module = "KYC",
-            Status = "success"
-        };
-        _db.AuditLogs.Add(audit);
-
-        // Sync linked GhlDeal KycStatus
-        if (result.Data != null)
-        {
-            var kycData = result.Data;
-            var deal = await _db.GhlDeals.Include(d => d.Customer).FirstOrDefaultAsync(d =>
-                (d.KycId == id ||
-                 (kycData.InvestorId > 0 && d.CustomerId == kycData.InvestorId) ||
-                 (d.Customer != null && !string.IsNullOrEmpty(kycData.Email) && d.Customer.Email == kycData.Email)) &&
-                d.CompanyId == companyId, ct);
-
-            if (deal != null)
-            {
-                deal.KycId = id;
-                if (dto.Action.Equals("Approved", StringComparison.OrdinalIgnoreCase))
-                {
-                    deal.KycStatus = "Verified";
-                    deal.VerifiedBy = actorEmail;
-                    deal.VerifiedAt = DateTime.UtcNow;
-                }
-                else if (dto.Action.Equals("ReuploadRequested", StringComparison.OrdinalIgnoreCase))
-                {
-                    deal.KycStatus = "Needs Correction";
-                }
-                else if (dto.Action.Equals("Rejected", StringComparison.OrdinalIgnoreCase))
-                {
-                    deal.KycStatus = "Rejected";
-                }
-                deal.Remarks = dto.Remarks;
-                deal.UpdatedAt = DateTime.UtcNow;
-            }
-        }
-
-        await _db.SaveChangesAsync(ct);
-
-        return Ok(result);
-    }
-
     [HttpPost("{id:int}/revoke-link")]
     [Authorize]
     public async Task<IActionResult> RevokeLink(int id, CancellationToken ct)
@@ -589,13 +483,20 @@ public class IrmKycController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<bool>.ErrorResponse("Access denied: You can only update KYC records assigned to you."));
         }
 
-        if (string.IsNullOrWhiteSpace(dto.Status) || 
-            (dto.Status != "Pending" && dto.Status != "Wrong" && dto.Status != "Verified"))
+        var targetStatus = dto.Status?.Trim();
+        if (string.Equals(targetStatus, "Needs Correction", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(targetStatus, "ReuploadRequested", StringComparison.OrdinalIgnoreCase))
+        {
+            targetStatus = "Wrong";
+        }
+
+        if (string.IsNullOrWhiteSpace(targetStatus) || 
+            (targetStatus != "Pending" && targetStatus != "Wrong" && targetStatus != "Verified"))
         {
             return BadRequest(ApiResponse<bool>.ErrorResponse("Invalid status. Allowed values: Pending, Wrong, Verified."));
         }
 
-        if (dto.Status == "Verified")
+        if (targetStatus == "Verified")
         {
             bool hasRealSubmission = kyc.SubmittedAt != null 
                 || kyc.Status == KycStatus.PendingReview 
@@ -612,7 +513,7 @@ public class IrmKycController : ControllerBase
                 return BadRequest(ApiResponse<bool>.ErrorResponse("Required checklist items (Identity, Bank, Documents, Demat" + (hasNominees ? ", Nominee" : "") + ") must be manually verified and confirmed."));
             }
         }
-        else if (dto.Status == "Wrong")
+        else if (targetStatus == "Wrong")
         {
             if (string.IsNullOrWhiteSpace(dto.Comment))
             {
@@ -633,7 +534,7 @@ public class IrmKycController : ControllerBase
 
         var oldStatus = kyc.Status.ToString();
 
-        if (dto.Status == "Verified")
+        if (targetStatus == "Verified")
         {
             kyc.VerifiedBy = actorEmail;
             kyc.VerifiedAt = DateTime.UtcNow;
@@ -642,7 +543,7 @@ public class IrmKycController : ControllerBase
             kyc.ReviewRemarks = dto.Comment;
             kyc.FlaggedSectionsJson = null;
         }
-        else if (dto.Status == "Wrong")
+        else if (targetStatus == "Wrong")
         {
             kyc.VerifiedBy = null;
             kyc.VerifiedAt = null;
@@ -673,7 +574,7 @@ public class IrmKycController : ControllerBase
             Action = "UPDATE",
             EntityType = "InvestorKyc",
             EntityId = kyc.Id.ToString(),
-            Details = $"KYC status updated to {dto.Status}. Old status: {oldStatus}. Comment: {dto.Comment}. Flagged: {(dto.FlaggedSections != null ? string.Join(", ", dto.FlaggedSections) : "none")}",
+            Details = $"KYC status updated to {targetStatus}. Old status: {oldStatus}. Comment: {dto.Comment}. Flagged: {(dto.FlaggedSections != null ? string.Join(", ", dto.FlaggedSections) : "none")}",
             Module = "KYC",
             Status = "success"
         };
@@ -688,7 +589,7 @@ public class IrmKycController : ControllerBase
         if (deal != null)
         {
             deal.KycId = kyc.Id;
-            deal.KycStatus = dto.Status;
+            deal.KycStatus = targetStatus;
             deal.VerifiedBy = kyc.VerifiedBy;
             deal.VerifiedAt = kyc.VerifiedAt;
             deal.Remarks = kyc.Remarks;
@@ -701,14 +602,14 @@ public class IrmKycController : ControllerBase
         return Ok(ApiResponse<object>.SuccessResponse(new
         {
             id = kyc.Id,
-            status = dto.Status,
+            status = targetStatus,
             customerKycStatus = kyc.Status == KycStatus.Approved ? "Verified" : kyc.Status == KycStatus.ReuploadRequested ? "Needs Correction" : "Submitted",
             verifiedBy = kyc.VerifiedBy,
             verifiedAt = kyc.VerifiedAt,
             remarks = kyc.Remarks,
             flaggedSections = dto.FlaggedSections,
             dealId = deal?.Id
-        }, $"KYC status updated to {dto.Status}"));
+        }, $"KYC status updated to {targetStatus}"));
     }
 
     /// <summary>
@@ -823,5 +724,128 @@ public class IrmKycController : ControllerBase
             reviewedBy = actorEmail,
             savedAt    = DateTime.UtcNow
         }, "Verification draft saved."));
+    }
+
+    /// <summary>
+    /// PATCH api/irm/kyc/{id}/details
+    /// Directly updates/corrects specific KYC details (e.g. when marked Wrong during verification).
+    /// </summary>
+    [HttpPatch("{id:int}/details")]
+    [Authorize]
+    public async Task<IActionResult> UpdateKycDetails(int id, [FromBody] UpdateKycDetailsDto dto, CancellationToken ct)
+    {
+        if (User.IsGhlAdmin())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<bool>.ErrorResponse("Access denied: GHL Admin has read-only access."));
+        }
+
+        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
+        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
+        var companyId = User.GetCompanyId(0);
+        if (companyId <= 0 && isPlatformAdmin) companyId = 1;
+        if (companyId <= 0) return Unauthorized();
+
+        var userId = User.GetUserId();
+        if (userId <= 0) return Unauthorized();
+
+        var kyc = await _db.InvestorKycs.FirstOrDefaultAsync(k => k.Id == id && k.CompanyId == companyId, ct);
+        if (kyc == null)
+            return NotFound(ApiResponse<bool>.ErrorResponse("KYC record not found."));
+
+        if (!isPlatformAdmin && kyc.IrmId.HasValue && kyc.IrmId.Value != userId)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<bool>.ErrorResponse("Access denied: You can only update KYC records assigned to you."));
+        }
+
+        // Apply provided field updates
+        if (dto.InvestorName != null) kyc.InvestorName = dto.InvestorName.Trim();
+        if (dto.Phone != null) kyc.Phone = dto.Phone.Trim();
+        if (dto.Email != null) kyc.Email = dto.Email.Trim();
+        if (dto.FatherName != null) kyc.FatherName = dto.FatherName.Trim();
+        if (dto.DateOfBirth != null) kyc.DateOfBirth = dto.DateOfBirth.Trim();
+        if (dto.NameAsPerPan != null) kyc.NameAsPerPan = dto.NameAsPerPan.Trim();
+        if (dto.Gender != null) kyc.Gender = dto.Gender.Trim();
+        if (dto.InvestorType != null) kyc.InvestorType = dto.InvestorType.Trim();
+        if (dto.ResidentType != null) kyc.ResidentType = dto.ResidentType.Trim();
+        if (dto.Occupation != null) kyc.Occupation = dto.Occupation.Trim();
+
+        if (dto.PanNumber != null) kyc.PanNumber = dto.PanNumber.Trim().ToUpperInvariant();
+        if (dto.AadhaarNumber != null) kyc.AadhaarNumber = dto.AadhaarNumber.Trim();
+        if (dto.AddressLine1 != null) kyc.AddressLine1 = dto.AddressLine1.Trim();
+        if (dto.AddressLine2 != null) kyc.AddressLine2 = dto.AddressLine2.Trim();
+        if (dto.City != null) kyc.City = dto.City.Trim();
+        if (dto.State != null) kyc.State = dto.State.Trim();
+        if (dto.Pincode != null) kyc.Pincode = dto.Pincode.Trim();
+        if (dto.Country != null) kyc.Country = dto.Country.Trim();
+
+        if (dto.BankName != null) kyc.BankName = dto.BankName.Trim();
+        if (dto.AccountNumber != null) kyc.AccountNumber = dto.AccountNumber.Trim();
+        if (dto.IfscCode != null) kyc.IfscCode = dto.IfscCode.Trim().ToUpperInvariant();
+        if (dto.AccountType != null) kyc.AccountType = dto.AccountType.Trim();
+
+        if (dto.DematAccountNumber != null) kyc.DematAccountNumber = dto.DematAccountNumber.Trim();
+        if (dto.DpId != null) kyc.DpId = dto.DpId.Trim();
+
+        if (dto.NomineesJson != null) kyc.NomineesJson = dto.NomineesJson.Trim();
+
+        kyc.UpdatedAt = DateTime.UtcNow;
+
+        // If linked Investor exists, sync name/phone/email
+        if (kyc.InvestorId > 0)
+        {
+            var inv = await _db.Investors.FirstOrDefaultAsync(i => i.Id == kyc.InvestorId && i.CompanyId == companyId, ct);
+            if (inv != null)
+            {
+                if (dto.InvestorName != null) inv.Name = dto.InvestorName.Trim();
+                if (dto.Phone != null) inv.Phone = dto.Phone.Trim();
+                if (dto.Email != null) inv.Email = dto.Email.Trim();
+            }
+        }
+
+        // Audit entry
+        var currentDbUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+        var actorEmail = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value ?? currentDbUser?.Email ?? "irm@ghl.com";
+        var actorName = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst("name")?.Value ?? currentDbUser?.Name ?? actorEmail;
+
+        _db.AuditLogs.Add(new AuditLog
+        {
+            CompanyId = companyId,
+            Timestamp = DateTime.UtcNow,
+            ActorEmail = actorEmail,
+            ActorName = actorName,
+            Action = "UPDATE_DETAILS",
+            EntityType = "InvestorKyc",
+            EntityId = kyc.Id.ToString(),
+            Details = $"KYC details corrected for {kyc.InvestorName}. Section: {dto.CorrectedSection ?? "General"}",
+            Module = "KYC",
+            Status = "success"
+        });
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(ApiResponse<object>.SuccessResponse(new
+        {
+            id = kyc.Id,
+            investorName = kyc.InvestorName,
+            phone = kyc.Phone,
+            email = kyc.Email,
+            panNumber = kyc.PanNumber,
+            nameAsPerPan = kyc.NameAsPerPan,
+            fatherName = kyc.FatherName,
+            aadhaarNumber = kyc.AadhaarNumber,
+            dob = kyc.DateOfBirth,
+            addressLine1 = kyc.AddressLine1,
+            city = kyc.City,
+            state = kyc.State,
+            pincode = kyc.Pincode,
+            bankName = kyc.BankName,
+            accountNumber = kyc.AccountNumber,
+            ifscCode = kyc.IfscCode,
+            accountType = kyc.AccountType,
+            dpId = kyc.DpId,
+            dematAccountNumber = kyc.DematAccountNumber,
+            nomineesJson = kyc.NomineesJson,
+            updatedAt = kyc.UpdatedAt
+        }, "KYC details updated successfully."));
     }
 }

@@ -224,11 +224,11 @@ public class LeadService : ILeadService
                 }
                 else if (matchInv != null)
                 {
-                    if (matchInv.Status == InvestorStatus.ActiveInvestor)
+                    if (matchInv.Status == InvestorStatus.ActiveInvestor || matchInv.Status == InvestorStatus.HnwInvestor)
                     {
                         targetStatus = "Converted";
                     }
-                    else
+                    else if (matchKyc != null)
                     {
                         targetStatus = "KYC In Progress";
                     }

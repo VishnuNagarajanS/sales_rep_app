@@ -121,7 +121,7 @@ export interface Lead {
   email: string;
   location: string;
   source: string;
-  status: 'New' | 'Contacted' | 'Qualified' | 'Proposal' | 'Negotiation' | 'Converted' | 'Lost' | 'Not Interested' | 'Junk' | 'Wrong Number' | 'Callback' | 'No Response' | 'Follow-up Required' | 'Interested' | 'Other';
+  status: 'New' | 'Contacted' | 'Qualified' | 'Proposal' | 'Negotiation' | 'Converted' | 'Lost' | 'Not Interested' | 'Junk' | 'Wrong Number' | 'Callback' | 'No Response' | 'Follow-up Required' | 'Interested' | 'Other' | 'Site Visit Scheduled' | 'Site Visit Completed' | 'Booking In Progress' | 'Follow-up Completed';
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
   assignedAgentId: string;
   assignedAgentName: string;
@@ -176,6 +176,17 @@ export interface Lead {
   returnedAt?: string;
   updatedAt?: string;
   normalizedEmail?: string;
+  targetDevelopment?: string;
+  preferredVisitDate?: string;
+  preferredTimeSlot?: string;
+  anythingWeShouldKnow?: string;
+  whatAreYouLookingFor?: string;
+  budgetRange?: string;
+  investmentCapacity?: string;
+  assetClass?: string;
+  horizon?: string;
+  investorType?: string;
+  readyToRegister?: string | boolean;
 }
 
 export interface Customer {
@@ -400,6 +411,9 @@ export interface Followup {
   isReturnedFromHandover?: boolean;
   returnedFromCoveringUserName?: string;
   returnedAt?: string;
+  leadId?: string;
+  customerId?: string;
+  investorId?: string;
   customFields?: Record<string, any>;
 }
 
@@ -427,44 +441,72 @@ export interface Plot {
   status: 'Available' | 'Hold' | 'Sold';
   dimension?: string;
   facing?: string;
+  heldByCustomerId?: string | number;
   holdByCustomer?: string;
   holdByAgent?: string;
   holdExpiry?: string;
 }
 
+export * from '../constants/siteVisit';
+
 export interface SiteVisit {
   id: string;
   companyId: string;
-  customerId: string;
-  customerName: string;
-  customerPhone: string;
-  projectId: string;
-  projectName: string;
+  customerId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  projectId?: string;
+  projectName?: string;
+  developmentName?: string;
+  plotId?: string;
   plotNumber?: string;
-  scheduledAt: string;
-  assignedAgentId: string;
-  assignedAgentName: string;
-  status: 'Scheduled' | 'Completed' | 'Rescheduled' | 'Cancelled' | 'No-show';
+  scheduledAt?: string;
+  scheduledDate?: string;
+  scheduledTimeSlot?: string;
+  assignedAgentId?: string;
+  assignedAgentName?: string;
+  status: 'Requested' | 'Pending' | 'Scheduled' | 'Confirmed' | 'Completed' | 'Rescheduled' | 'Cancelled' | 'No-show' | string;
   outcomeNotes?: string;
+  visitorNote?: string;
+  contactType?: 'lead' | 'customer';
+  leadId?: string;
+  leadName?: string;
+  leadPhone?: string;
+  notes?: string;
+  createdAt?: string;
 }
 
 export interface Booking {
   id: string;
+  bookingId?: string;
   companyId: string;
-  customerId: string;
+  customerId?: string;
+  leadId?: string;
   customerName: string;
   customerPhone: string;
-  projectId: string;
+  projectId?: string;
   projectName: string;
-  plotId: string;
-  plotNumber: string;
-  bookingDate: string;
-  bookingAmount: number;
+  plotId?: string;
+  plotNumber?: string;
+  plotArea?: string | number;
+  bookingDate?: string;
+  bookingAmount?: number;
+  tokenAmount?: number;
+  tokenAmountPaid?: number;
   totalAmount: number;
-  status: 'Pending' | 'Confirmed' | 'Cancelled';
-  agentId: string;
-  agentName: string;
-  paymentTerms: string;
+  balanceAmount?: number;
+  tokenPaidDate?: string;
+  paymentMode?: string;
+  paymentStatus?: string;
+  status: 'Pending' | 'Confirmed' | 'Cancelled' | 'Token Paid' | 'Agreement Signed' | 'Registration Completed' | string;
+  agentId?: string;
+  agentName?: string;
+  assignedAgentId?: string;
+  assignedAgentName?: string;
+  paymentTerms?: string;
+  notes?: string;
+  createdAt?: string;
+  verifiedReceipts?: number;
 }
 
 export interface Investor {
@@ -1186,5 +1228,47 @@ export interface EmergencyLockdownStatus {
   initiatedBy?: string;
   initiatedAt?: string;
   revokedSessionsCount?: number;
+}
+
+// ── Platform Cross-Tenant Leads ──────────────────────────────────────────
+export interface PlatformLead {
+  id: number;
+  tenantId: number;
+  tenantName: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  status: string;
+  priority: string;
+  assignedAgentName?: string;
+  source?: string;
+  location?: string;
+  createdAt?: string;
+}
+
+export interface TenantLeadCount {
+  tenantId: number;
+  tenantName: string;
+  count: number;
+}
+
+export interface PlatformLeadSummary {
+  total: number;
+  newLeads: number;
+  interestedLeads: number;
+  convertedLeads: number;
+  notInterestedLeads: number;
+  thisMonthLeads: number;
+  lastMonthLeads: number;
+  byTenant: TenantLeadCount[];
+}
+
+export interface PlatformLeadsResponse {
+  items: PlatformLead[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  summary: PlatformLeadSummary;
 }
 

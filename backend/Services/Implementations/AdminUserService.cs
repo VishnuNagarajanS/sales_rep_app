@@ -14,17 +14,20 @@ public class AdminUserService : IAdminUserService
     private readonly backend.Services.Email.IEmailService _emailService;
     private readonly backend.Services.Interfaces.ICompanyClock _clock;
     private readonly Microsoft.AspNetCore.SignalR.IHubContext<backend.Hubs.PlatformHub, backend.Hubs.IPlatformHubClient>? _hubContext;
+    private readonly IConfiguration? _config;
 
     public AdminUserService(
         ApplicationDbContext context,
         backend.Services.Email.IEmailService emailService,
         backend.Services.Interfaces.ICompanyClock clock,
-        Microsoft.AspNetCore.SignalR.IHubContext<backend.Hubs.PlatformHub, backend.Hubs.IPlatformHubClient>? hubContext = null)
+        Microsoft.AspNetCore.SignalR.IHubContext<backend.Hubs.PlatformHub, backend.Hubs.IPlatformHubClient>? hubContext = null,
+        IConfiguration? config = null)
     {
         _context = context;
         _emailService = emailService;
         _clock = clock;
         _hubContext = hubContext;
+        _config = config;
     }
 
     public async Task<ApiResponse<List<AdminUserDto>>> GetUsersByCompanyAsync(int companyId, CancellationToken cancellationToken = default)
@@ -140,7 +143,8 @@ public class AdminUserService : IAdminUserService
         {
             try
             {
-                var loginUrl = "http://localhost:5173/auth/login";
+                var clientBaseUrl = _config?["SmtpSettings:ClientBaseUrl"]?.TrimEnd('/') ?? "http://localhost:5173";
+                var loginUrl = $"{clientBaseUrl}/auth/login";
                 var emailBody = $@"
                     <h3>Welcome to GHL India Ventures, {request.Name}!</h3>
                     <p>You have been invited to join the platform as a <b>{role.Name}</b>.</p>

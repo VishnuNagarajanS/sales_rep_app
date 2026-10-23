@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace backend.Controllers.SuperAdmin;
 
@@ -650,8 +651,16 @@ public class PlatformUsersController : ControllerBase
     [HttpGet("~/api/platform/metrics")]
     public async Task<ActionResult<ApiResponse<PlatformMetricsDto>>> GetPlatformMetrics(
         [FromQuery] string? timeZone = null,
+        [FromServices] Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null,
         CancellationToken ct = default)
     {
+        var tzKey = timeZone ?? "default";
+        var cacheKey = $"platform_metrics_{tzKey}";
+        if (cache != null && cache.TryGetValue(cacheKey, out PlatformMetricsDto? cached) && cached != null)
+        {
+            return Ok(ApiResponse<PlatformMetricsDto>.SuccessResult(cached));
+        }
+
         var (currentMonthStart, nextMonthStart, prevMonthStart) = GetMonthUtcRanges(timeZone);
 
         var totalTenants = await _context.Tenants.CountAsync(ct);
@@ -736,6 +745,11 @@ public class PlatformUsersController : ControllerBase
             SystemHealthScore = systemHealthScore
         };
 
+        if (cache != null)
+        {
+            cache.Set(cacheKey, metrics, TimeSpan.FromSeconds(10));
+        }
+
         return Ok(ApiResponse<PlatformMetricsDto>.SuccessResult(metrics));
     }
 
@@ -743,8 +757,16 @@ public class PlatformUsersController : ControllerBase
     [HttpGet("~/api/platform/metrics/calls-today")]
     public async Task<ActionResult<ApiResponse<CallsTodayMetricsDto>>> GetCallsTodayMetrics(
         [FromQuery] string? timeZone = null,
+        [FromServices] Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null,
         CancellationToken ct = default)
     {
+        var tzKey = timeZone ?? "default";
+        var cacheKey = $"calls_today_metrics_{tzKey}";
+        if (cache != null && cache.TryGetValue(cacheKey, out CallsTodayMetricsDto? cached) && cached != null)
+        {
+            return Ok(ApiResponse<CallsTodayMetricsDto>.SuccessResult(cached));
+        }
+
         var (callsToday, callsConnected, callsFailed, duration, successRate) = await CalculateCallsTodayAsync(timeZone, ct);
 
         var result = new CallsTodayMetricsDto
@@ -755,6 +777,11 @@ public class PlatformUsersController : ControllerBase
             TotalDurationSeconds = duration,
             SuccessRate = successRate
         };
+
+        if (cache != null)
+        {
+            cache.Set(cacheKey, result, TimeSpan.FromSeconds(5));
+        }
 
         return Ok(ApiResponse<CallsTodayMetricsDto>.SuccessResult(result));
     }
@@ -852,5 +879,204 @@ public class PlatformUsersController : ControllerBase
         var successRate = callsToday > 0 ? Math.Round(((double)callsConnected / callsToday) * 100.0, 1) : 100.0;
 
         return (callsToday, callsConnected, callsFailed, totalDuration, successRate);
+    }
+
+    // ── CROSS-TENANT LEADS (Super Admin) ────────────────────────────────────────
+
+    /// <summary>
+    /// Returns paginated cross-tenant leads visible to the super admin.
+    /// </summary>
+    [HttpGet("~/api/super-admin/leads")]
+    public async Task<ActionResult<ApiResponse<PlatformLeadsResponseDto>>> GetAllLeads(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? search = null,
+        [FromQuery] string? status = null,
+        [FromQuery] string? priority = null,
+        [FromQuery] int? tenantId = null,
+        [FromQuery] string? source = null,
+        [FromQuery] string? startDate = null,
+        [FromQuery] string? endDate = null,
+        [FromQuery] string? sortBy = "createdAt",
+        [FromQuery] string? sortOrder = "desc",
+        [FromQuery] string? timeZone = null,
+        [FromServices] Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null,
+        CancellationToken ct = default)
+    {
+        var cacheKey = $"leads_p{page}_s{pageSize}_{search ?? ""}_{status ?? ""}_{priority ?? ""}_{tenantId?.ToString() ?? ""}_{source ?? ""}_{startDate ?? ""}_{endDate ?? ""}_{sortBy ?? ""}_{sortOrder ?? ""}";
+        if (cache != null && cache.TryGetValue(cacheKey, out PlatformLeadsResponseDto? cachedResponse) && cachedResponse != null)
+        {
+            return Ok(ApiResponse<PlatformLeadsResponseDto>.SuccessResult(cachedResponse));
+        }
+
+        var query = _context.Leads
+            .AsNoTracking()
+            .Include(l => l.Company)
+            .Include(l => l.AssignedAgent)
+            .AsQueryable();
+
+        // Filters
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim().ToLower();
+            query = query.Where(l =>
+                l.Name.ToLower().Contains(s) ||
+                l.Email.ToLower().Contains(s) ||
+                l.Phone.Contains(s) ||
+                l.Location.ToLower().Contains(s));
+        }
+
+        if (!string.IsNullOrWhiteSpace(status))
+            query = query.Where(l => l.Status == status);
+
+        if (!string.IsNullOrWhiteSpace(priority))
+            query = query.Where(l => l.Priority == priority);
+
+        if (tenantId.HasValue)
+            query = query.Where(l => l.CompanyId == tenantId.Value);
+
+        if (!string.IsNullOrWhiteSpace(source))
+            query = query.Where(l => l.Source == source);
+
+        if (!string.IsNullOrWhiteSpace(startDate) && DateTime.TryParse(startDate, out var sd))
+            query = query.Where(l => l.CreatedAt >= sd.ToUniversalTime());
+
+        if (!string.IsNullOrWhiteSpace(endDate) && DateTime.TryParse(endDate, out var ed))
+            query = query.Where(l => l.CreatedAt <= ed.ToUniversalTime().AddDays(1));
+
+        // Total count matching query
+        var totalCount = await query.CountAsync(ct);
+
+        // Sorting
+        query = (sortBy?.ToLower(), sortOrder?.ToLower()) switch
+        {
+            ("name", "asc") => query.OrderBy(l => l.Name),
+            ("name", _) => query.OrderByDescending(l => l.Name),
+            ("status", "asc") => query.OrderBy(l => l.Status),
+            ("status", _) => query.OrderByDescending(l => l.Status),
+            ("priority", "asc") => query.OrderBy(l => l.Priority),
+            ("priority", _) => query.OrderByDescending(l => l.Priority),
+            ("tenant", "asc") => query.OrderBy(l => l.Company != null ? l.Company.Name : ""),
+            ("tenant", _) => query.OrderByDescending(l => l.Company != null ? l.Company.Name : ""),
+            ("createdat", "asc") => query.OrderBy(l => l.CreatedAt),
+            _ => query.OrderByDescending(l => l.CreatedAt)
+        };
+
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+        var totalPages = (int)Math.Ceiling(totalCount / (double)safePageSize);
+
+        var rawLeads = await query
+            .Skip((safePage - 1) * safePageSize)
+            .Take(safePageSize)
+            .Select(l => new
+            {
+                l.Id,
+                TenantId = l.CompanyId,
+                TenantName = l.Company != null ? l.Company.Name : "",
+                l.Name,
+                l.Phone,
+                l.Email,
+                l.Status,
+                l.Priority,
+                AssignedAgentName = l.AssignedAgent != null ? l.AssignedAgent.Name : null,
+                l.Source,
+                l.Location,
+                l.CreatedAt
+            })
+            .ToListAsync(ct);
+
+        var leads = rawLeads.Select(l => new PlatformLeadDto
+        {
+            Id = l.Id,
+            TenantId = l.TenantId,
+            TenantName = !string.IsNullOrEmpty(l.TenantName) ? l.TenantName : $"Tenant #{l.TenantId}",
+            Name = l.Name,
+            Phone = l.Phone,
+            Email = l.Email,
+            Status = l.Status,
+            Priority = l.Priority,
+            AssignedAgentName = l.AssignedAgentName,
+            Source = l.Source,
+            Location = l.Location,
+            CreatedAt = l.CreatedAt.ToString("o")
+        }).ToList();
+
+        // Cached summary metrics
+        var summaryCacheKey = "platform_leads_summary";
+        PlatformLeadSummaryDto? summary = null;
+        if (cache != null && cache.TryGetValue(summaryCacheKey, out PlatformLeadSummaryDto? cachedSummary) && cachedSummary != null)
+        {
+            summary = cachedSummary;
+        }
+        else
+        {
+            var (currentMonthStart, _, prevMonthStart) = GetMonthUtcRanges(timeZone);
+
+            var summaryAgg = await _context.Leads
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Total = g.Count(),
+                    NewLeads = g.Count(l => l.Status == "New"),
+                    InterestedLeads = g.Count(l => l.Status == "Interested"),
+                    ConvertedLeads = g.Count(l => l.Status == "Converted"),
+                    NotInterestedLeads = g.Count(l => l.Status == "Not Interested"),
+                    ThisMonthLeads = g.Count(l => l.CreatedAt >= currentMonthStart),
+                    LastMonthLeads = g.Count(l => l.CreatedAt >= prevMonthStart && l.CreatedAt < currentMonthStart)
+                })
+                .FirstOrDefaultAsync(ct);
+
+            var tenantCounts = await _context.Leads
+                .GroupBy(l => l.CompanyId)
+                .Select(g => new
+                {
+                    TenantId = g.Key,
+                    Count = g.Count()
+                })
+                .ToListAsync(ct);
+
+            var tenants = await _context.Tenants.AsNoTracking().Select(t => new { t.Id, t.Name }).ToListAsync(ct);
+            var tenantDict = tenants.ToDictionary(t => t.Id, t => t.Name);
+
+            summary = new PlatformLeadSummaryDto
+            {
+                Total = summaryAgg?.Total ?? 0,
+                NewLeads = summaryAgg?.NewLeads ?? 0,
+                InterestedLeads = summaryAgg?.InterestedLeads ?? 0,
+                ConvertedLeads = summaryAgg?.ConvertedLeads ?? 0,
+                NotInterestedLeads = summaryAgg?.NotInterestedLeads ?? 0,
+                ThisMonthLeads = summaryAgg?.ThisMonthLeads ?? 0,
+                LastMonthLeads = summaryAgg?.LastMonthLeads ?? 0,
+                ByTenant = tenantCounts.Select(tc => new TenantLeadCountDto
+                {
+                    TenantId = tc.TenantId,
+                    TenantName = tenantDict.TryGetValue(tc.TenantId, out var tn) ? tn : $"Tenant #{tc.TenantId}",
+                    Count = tc.Count
+                }).OrderByDescending(g => g.Count).ToList()
+            };
+
+            if (cache != null)
+            {
+                cache.Set(summaryCacheKey, summary, TimeSpan.FromSeconds(30));
+            }
+        }
+
+        var response = new PlatformLeadsResponseDto
+        {
+            Items = leads,
+            TotalCount = totalCount,
+            Page = safePage,
+            PageSize = safePageSize,
+            TotalPages = Math.Max(1, totalPages),
+            Summary = summary
+        };
+
+        if (cache != null)
+        {
+            cache.Set(cacheKey, response, TimeSpan.FromSeconds(10));
+        }
+
+        return Ok(ApiResponse<PlatformLeadsResponseDto>.SuccessResult(response));
     }
 }

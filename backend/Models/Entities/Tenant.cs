@@ -30,4 +30,5 @@ public class Tenant
     // Navigation properties
     public ICollection<User> Users { get; set; } = new List<User>();
     public ICollection<TenantDidMapping> DidMappings { get; set; } = new List<TenantDidMapping>();
+    public ICollection<SiteVisit> SiteVisits { get; set; } = new List<SiteVisit>();
 }

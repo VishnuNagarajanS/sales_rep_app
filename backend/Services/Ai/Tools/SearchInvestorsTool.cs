@@ -36,6 +36,11 @@ namespace backend.Services.Ai.Tools
 
             var query = db.Investors.AsNoTracking().Where(i => i.CompanyId == scope.CompanyId);
 
+            if (!scope.IsAdmin)
+            {
+                query = query.Where(i => i.AssignedIrmId == scope.UserId || i.OriginalOwnerId == scope.UserId);
+            }
+
             if (!string.IsNullOrEmpty(args.Status))
             {
                 if (Enum.TryParse<backend.Models.Enums.InvestorStatus>(args.Status, true, out var parsedStatus))

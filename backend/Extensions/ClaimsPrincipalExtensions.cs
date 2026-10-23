@@ -23,6 +23,20 @@ public static class ClaimsPrincipalExtensions
         return principal.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
     }
 
+    public static string GetUserName(this ClaimsPrincipal principal)
+    {
+        return principal.FindFirst(ClaimTypes.Name)?.Value
+               ?? principal.FindFirst("name")?.Value
+               ?? string.Empty;
+    }
+
+    public static string GetUserEmail(this ClaimsPrincipal principal)
+    {
+        return principal.FindFirst(ClaimTypes.Email)?.Value
+               ?? principal.FindFirst("email")?.Value
+               ?? string.Empty;
+    }
+
     public static bool IsSuperAdmin(this ClaimsPrincipal principal)
     {
         var role = (principal.FindFirst(ClaimTypes.Role)?.Value

@@ -40,6 +40,11 @@ namespace backend.Services.Ai.Tools
 
             var query = db.Followups.AsNoTracking().Where(f => f.CompanyId == scope.CompanyId);
 
+            if (!scope.IsAdmin)
+            {
+                query = query.Where(f => f.AssignedAgentId == scope.UserId || f.OriginalOwnerId == scope.UserId);
+            }
+
             if (!string.IsNullOrEmpty(args.DateFrom) || !string.IsNullOrEmpty(args.DateTo))
             {
                 var clock = services.GetRequiredService<backend.Services.Interfaces.ICompanyClock>();

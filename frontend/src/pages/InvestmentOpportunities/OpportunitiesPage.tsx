@@ -447,7 +447,10 @@ export const OpportunitiesPage: React.FC = () => {
       email: deal.email || '',
       status: 'Active Investor',
       investmentCapacity: deal.investmentRange || '',
-      preferredAssetClass: deal.preferredAssetClass || '',
+      preferredAssetClass:
+        (deal.preferredAssetClass && deal.preferredAssetClass !== '—' && deal.preferredAssetClass.toLowerCase() !== 'not specified' ? deal.preferredAssetClass : '') ||
+        (deal.investmentRoute === 'direct_aif' ? 'Direct AIF' : deal.investmentRoute === 'debenture' ? 'Debenture' : '') ||
+        (deal.investorType?.toLowerCase().includes('direct') ? 'Direct AIF' : deal.investorType?.toLowerCase().includes('debenture') ? 'Debenture' : ''),
       assignedAgentId: deal.assignedAgentId || user?.id || '',
       assignedAgentName: deal.assignedAgentName || user?.name || '',
       referralSource: 'IRM Pipeline',
@@ -630,13 +633,17 @@ export const OpportunitiesPage: React.FC = () => {
 
   const handleRouteChange = async (route: 'direct_aif' | 'debenture') => {
     if (!detailDeal || isGhlAdmin) return;
+    const assetClassVal = route === 'debenture' ? 'Debenture' : 'Direct AIF';
     const updatedDeal: Deal = {
       ...detailDeal,
       investmentRoute: route,
+      preferredAssetClass: assetClassVal,
       investorType: route === 'debenture' ? 'Alternate route to Invest in AIF via Debenture' : 'Direct AIF',
       customFields: {
         ...(detailDeal.customFields || {}),
         investmentRoute: route,
+        preferredAssetClass: assetClassVal,
+        assetClass: assetClassVal,
       },
     };
     setDetailDeal(updatedDeal);
@@ -906,10 +913,13 @@ export const OpportunitiesPage: React.FC = () => {
       key: 'preferredAssetClass',
       header: 'Preferred Asset Class',
       render: deal => {
-        const pref = deal.preferredAssetClass;
-        const hasPref = pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified';
+        const pref =
+          (deal.preferredAssetClass && deal.preferredAssetClass !== '—' && deal.preferredAssetClass.toLowerCase() !== 'not specified' ? deal.preferredAssetClass : '') ||
+          (deal.investmentRoute === 'direct_aif' ? 'Direct AIF' : deal.investmentRoute === 'debenture' ? 'Debenture' : '') ||
+          (deal.investorType?.toLowerCase().includes('direct') ? 'Direct AIF' : deal.investorType?.toLowerCase().includes('debenture') ? 'Debenture' : '');
+        const hasPref = Boolean(pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified');
         return hasPref ? (
-          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>
             {pref}
           </span>
         ) : (
@@ -1443,11 +1453,17 @@ export const OpportunitiesPage: React.FC = () => {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ color: 'var(--text-muted)' }}>Preferred Asset Class:</span>
-                        {detailDeal.preferredAssetClass && detailDeal.preferredAssetClass !== '—' ? (
-                          <strong style={{ color: 'var(--text-primary)' }}>{detailDeal.preferredAssetClass}</strong>
-                        ) : (
-                          <span className="not-specified-badge">Not Specified</span>
-                        )}
+                        {(() => {
+                          const pref =
+                            (detailDeal.preferredAssetClass && detailDeal.preferredAssetClass !== '—' && detailDeal.preferredAssetClass.toLowerCase() !== 'not specified' ? detailDeal.preferredAssetClass : '') ||
+                            (detailDeal.investmentRoute === 'direct_aif' ? 'Direct AIF' : detailDeal.investmentRoute === 'debenture' ? 'Debenture' : '') ||
+                            (detailDeal.investorType?.toLowerCase().includes('direct') ? 'Direct AIF' : detailDeal.investorType?.toLowerCase().includes('debenture') ? 'Debenture' : '');
+                          return pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified' ? (
+                            <strong style={{ color: 'var(--text-primary)' }}>{pref}</strong>
+                          ) : (
+                            <span className="not-specified-badge">Not Specified</span>
+                          );
+                        })()}
                       </div>
                       {detailDeal.customerId && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

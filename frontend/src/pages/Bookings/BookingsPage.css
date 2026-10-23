@@ -72,3 +72,91 @@
   gap: 10px;
   margin-top: 8px;
 }
+
+.booking-source-tabs {
+  display: flex;
+  background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+  border-radius: var(--radius-md, 8px);
+  padding: 4px;
+  gap: 4px;
+}
+
+.booking-source-tab {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.booking-source-tab:hover {
+  color: var(--text-primary);
+}
+
+.booking-source-tab.active {
+  background: var(--bg-surface, #ffffff);
+  color: var(--primary, #2563eb);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Booking Manage Modal */
+.booking-summary-card {
+  background-color: var(--bg-surface-hover, #f8fafc);
+  border: 1px solid var(--border-base, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.booking-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.booking-summary-label {
+  color: var(--text-muted, #64748b);
+  font-weight: 500;
+}
+
+.booking-summary-val {
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+}
+
+.booking-manage-banner {
+  padding: 9px 13px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 12px;
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.booking-manage-banner.agreement {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.booking-manage-banner.registration {
+  background-color: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.booking-manage-banner.cancelled {
+  background-color: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+

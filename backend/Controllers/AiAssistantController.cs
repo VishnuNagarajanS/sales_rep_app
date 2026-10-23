@@ -8,7 +8,7 @@ namespace backend.Controllers
 {
     [ApiController]
     [Route("api/ai")]
-    [Authorize(Roles = "company_admin")] // Strictly admin for now as requested
+    [Authorize(Roles = "company_admin,sales_executive,irm,super_admin,admin,ghl_admin")]
     public class AiAssistantController : ControllerBase
     {
         private readonly AiAssistantService _aiService;

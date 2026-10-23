@@ -36,6 +36,11 @@ namespace backend.Services.Ai.Tools
 
             var query = db.WorkHandovers.AsNoTracking().Where(w => w.CompanyId == scope.CompanyId);
 
+            if (!scope.IsAdmin)
+            {
+                query = query.Where(w => w.OriginalUserId == scope.UserId || w.CoveringUserId == scope.UserId);
+            }
+
             if (!string.IsNullOrEmpty(args.Status))
             {
                 var lowerStatus = args.Status.ToLower();

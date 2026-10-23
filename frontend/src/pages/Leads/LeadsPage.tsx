@@ -14,6 +14,7 @@ import {
   Clock,
   ArrowRight,
   UserCheck,
+  RefreshCw,
 } from 'lucide-react';
 import { Lead, Customer, Deal, Followup, IrmProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -106,6 +107,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [allFollowups, setAllFollowups] = useState<any[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Duplicate in Follow-up & Customer Resolution States
   interface DuplicateFollowupModalData {
@@ -569,7 +571,14 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       console.error('Failed to load leads from API', err);
       setLeads([]);
       setLoadError(err?.message || 'Failed to load leads from server.');
+    } finally {
+      setIsRefreshing(false);
     }
+  };
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await loadData();
   };
 
   useEffect(() => {
@@ -950,7 +959,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       createdAt: new Date().toISOString().split('T')[0],
       notes: '',
       customFields: tenant?.slug === 'jamin'
-        ? { budgetRange: '₹45L - ₹65L', preferredLocation: 'Devanahalli North', readyToRegister: 'Immediate' }
+        ? { budgetRange: '₹35L - ₹65L', preferredLocation: 'Shastri Nagar (Erode)', readyToRegister: 'Immediate' }
         : { investmentCapacity: '', assetClass: '', preferredAssetClass: '', horizon: '3-5 Years' },
     });
     setFormErrorMessage(null);
@@ -1845,6 +1854,15 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         <div className="leads-header-actions">
           <button
             className="btn btn-secondary"
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            title="Refresh leads list from server"
+          >
+            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+            <span>Refresh</span>
+          </button>
+          <button
+            className="btn btn-secondary"
             onClick={() => setIsImportModalOpen(true)}
           >
             <Upload size={15} /> Import CSV
@@ -2341,7 +2359,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   <label className="form-label">Preferred Micro-Market</label>
                   <select
                     className="form-select"
-                    value={formData.customFields?.preferredLocation || 'Devanahalli North'}
+                    value={formData.customFields?.preferredLocation || 'Shastri Nagar (Erode)'}
                     onChange={e =>
                       setFormData({
                         ...formData,
@@ -2349,9 +2367,11 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                       })
                     }
                   >
-                    <option value="Devanahalli North">Devanahalli North (Airport)</option>
-                    <option value="Sarjapur East">Sarjapur East</option>
-                    <option value="Mysore Highway Corridor">Mysore Highway Corridor</option>
+                    <option value="Shastri Nagar (Erode)">Shastri Nagar (Erode)</option>
+                    <option value="Edappadi (Salem)">Edappadi (Salem)</option>
+                    <option value="Innam Kolathur (Trichy)">Innam Kolathur (Trichy)</option>
+                    <option value="Varapatty (Coimbatore)">Varapatty (Coimbatore)</option>
+                    <option value="Udumalaipet (Tiruppur)">Udumalaipet (Tiruppur)</option>
                   </select>
                 </div>
               </div>

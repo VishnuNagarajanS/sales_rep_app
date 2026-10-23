@@ -7,7 +7,7 @@ public class Customer
     public int CompanyId { get; set; }
     public Tenant? Company { get; set; }
 
-    public int AssignedAgentId { get; set; }
+    public int? AssignedAgentId { get; set; }
     public User? AssignedAgent { get; set; }
 
     public int? HandoverId { get; set; }
@@ -33,4 +33,9 @@ public class Customer
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
+
+    public ICollection<Followup> Followups { get; set; } = new List<Followup>();
+    public ICollection<SiteVisit> SiteVisits { get; set; } = new List<SiteVisit>();
+    public ICollection<JaminBooking> Bookings { get; set; } = new List<JaminBooking>();
+    public ICollection<JaminPayment> Payments { get; set; } = new List<JaminPayment>();
 }

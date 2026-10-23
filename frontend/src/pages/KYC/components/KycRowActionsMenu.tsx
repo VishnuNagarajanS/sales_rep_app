@@ -7,6 +7,7 @@ import {
   Phone,
   ArrowRight,
   UserCheck,
+  Edit3,
 } from 'lucide-react';
 import { Deal } from '../../../types';
 import { getAuthHeaders } from '../../../utils/authHeaders';
@@ -22,16 +23,27 @@ interface KycRowActionsMenuProps {
   onCallInvestor?: (deal: Deal) => void;
   onAdvanceStage?: (deal: Deal) => void;
   isGhlAdmin?: boolean;
+  isVerified?: boolean;
 }
 
 export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
   deal,
   onShowToast,
+  onOpenReview,
+  onViewProfile,
+  onEditKyc,
   onAssistedKyc,
   onCallInvestor,
   onAdvanceStage,
   isGhlAdmin = false,
+  isVerified,
 }) => {
+  const isVerifiedResolved =
+    isVerified ??
+    ((deal as any).kycStatus === 'Verified' ||
+      (deal as any).customerKycStatus === 'Verified' ||
+      (deal as any).kycRecord?.status?.toLowerCase() === 'approved');
+
   const [isOpen, setIsOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -198,7 +210,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
           onClick={e => e.stopPropagation()}
           role="menu"
         >
-          {!isGhlAdmin && (
+          {!isGhlAdmin && !isVerifiedResolved && (
             <>
               <button
                 type="button"
@@ -222,11 +234,46 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
             </>
           )}
 
-          {(onAssistedKyc || onCallInvestor || onAdvanceStage) && !isGhlAdmin && (
+          {!isVerifiedResolved && (onEditKyc || onAssistedKyc || onCallInvestor || onAdvanceStage) && !isGhlAdmin && (
             <div className="kyc-link-menu-divider" />
           )}
 
-          {!isGhlAdmin && onAssistedKyc && (() => {
+          {!isGhlAdmin && !isVerifiedResolved && onEditKyc && (
+            <button
+              type="button"
+              className="kyc-link-menu-item"
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setIsOpen(false);
+                onEditKyc(deal);
+              }}
+              style={{
+                color:
+                  (deal as any).kycStatus === 'Wrong' || (deal as any).customerKycStatus === 'Needs Correction'
+                    ? '#dc2626'
+                    : 'var(--text-primary)',
+                fontWeight: 600,
+              }}
+            >
+              <Edit3
+                size={14}
+                color={
+                  (deal as any).kycStatus === 'Wrong' || (deal as any).customerKycStatus === 'Needs Correction'
+                    ? '#dc2626'
+                    : 'var(--text-secondary)'
+                }
+              />
+              <span>
+                {(deal as any).kycStatus === 'Wrong' || (deal as any).customerKycStatus === 'Needs Correction'
+                  ? 'Correct Flagged Details'
+                  : 'Edit KYC Details'}
+              </span>
+            </button>
+          )}
+
+          {!isGhlAdmin && !isVerifiedResolved && onAssistedKyc && (() => {
             const draftRaw = localStorage.getItem(`nexus_kyc_draft_${deal.id}`);
             let hasDraft = (deal as any).customerKycStatus === 'Assisted Draft';
             let draftStep = 1;

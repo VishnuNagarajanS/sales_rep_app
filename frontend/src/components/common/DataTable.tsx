@@ -27,6 +27,7 @@ export interface RowAction<T> {
   onClick: (item: T) => void;
   danger?: boolean;
   hidden?: (item: T) => boolean;
+  disabled?: boolean | ((item: T) => boolean);
 }
 
 interface DataTableProps<T> {
@@ -45,6 +46,8 @@ interface DataTableProps<T> {
   bulkActions?: { label: string; onClick: (selectedItems: T[]) => void; danger?: boolean }[];
   filtersNode?: React.ReactNode;
   hideSearch?: boolean; // when true, don't render the built-in search box
+  loading?: boolean;
+  isLoading?: boolean;
 }
 
 export function DataTable<T>({
@@ -63,6 +66,8 @@ export function DataTable<T>({
   bulkActions,
   filtersNode,
   hideSearch = false,
+  loading = false,
+  isLoading = false,
 }: DataTableProps<T>) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -269,7 +274,12 @@ export function DataTable<T>({
       )}
 
       {/* Table Body */}
-      {paginatedData.length === 0 ? (
+      {(loading || isLoading) && paginatedData.length === 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '56px 16px', gap: 12, color: 'var(--text-secondary)' }}>
+          <div style={{ width: 28, height: 28, border: '3px solid var(--border-base)', borderTopColor: 'var(--primary-600)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+          <span style={{ fontSize: 13, fontWeight: 500 }}>Loading records...</span>
+        </div>
+      ) : paginatedData.length === 0 ? (
         <EmptyState
           title={emptyTitle}
           description={emptyDescription}
@@ -541,24 +551,31 @@ export function DataTable<T>({
               if (!item) return null;
               return rowActions!
                 .filter(action => !action.hidden || !action.hidden(item))
-                .map((action, aIdx) => (
-                  <button
-                    key={aIdx}
-                    className="btn btn-ghost btn-sm"
-                    style={{
-                      width: '100%',
-                      justifyContent: 'flex-start',
-                      color: action.danger ? 'var(--danger)' : 'var(--text-primary)',
-                    }}
-                    onClick={() => {
-                      setActiveMenuKey(null);
-                      action.onClick(item);
-                    }}
-                  >
-                    {action.icon}
-                    {action.label}
-                  </button>
-                ));
+                .map((action, aIdx) => {
+                  const isDisabled = typeof action.disabled === 'function' ? action.disabled(item) : Boolean(action.disabled);
+                  return (
+                    <button
+                      key={aIdx}
+                      className="btn btn-ghost btn-sm"
+                      disabled={isDisabled}
+                      style={{
+                        width: '100%',
+                        justifyContent: 'flex-start',
+                        color: action.danger ? 'var(--danger)' : 'var(--text-primary)',
+                        opacity: isDisabled ? 0.45 : 1,
+                        cursor: isDisabled ? 'not-allowed' : 'pointer',
+                      }}
+                      onClick={() => {
+                        if (isDisabled) return;
+                        setActiveMenuKey(null);
+                        action.onClick(item);
+                      }}
+                    >
+                      {action.icon}
+                      {action.label}
+                    </button>
+                  );
+                });
             })()}
           </div>
         </>,
