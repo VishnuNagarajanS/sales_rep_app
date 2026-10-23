@@ -197,6 +197,18 @@ using (var scope = app.Services.CreateScope())
                         ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""NextFollowupDate"" timestamp with time zone;
                         ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssignedById"" integer;
                         ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssignedAt"" timestamp with time zone;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssignedAgentName"" character varying(150);
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""TargetDevelopment"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""PreferredVisitDate"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""PreferredTimeSlot"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AnythingWeShouldKnow"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""WhatAreYouLookingFor"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""BudgetRange"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""ReadyToRegister"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssetClass"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Horizon"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""InvestorType"" text;
                         ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
                         ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
                         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'leads' AND column_name = 'city') THEN
@@ -319,7 +331,13 @@ using (var scope = app.Services.CreateScope())
                         ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
                         ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""StageEnteredAt"" timestamp with time zone;
                         ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""DealAmountConfirmed"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""InvestmentAmountConfirmed"" boolean NOT NULL DEFAULT FALSE;
                         ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""KycStatus"" text;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""KycId"" integer;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""VerifiedBy"" text;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""VerifiedAt"" timestamp with time zone;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Remarks"" text;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""FlaggedSections"" text;
                         ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
                         ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
                     END IF;
@@ -337,7 +355,13 @@ using (var scope = app.Services.CreateScope())
                         ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
                         ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""StageEnteredAt"" timestamp with time zone;
                         ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""DealAmountConfirmed"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""InvestmentAmountConfirmed"" boolean NOT NULL DEFAULT FALSE;
                         ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""KycStatus"" text;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""KycId"" integer;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""VerifiedBy"" text;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""VerifiedAt"" timestamp with time zone;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Remarks"" text;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""FlaggedSections"" text;
                         ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
                         ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
                     END IF;
