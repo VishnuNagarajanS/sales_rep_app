@@ -161,6 +161,403 @@ using (var scope = app.Services.CreateScope())
                         UPDATE tenants SET ""SubscriptionPlan"" = 'Wealth Advisory Enterprise Suite' WHERE ""Id"" IN (1, 2) OR ""Slug"" IN ('ghl', 'jamin');
                     END IF;
 
+                    -- Call records Duration, Timestamp, and CallModule columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'call_records') THEN
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Timestamp"" timestamp with time zone NOT NULL DEFAULT NOW();
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Duration"" integer NOT NULL DEFAULT 0;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""CallModule"" character varying(50);
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Reason"" text;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""TwilioCallSid"" character varying(64);
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""RecordingUrl"" character varying(256);
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""Transcript"" text;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""LeadId"" integer;
+                        ALTER TABLE call_records ADD COLUMN IF NOT EXISTS ""CustomerId"" integer;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'call_records' AND column_name = 'duration') THEN
+                            UPDATE call_records SET ""Duration"" = duration WHERE ""Duration"" = 0;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'call_records' AND column_name = 'DurationSeconds') THEN
+                            UPDATE call_records SET ""Duration"" = ""DurationSeconds"" WHERE ""Duration"" = 0;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'call_records' AND column_name = 'CreatedAt') THEN
+                            UPDATE call_records SET ""Timestamp"" = ""CreatedAt"" WHERE ""Timestamp"" = '0001-01-01' OR ""Timestamp"" IS NULL;
+                        END IF;
+                    END IF;
+
+                    -- Leads columns (Location, Source, Priority, Notes, CustomFieldsJson, NormalizedPhone, NormalizedEmail, HandoverId, etc.)
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'leads') THEN
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Location"" character varying(255) NOT NULL DEFAULT '';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Source"" character varying(100) NOT NULL DEFAULT 'Website Inbound';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'New';
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""CustomFieldsJson"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""NormalizedPhone"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""NormalizedEmail"" text;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""IsDuplicate"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""NextFollowupDate"" timestamp with time zone;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssignedById"" integer;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""AssignedAt"" timestamp with time zone;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE leads ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'leads' AND column_name = 'city') THEN
+                            UPDATE leads SET ""Location"" = city WHERE ""Location"" = '';
+                        END IF;
+                    END IF;
+
+                    -- Followups columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'followups') THEN
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactId"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactType"" character varying(50) NOT NULL DEFAULT 'lead';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactPhone"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ContactEmail"" text;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""InvestorId"" integer;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""InvestorName"" text;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""AssignedToName"" text NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""AssignedToRole"" text NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'Pending';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""Agenda"" text;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""OutcomeNotes"" text;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""ScheduledAt"" timestamp with time zone NOT NULL DEFAULT NOW();
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""CompletedAt"" timestamp with time zone;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""RescheduledTo"" timestamp with time zone;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""OverdueNotifiedAt"" timestamp with time zone;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE followups ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+
+                    -- Customers table and columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Customers') THEN
+                        ALTER TABLE ""Customers"" RENAME TO customers;
+                    END IF;
+
+                    CREATE TABLE IF NOT EXISTS customers (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""CompanyId"" integer NOT NULL,
+                        ""AssignedAgentId"" integer NOT NULL,
+                        ""Name"" character varying(150) NOT NULL DEFAULT '',
+                        ""Phone"" character varying(50) NOT NULL DEFAULT '',
+                        ""Email"" character varying(255) NOT NULL DEFAULT '',
+                        ""NormalizedPhone"" character varying(20) NULL,
+                        ""NormalizedEmail"" character varying(255) NULL,
+                        ""IsDuplicate"" boolean NOT NULL DEFAULT FALSE,
+                        ""Location"" character varying(255) NOT NULL DEFAULT '',
+                        ""Status"" character varying(50) NOT NULL DEFAULT 'Active',
+                        ""TotalValue"" numeric(18,2) NOT NULL DEFAULT 0,
+                        ""Notes"" text NOT NULL DEFAULT '',
+                        ""CustomFieldsJson"" text NULL,
+                        ""LastContactedAt"" timestamp with time zone NULL,
+                        ""HandoverId"" integer NULL,
+                        ""OriginalOwnerId"" integer NULL,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""UpdatedAt"" timestamp with time zone NULL
+                    );
+
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'customers') THEN
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""Location"" character varying(255) NOT NULL DEFAULT '';
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'Active';
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""TotalValue"" numeric(18,2) NOT NULL DEFAULT 0;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""CustomFieldsJson"" text;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""NormalizedPhone"" text;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""NormalizedEmail"" text;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""IsDuplicate"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""LastContactedAt"" timestamp with time zone;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE customers ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'customers' AND column_name = 'city') THEN
+                            UPDATE customers SET ""Location"" = city WHERE ""Location"" = '';
+                        END IF;
+                    END IF;
+
+                    -- Lead assignment history table
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'LeadAssignmentHistories') THEN
+                        ALTER TABLE ""LeadAssignmentHistories"" RENAME TO lead_assignment_history;
+                    END IF;
+
+                    CREATE TABLE IF NOT EXISTS lead_assignment_history (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""LeadId"" integer NOT NULL,
+                        ""FromAgentId"" integer NULL,
+                        ""ToAgentId"" integer NOT NULL,
+                        ""AssignedById"" integer NOT NULL,
+                        ""AssignedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""Notes"" text NULL
+                    );
+
+                    -- Consultations columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'consultations') THEN
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""IrmUserId"" integer;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""IrmUserName"" text NOT NULL DEFAULT '';
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""AssetClass"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""ScheduledAt"" timestamp with time zone NOT NULL DEFAULT NOW();
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""Status"" character varying(50) NOT NULL DEFAULT 'Scheduled';
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""MeetingType"" character varying(50) NOT NULL DEFAULT 'Virtual';
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""MeetingLink"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""Feedback"" text;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""CompletedAt"" timestamp with time zone;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+
+                    -- Deals columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'GhlDeals') THEN
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Title"" character varying(200) NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""CustomerName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Stage"" character varying(100) NOT NULL DEFAULT 'new';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Value"" numeric(18,2) NOT NULL DEFAULT 0;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""ExpectedCloseDate"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""LostReason"" text;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""InvestorType"" character varying(50);
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""InvestmentRange"" character varying(100);
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100);
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""StageEnteredAt"" timestamp with time zone;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""DealAmountConfirmed"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""KycStatus"" text;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE ""GhlDeals"" ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ghl_deals') THEN
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Title"" character varying(200) NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""CustomerName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Stage"" character varying(100) NOT NULL DEFAULT 'new';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Value"" numeric(18,2) NOT NULL DEFAULT 0;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""ExpectedCloseDate"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""LostReason"" text;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""InvestorType"" character varying(50);
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""InvestmentRange"" character varying(100);
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100);
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""Priority"" character varying(50) NOT NULL DEFAULT 'Medium';
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""StageEnteredAt"" timestamp with time zone;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""DealAmountConfirmed"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""KycStatus"" text;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE ghl_deals ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+
+                    -- Investors & Opportunities columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'investors') THEN
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""RiskTolerance"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""InvestmentMandate"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""CommittedAum"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""ReferralSource"" text;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""AssignedIrmId"" integer;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""AssignedIrmName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE investors ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Investors') THEN
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""InvestmentCapacity"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""PreferredAssetClass"" character varying(100) NOT NULL DEFAULT '';
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""RiskTolerance"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""InvestmentMandate"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""CommittedAum"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""ReferralSource"" text;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""AssignedIrmId"" integer;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""AssignedIrmName"" character varying(150) NOT NULL DEFAULT '';
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""Notes"" text NOT NULL DEFAULT '';
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE ""Investors"" ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'InvestmentOpportunities') THEN
+                        ALTER TABLE ""InvestmentOpportunities"" ADD COLUMN IF NOT EXISTS ""HandoverId"" integer;
+                        ALTER TABLE ""InvestmentOpportunities"" ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer;
+                    END IF;
+
+                    -- InvestorKycs columns
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'InvestorKycs') THEN
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""FatherName"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""DateOfBirth"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""NameAsPerPan"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""Gender"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""InvestorType"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""ResidentType"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""Occupation"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""PanNumber"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AadhaarNumber"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AddressLine1"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AddressLine2"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""City"" character varying(100) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""State"" character varying(100) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""Pincode"" character varying(20) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""Country"" character varying(100) NOT NULL DEFAULT 'India';
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""BankName"" character varying(150) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AccountNumber"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""IfscCode"" character varying(20) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AccountType"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""DematAccountNumber"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""DpId"" character varying(50) NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""NomineesJson"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""PanDocumentUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AadhaarDocumentUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""BankChequeUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""DematDocumentUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""PhotoUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""SignatureUrl"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""ReviewRemarks"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""ReviewedByIrmId"" integer NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""ReviewedAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""SubmittedAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""VerifiedBy"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""VerifiedAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""Remarks"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""FlaggedSectionsJson"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""SectionVerificationsJson"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""KycLinkToken"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""KycTokenHash"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""KycLinkExpiresAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""KycLinkSent"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""KycLinkSentAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""IsRevoked"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""RevokedAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""IsAssisted"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""AssistedByUserId"" integer NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""CustomerConsentObtained"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""CustomerConsentTimestamp"" timestamp with time zone NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""CustomerConsentDetails"" text NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""HandoverId"" integer NULL;
+                        ALTER TABLE ""InvestorKycs"" ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer NULL;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'investor_kycs') THEN
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""FatherName"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""DateOfBirth"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""NameAsPerPan"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""Gender"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""InvestorType"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""ResidentType"" character varying(50) NOT NULL DEFAULT '';
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""Occupation"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""PanNumber"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AadhaarNumber"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AddressLine1"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AddressLine2"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""City"" character varying(100) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""State"" character varying(100) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""Pincode"" character varying(20) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""Country"" character varying(100) NOT NULL DEFAULT 'India';
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""BankName"" character varying(150) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AccountNumber"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""IfscCode"" character varying(20) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AccountType"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""DematAccountNumber"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""DpId"" character varying(50) NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""NomineesJson"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""PanDocumentUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AadhaarDocumentUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""BankChequeUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""DematDocumentUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""PhotoUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""SignatureUrl"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""ReviewRemarks"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""ReviewedByIrmId"" integer NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""ReviewedAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""SubmittedAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""VerifiedBy"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""VerifiedAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""Remarks"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""FlaggedSectionsJson"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""SectionVerificationsJson"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""KycLinkToken"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""KycTokenHash"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""KycLinkExpiresAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""KycLinkSent"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""KycLinkSentAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""IsRevoked"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""RevokedAt"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""IsAssisted"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""AssistedByUserId"" integer NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""CustomerConsentObtained"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""CustomerConsentTimestamp"" timestamp with time zone NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""CustomerConsentDetails"" text NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""HandoverId"" integer NULL;
+                        ALTER TABLE investor_kycs ADD COLUMN IF NOT EXISTS ""OriginalOwnerId"" integer NULL;
+                    END IF;
+
+                    -- Create work_handovers table if not exists
+                    CREATE TABLE IF NOT EXISTS work_handovers (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""CompanyId"" integer NOT NULL,
+                        ""RoleCode"" character varying(50) NOT NULL,
+                        ""OriginalUserId"" integer NOT NULL,
+                        ""CoveringUserId"" integer NOT NULL,
+                        ""StartedById"" integer NOT NULL,
+                        ""Reason"" character varying(500) NOT NULL,
+                        ""StartedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""PlannedEndAt"" timestamp with time zone NULL,
+                        ""Status"" character varying(50) NOT NULL DEFAULT 'active',
+                        ""EndedAt"" timestamp with time zone NULL,
+                        ""EndedById"" integer NULL,
+                        ""ReturnSummaryJson"" text NULL,
+                        ""LeaveRequestId"" integer NULL,
+                        ""OverdueNotifiedAt"" timestamp with time zone NULL
+                    );
+
+                    -- Ensure work_handovers columns exist if table was created in earlier version
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'work_handovers') THEN
+                        ALTER TABLE work_handovers ADD COLUMN IF NOT EXISTS ""LeaveRequestId"" integer NULL;
+                        ALTER TABLE work_handovers ADD COLUMN IF NOT EXISTS ""OverdueNotifiedAt"" timestamp with time zone NULL;
+                        ALTER TABLE work_handovers ADD COLUMN IF NOT EXISTS ""ReturnSummaryJson"" text NULL;
+                    END IF;
+
+                    -- Create work_handover_items table if not exists
+                    CREATE TABLE IF NOT EXISTS work_handover_items (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""HandoverId"" integer NOT NULL,
+                        ""EntityType"" character varying(50) NOT NULL,
+                        ""EntityId"" integer NOT NULL,
+                        ""Origin"" character varying(50) NOT NULL DEFAULT 'included_at_start',
+                        ""ReturnedAt"" timestamp with time zone NULL,
+                        ""ReturnOutcome"" character varying(50) NULL,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW()
+                    );
+
+                    -- Create LeaveRequests table if not exists
+                    CREATE TABLE IF NOT EXISTS ""LeaveRequests"" (
+                        ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                        ""CompanyId"" integer NOT NULL,
+                        ""UserId"" integer NOT NULL,
+                        ""StartDate"" timestamp with time zone NOT NULL,
+                        ""EndDate"" timestamp with time zone NOT NULL,
+                        ""Reason"" character varying(500) NOT NULL,
+                        ""Status"" character varying(20) NOT NULL DEFAULT 'Pending',
+                        ""WorkHandoverId"" integer NULL,
+                        ""ApprovedById"" integer NULL,
+                        ""DecidedById"" integer NULL,
+                        ""DecisionAt"" timestamp with time zone NULL,
+                        ""DecisionNote"" character varying(500) NULL,
+                        ""CancelledById"" integer NULL,
+                        ""CancelledAt"" timestamp with time zone NULL,
+                        ""LeaveType"" character varying(50) NOT NULL DEFAULT 'Casual',
+                        ""IsHalfDay"" boolean NOT NULL DEFAULT FALSE,
+                        ""HalfDaySession"" character varying(20) NULL,
+                        ""Days"" numeric(4,1) NOT NULL DEFAULT 1.0,
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""UpdatedAt"" timestamp with time zone NULL
+                    );
+
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'LeaveRequests') THEN
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""LeaveType"" character varying(50) NOT NULL DEFAULT 'Casual';
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""IsHalfDay"" boolean NOT NULL DEFAULT FALSE;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""HalfDaySession"" character varying(20) NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""Days"" numeric(4,1) NOT NULL DEFAULT 1.0;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""WorkHandoverId"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""ApprovedById"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""DecidedById"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""DecisionAt"" timestamp with time zone NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""DecisionNote"" character varying(500) NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""CancelledById"" integer NULL;
+                        ALTER TABLE ""LeaveRequests"" ADD COLUMN IF NOT EXISTS ""CancelledAt"" timestamp with time zone NULL;
+                    END IF;
+
                     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'roles') THEN
                         UPDATE roles SET ""IsActive"" = FALSE WHERE ""Code"" IN ('sales_manager', 'presales_rep');
                     END IF;
@@ -470,84 +867,102 @@ using (var scope = app.Services.CreateScope())
         // Patch: reconcile leads whose KYC/Investor records are Approved
         try
         {
-            var reconcileSql = @"
-                -- 1. Active Opportunities
-                UPDATE leads
-                SET ""Status"" = 'In Opportunity', ""UpdatedAt"" = NOW()
-                WHERE ""Status"" != 'In Opportunity'
-                  AND EXISTS (
-                    SELECT 1 FROM ghl_deals d
-                    WHERE d.""CompanyId"" = leads.""CompanyId""
-                      AND LOWER(TRIM(d.""Stage"")) IN ('investment_opportunity', 'opportunity', 'term_sheet', 'committed')
+            var dealsTable = "\"GhlDeals\"";
+            bool dealsTableExists = false;
+            using (var conn = db.Database.GetDbConnection())
+            {
+                if (conn.State != System.Data.ConnectionState.Open) conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT table_name FROM information_schema.tables WHERE table_name IN ('GhlDeals', 'ghl_deals') LIMIT 1;";
+                var result = cmd.ExecuteScalar()?.ToString();
+                if (!string.IsNullOrEmpty(result))
+                {
+                    dealsTable = result == "ghl_deals" ? "ghl_deals" : "\"GhlDeals\"";
+                    dealsTableExists = true;
+                }
+            }
+
+            if (dealsTableExists)
+            {
+                var reconcileSql = $@"
+                    -- 1. Active Opportunities
+                    UPDATE leads
+                    SET ""Status"" = 'In Opportunity', ""UpdatedAt"" = NOW()
+                    WHERE ""Status"" != 'In Opportunity'
+                      AND EXISTS (
+                        SELECT 1 FROM {dealsTable} d
+                        WHERE d.""CompanyId"" = leads.""CompanyId""
+                          AND LOWER(TRIM(d.""Stage"")) IN ('investment_opportunity', 'opportunity', 'term_sheet', 'committed')
+                          AND (
+                            (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                            OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                          )
+                      );
+
+                    -- 2. Active KYC In Progress
+                    UPDATE leads
+                    SET ""Status"" = 'KYC In Progress', ""UpdatedAt"" = NOW()
+                    WHERE ""Status"" NOT IN ('In Opportunity', 'Converted', 'KYC In Progress')
                       AND (
-                        (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
-                        OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
-                      )
-                  );
+                        EXISTS (
+                            SELECT 1 FROM {dealsTable} d
+                            WHERE d.""CompanyId"" = leads.""CompanyId""
+                              AND LOWER(TRIM(d.""Stage"")) IN ('qualified_investor', 'qualified')
+                              AND (
+                                (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                                OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                              )
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM ""InvestorKycs"" k
+                            WHERE k.""CompanyId"" = leads.""CompanyId""
+                              AND k.""Status"" IN (0, 1, 2)
+                              AND (
+                                (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                                OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                                OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
+                              )
+                        )
+                      );
 
-                -- 2. Active KYC In Progress
-                UPDATE leads
-                SET ""Status"" = 'KYC In Progress', ""UpdatedAt"" = NOW()
-                WHERE ""Status"" NOT IN ('In Opportunity', 'Converted', 'KYC In Progress')
-                  AND (
-                    EXISTS (
-                        SELECT 1 FROM ghl_deals d
-                        WHERE d.""CompanyId"" = leads.""CompanyId""
-                          AND LOWER(TRIM(d.""Stage"")) IN ('qualified_investor', 'qualified')
-                          AND (
-                            (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
-                            OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
-                          )
-                    )
-                    OR EXISTS (
-                        SELECT 1 FROM ""InvestorKycs"" k
-                        WHERE k.""CompanyId"" = leads.""CompanyId""
-                          AND k.""Status"" IN (0, 1, 2)
-                          AND (
-                            (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
-                            OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
-                            OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
-                          )
-                    )
-                  );
-
-                -- 3. Won / Converted Investors (without active opportunity)
-                UPDATE leads
-                SET ""Status"" = 'Converted', ""UpdatedAt"" = NOW()
-                WHERE ""Status"" NOT IN ('In Opportunity', 'Converted')
-                  AND (
-                    EXISTS (
-                        SELECT 1 FROM ghl_deals d
-                        WHERE d.""CompanyId"" = leads.""CompanyId""
-                          AND LOWER(TRIM(d.""Stage"")) IN ('converted', 'won')
-                          AND (
-                            (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
-                            OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
-                          )
-                    )
-                    OR EXISTS (
-                        SELECT 1 FROM ""Investors"" i
-                        WHERE i.""CompanyId"" = leads.""CompanyId""
-                          AND i.""Status"" = 1
-                          AND (
-                            (i.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(i.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
-                            OR (i.""Email"" IS NOT NULL AND LOWER(TRIM(i.""Email"")) = LOWER(TRIM(leads.""Email"")))
-                            OR LOWER(TRIM(i.""Name"")) = LOWER(TRIM(leads.""Name""))
-                          )
-                    )
-                    OR EXISTS (
-                        SELECT 1 FROM ""InvestorKycs"" k
-                        WHERE k.""CompanyId"" = leads.""CompanyId""
-                          AND k.""Status"" = 3
-                          AND (
-                            (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
-                            OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
-                            OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
-                          )
-                    )
-                  );
-            ";
-            db.Database.ExecuteSqlRaw(reconcileSql);
+                    -- 3. Won / Converted Investors (without active opportunity)
+                    UPDATE leads
+                    SET ""Status"" = 'Converted', ""UpdatedAt"" = NOW()
+                    WHERE ""Status"" NOT IN ('In Opportunity', 'Converted')
+                      AND (
+                        EXISTS (
+                            SELECT 1 FROM {dealsTable} d
+                            WHERE d.""CompanyId"" = leads.""CompanyId""
+                              AND LOWER(TRIM(d.""Stage"")) IN ('converted', 'won')
+                              AND (
+                                (d.""CustomerId"" IS NOT NULL AND d.""CustomerId"" = leads.""Id"")
+                                OR LOWER(TRIM(d.""CustomerName"")) = LOWER(TRIM(leads.""Name""))
+                              )
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM ""Investors"" i
+                            WHERE i.""CompanyId"" = leads.""CompanyId""
+                              AND i.""Status"" = 1
+                              AND (
+                                (i.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(i.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                                OR (i.""Email"" IS NOT NULL AND LOWER(TRIM(i.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                                OR LOWER(TRIM(i.""Name"")) = LOWER(TRIM(leads.""Name""))
+                              )
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM ""InvestorKycs"" k
+                            WHERE k.""CompanyId"" = leads.""CompanyId""
+                              AND k.""Status"" = 3
+                              AND (
+                                (k.""Phone"" IS NOT NULL AND RIGHT(REGEXP_REPLACE(k.""Phone"", '\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(leads.""Phone"", '\D', '', 'g'), 10))
+                                OR (k.""Email"" IS NOT NULL AND LOWER(TRIM(k.""Email"")) = LOWER(TRIM(leads.""Email"")))
+                                OR LOWER(TRIM(k.""InvestorName"")) = LOWER(TRIM(leads.""Name""))
+                              )
+                        )
+                      );
+                ";
+                db.Database.ExecuteSqlRaw(reconcileSql);
+            }
         }
         catch (Exception ex)
         {
