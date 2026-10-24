@@ -28,6 +28,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
 import { DataTable, Column } from '../../components/common/DataTable';
 import { Drawer } from '../../components/common/Drawer';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './IrmOtherPage.css';
 
 const MODULE_ROUTES: Record<string, string> = {
@@ -430,19 +431,21 @@ export const IrmOtherPage: React.FC<IrmOtherPageProps> = ({ onNavigate }) => {
             style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}
             onClick={e => e.stopPropagation()}
           >
-            <button
-              type="button"
-              className="irm-other-call-btn"
-              title={`Call ${record.contactName}`}
-              aria-label={`Call ${record.contactName}`}
-              onClick={e => {
-                e.stopPropagation();
-                handleCallContact(record);
-              }}
-            >
-              <Phone size={12} style={{ flexShrink: 0 }} />
-              <span>Call</span>
-            </button>
+            {canPlaceCalls(user) && (
+              <button
+                type="button"
+                className="irm-other-call-btn"
+                title={`Call ${record.contactName}`}
+                aria-label={`Call ${record.contactName}`}
+                onClick={e => {
+                  e.stopPropagation();
+                  handleCallContact(record);
+                }}
+              >
+                <Phone size={12} style={{ flexShrink: 0 }} />
+                <span>Call</span>
+              </button>
+            )}
             <button
               type="button"
               className="irm-other-move-btn"
@@ -832,18 +835,20 @@ export const IrmOtherPage: React.FC<IrmOtherPageProps> = ({ onNavigate }) => {
               >
                 Close
               </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={{ display: 'flex', alignItems: 'center', gap: 6, backgroundColor: '#059669', borderColor: '#059669' }}
-                onClick={() => {
-                  handleCallContact(selectedRecord);
-                  setSelectedRecord(null);
-                }}
-              >
-                <Phone size={14} />
-                <span>Call Now</span>
-              </button>
+              {canPlaceCalls(user) && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, backgroundColor: '#059669', borderColor: '#059669' }}
+                  onClick={() => {
+                    handleCallContact(selectedRecord);
+                    setSelectedRecord(null);
+                  }}
+                >
+                  <Phone size={14} />
+                  <span>Call Now</span>
+                </button>
+              )}
             </div>
           }
         >
@@ -858,18 +863,20 @@ export const IrmOtherPage: React.FC<IrmOtherPageProps> = ({ onNavigate }) => {
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-primary"
-                  style={{ backgroundColor: '#059669', borderColor: '#059669', display: 'flex', alignItems: 'center', gap: 6 }}
-                  onClick={() => {
-                    handleCallContact(selectedRecord);
-                    setSelectedRecord(null);
-                  }}
-                >
-                  <Phone size={13} />
-                  <span>Call</span>
-                </button>
+                {canPlaceCalls(user) && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    style={{ backgroundColor: '#059669', borderColor: '#059669', display: 'flex', alignItems: 'center', gap: 6 }}
+                    onClick={() => {
+                      handleCallContact(selectedRecord);
+                      setSelectedRecord(null);
+                    }}
+                  >
+                    <Phone size={13} />
+                    <span>Call</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn btn-sm btn-secondary"

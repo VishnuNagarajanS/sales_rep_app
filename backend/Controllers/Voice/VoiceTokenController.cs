@@ -43,8 +43,17 @@ public class VoiceTokenController : ControllerBase
     /// The browser uses this token to register a Twilio Device for real calls.
     /// </summary>
     [HttpGet("token")]
+    [Authorize(Roles = "sales_executive,irm,super_admin")]
     public ActionResult<ApiResponse<VoiceTokenResponseDto>> GetToken(CancellationToken ct = default)
     {
+        var role = (_currentUser.Role ?? string.Empty).ToLowerInvariant();
+        if (role == "company_admin" || role == "admin" || role == "ghl_admin")
+        {
+            _logger.LogWarning("Voice token request rejected: User {UserId} with role {Role} is not permitted to acquire voice tokens.", _currentUser.UserId, role);
+            return StatusCode(StatusCodes.Status403Forbidden,
+                ApiResponse<VoiceTokenResponseDto>.FailureResult("Access denied: Admin roles are not permitted to acquire voice tokens or place calls."));
+        }
+
         var settings = _twilioOptions.Value;
 
         if (!settings.IsConfigured)

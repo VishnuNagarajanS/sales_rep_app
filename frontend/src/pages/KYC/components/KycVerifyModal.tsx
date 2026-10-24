@@ -16,6 +16,8 @@ import {
   EyeOff,
   FileText,
   CheckCircle2,
+  Edit3,
+  Save,
 } from 'lucide-react';
 import { Modal } from '../../../components/common/Modal';
 import { Deal } from '../../../types';
@@ -24,6 +26,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { PERMISSIONS } from '../../../constants/permissions';
 import { isMockMode } from '../../../config/environment';
 import { getAuthHeaders } from '../../../utils/authHeaders';
+import { EXTERNAL_VERIFICATION_LINKS } from '../../../constants/externalLinks';
 import './KycVerifyModal.css';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -74,11 +77,14 @@ function NotProvided() {
   return <span className="kvm-not-provided">Not provided</span>;
 }
 
-function DetailField({ label, value }: { label: string; value?: string | null }) {
+function DetailField({ label, value, extra }: { label: string; value?: string | null; extra?: React.ReactNode }) {
   return (
     <div className="kvm-detail-row">
       <span className="kvm-detail-label">{label}</span>
-      {value ? <span className="kvm-detail-val">{value}</span> : <NotProvided />}
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {value ? <span className="kvm-detail-val">{value}</span> : <NotProvided />}
+        {extra}
+      </div>
     </div>
   );
 }
@@ -96,19 +102,21 @@ function SensitiveField({
   label,
   full,
   masked,
+  extra,
 }: {
   label: string;
   full?: string | null;
   masked?: string | null;
+  extra?: React.ReactNode;
 }) {
   const [revealed, setRevealed] = useState(false);
   if (!full) {
-    return <DetailField label={label} value={null} />;
+    return <DetailField label={label} value={null} extra={extra} />;
   }
   return (
     <div className="kvm-detail-row">
       <span className="kvm-detail-label">{label}</span>
-      <span className="kvm-detail-val" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span className="kvm-detail-val" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {revealed ? full : masked}
         <button
           type="button"
@@ -132,6 +140,7 @@ function SensitiveField({
           {revealed ? <EyeOff size={12} /> : <Eye size={12} />}
           {revealed ? 'Hide' : 'Show'}
         </button>
+        {extra}
       </span>
     </div>
   );
@@ -181,15 +190,50 @@ function DocumentPreviewBar({ label, doc, onView }: DocPreviewProps) {
 function PanDetails({
   data,
   onViewDoc,
+  onShowToast,
 }: {
   data: Record<string, any>;
   onViewDoc: (doc: { name: string; url?: string }) => void;
+  onShowToast?: (msg: string) => void;
 }) {
   const doc = data.panDoc?.url ? data.panDoc : data.panDocumentUrl ? { name: 'PAN Card Proof', url: data.panDocumentUrl } : null;
 
   return (
     <div className="kvm-detail-block">
-      <DetailField label="PAN Number" value={data.panNumber} />
+      <DetailField
+        label="PAN Number"
+        value={data.panNumber}
+        extra={
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            title="Verify PAN on Income Tax portal"
+            aria-label="Verify PAN on Income Tax portal"
+            onClick={() => {
+              const rawPan = data.panNumber ? String(data.panNumber).trim() : '';
+              if (rawPan && rawPan !== '—' && rawPan.toLowerCase() !== 'not provided') {
+                try {
+                  navigator.clipboard.writeText(rawPan);
+                  onShowToast?.('PAN copied. Paste it on the Income Tax portal.');
+                } catch {}
+              }
+              window.open(EXTERNAL_VERIFICATION_LINKS.PAN, '_blank', 'noopener,noreferrer');
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '2px 8px',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              borderRadius: 6,
+            }}
+          >
+            <ShieldCheck size={12} /> <span>Verify PAN</span>
+          </button>
+        }
+      />
       <DetailField label="Name as per PAN" value={data.nameAsPerPan || data.investorName} />
       <DetailField label="Father's Name" value={data.fatherName} />
       <DocumentPreviewBar label="PAN Card" doc={doc} onView={onViewDoc} />
@@ -212,6 +256,29 @@ function AadhaarDetails({
         label="Aadhaar Number"
         full={formatAadhaar(data.aadhaarNumber)}
         masked={maskAadhaar(data.aadhaarNumber)}
+        extra={
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            title="Verify Aadhaar on UIDAI portal"
+            aria-label="Verify Aadhaar on UIDAI portal"
+            onClick={() => {
+              window.open(EXTERNAL_VERIFICATION_LINKS.AADHAAR, '_blank', 'noopener,noreferrer');
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '2px 8px',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              borderRadius: 6,
+            }}
+          >
+            <ShieldCheck size={12} /> <span>Verify Aadhaar</span>
+          </button>
+        }
       />
       <DetailField label="Name on Document" value={data.nameAsPerPan || data.investorName} />
       <DetailField label="Date of Birth" value={data.dob || data.dateOfBirth} />
@@ -455,14 +522,12 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
   onShowToast,
 }) => {
   const { user, permissions } = useAuth();
-  const canVerify =
-    permissions.includes(PERMISSIONS.KYC_VERIFY) ||
+  const canVerify = Boolean(
+    (permissions && Array.isArray(permissions) && permissions.includes(PERMISSIONS.KYC_VERIFY)) ||
     user?.role?.code === 'irm' ||
     user?.role?.code === 'company_admin' ||
-    user?.role?.code === 'super_admin' ||
-    user?.role?.code === 'sales_executive' ||
-    !permissions ||
-    permissions.length === 0;
+    user?.role?.code === 'super_admin'
+  );
 
   // Real submitted record fetched live from backend
   const [liveKycData, setLiveKycData] = useState<any | null>(null);
@@ -564,13 +629,58 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [confirmVerify, setConfirmVerify] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
+  const [savingSection, setSavingSection] = useState<KycSectionKey | null>(null);
+  const [editingSections, setEditingSections] = useState<Record<KycSectionKey, boolean>>({
+    pan: false,
+    aadhaar: false,
+    bank: false,
+    demat: false,
+    nominee: false,
+    liveness: false,
+  });
+  const [editValues, setEditValues] = useState<Record<string, any>>({});
 
   useEffect(() => {
     if (isOpen) {
       setSections(initSections());
       setConfirmVerify(false);
+      setEditingSections({
+        pan: false,
+        aadhaar: false,
+        bank: false,
+        demat: false,
+        nominee: false,
+        liveness: false,
+      });
     }
   }, [isOpen, deal.id]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setEditValues({
+        panNumber: mergedData.panNumber || '',
+        nameAsPerPan: mergedData.nameAsPerPan || '',
+        fatherName: mergedData.fatherName || '',
+        aadhaarNumber: mergedData.aadhaarNumber || '',
+        dob: mergedData.dob || '',
+        address: mergedData.address || '',
+        city: mergedData.city || '',
+        pincode: mergedData.pincode || '',
+        bankName: mergedData.bankName || '',
+        accountHolderName: mergedData.accountHolderName || '',
+        accountNumber: mergedData.accountNumber || '',
+        ifscCode: mergedData.ifscCode || '',
+        accountType: mergedData.accountType || 'Savings Account',
+        branchName: mergedData.branchName || '',
+        hasNoDemat: Boolean(mergedData.hasNoDemat),
+        dematDepository: mergedData.dematDepository || 'CDSL',
+        dpId: mergedData.dpId || '',
+        dematClientId: mergedData.dematClientId || '',
+        dematAccountNumber: mergedData.dematAccountNumber || '',
+        nominees: Array.isArray(mergedData.nominees) ? mergedData.nominees : [],
+      });
+    }
+  }, [isOpen, deal.id, liveKycData]);
 
   const updateSection = (key: KycSectionKey, patch: Partial<SectionState>) =>
     setSections(prev => ({ ...prev, [key]: { ...prev[key], ...patch } }));
@@ -583,11 +693,16 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
     const newStatus: SectionStatus = sections[key].status === mark ? 'unchecked' : mark;
     updateSection(key, {
       viewedOnce: true,
+      expanded: newStatus === 'wrong' ? true : sections[key].expanded,
       status: newStatus,
       reason: newStatus !== 'wrong' ? '' : sections[key].reason,
       reviewedBy: user?.email || 'IRM Officer',
       reviewedAt: new Date().toISOString(),
     });
+    // If marked wrong, automatically open edit mode for this section
+    if (newStatus === 'wrong' && key !== 'liveness') {
+      setEditingSections(prev => ({ ...prev, [key]: true }));
+    }
   };
 
   const handleQuickVerifyAll = () => {
@@ -612,17 +727,60 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
       onShowToast(`No preview file available for ${doc.name}.`);
       return;
     }
-    const isPdf = doc.url.startsWith('data:application/pdf') || doc.url.toLowerCase().includes('.pdf');
-    const w = window.open('');
+    const cleanUrl = doc.url.trim();
+    const isAllowedScheme =
+      cleanUrl.startsWith('http://') ||
+      cleanUrl.startsWith('https://') ||
+      cleanUrl.startsWith('blob:') ||
+      cleanUrl.startsWith('data:application/pdf') ||
+      cleanUrl.startsWith('data:image/');
+    if (!isAllowedScheme) {
+      onShowToast('Invalid or unsafe document URL.');
+      return;
+    }
+
+    const isPdf = cleanUrl.startsWith('data:application/pdf') || cleanUrl.toLowerCase().includes('.pdf');
+    const w = window.open('', '_blank');
     if (w) {
-      if (isPdf) {
-        w.document.write(
-          `<title>${doc.name}</title><iframe src="${doc.url}" style="width:100%;height:100%;border:none;margin:0;position:fixed;top:0;left:0;right:0;bottom:0;"></iframe>`
-        );
-      } else {
-        w.document.write(
-          `<title>${doc.name}</title><div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#090d16;margin:0;"><img src="${doc.url}" style="max-width:92%;max-height:92vh;border-radius:10px;box-shadow:0 12px 36px rgba(0,0,0,0.6);" alt="${doc.name}" /></div>`
-        );
+      try {
+        w.opener = null;
+        w.document.title = doc.name;
+        w.document.body.style.margin = '0';
+        w.document.body.style.background = '#090d16';
+
+        if (isPdf) {
+          const iframe = w.document.createElement('iframe');
+          iframe.src = cleanUrl;
+          iframe.style.width = '100%';
+          iframe.style.height = '100%';
+          iframe.style.border = 'none';
+          iframe.style.position = 'fixed';
+          iframe.style.top = '0';
+          iframe.style.left = '0';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          w.document.body.appendChild(iframe);
+        } else {
+          const container = w.document.createElement('div');
+          container.style.display = 'flex';
+          container.style.alignItems = 'center';
+          container.style.justifyContent = 'center';
+          container.style.minHeight = '100vh';
+          container.style.background = '#090d16';
+          container.style.margin = '0';
+
+          const img = w.document.createElement('img');
+          img.src = cleanUrl;
+          img.alt = doc.name;
+          img.style.maxWidth = '92%';
+          img.style.maxHeight = '92vh';
+          img.style.borderRadius = '10px';
+          img.style.boxShadow = '0 12px 36px rgba(0,0,0,0.6)';
+          container.appendChild(img);
+          w.document.body.appendChild(container);
+        }
+      } catch (err) {
+        console.error('Error rendering preview:', err);
       }
     }
   };
@@ -716,6 +874,375 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
     }
   };
 
+  const handleSaveSectionDetails = async (key: KycSectionKey) => {
+    setSavingSection(key);
+    try {
+      const payload: Record<string, any> = {
+        correctedSection: key,
+      };
+      if (key === 'pan') {
+        payload.panNumber = editValues.panNumber;
+        payload.nameAsPerPan = editValues.nameAsPerPan;
+        payload.fatherName = editValues.fatherName;
+      } else if (key === 'aadhaar') {
+        payload.aadhaarNumber = editValues.aadhaarNumber;
+        payload.dateOfBirth = editValues.dob;
+        payload.addressLine1 = editValues.address;
+        payload.city = editValues.city;
+        payload.pincode = editValues.pincode;
+        payload.nameAsPerPan = editValues.nameAsPerPan;
+      } else if (key === 'bank') {
+        payload.bankName = editValues.bankName;
+        payload.accountNumber = editValues.accountNumber;
+        payload.ifscCode = editValues.ifscCode;
+        payload.accountType = editValues.accountType;
+        payload.accountHolderName = editValues.accountHolderName;
+        payload.branchName = editValues.branchName;
+      } else if (key === 'demat') {
+        payload.hasNoDemat = editValues.hasNoDemat;
+        payload.dpId = editValues.dpId;
+        payload.dematClientId = editValues.dematClientId;
+        payload.dematAccountNumber = editValues.dematAccountNumber;
+        payload.dematDepository = editValues.dematDepository;
+      } else if (key === 'nominee') {
+        payload.nomineesJson = JSON.stringify(editValues.nominees || []);
+      }
+
+      if (!isMockMode() && resolvedKycId && (/^\d+$/.test(String(resolvedKycId)) || typeof resolvedKycId === 'number')) {
+        const res = await fetch(`/api/irm/kyc/${resolvedKycId}/details`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            setLiveKycData((prev: any) => ({ ...prev, ...json.data }));
+          }
+        }
+      }
+
+      // Also update local storage so it persists in offline/demo modes
+      const kycStorageKey = `nexus_kyc_data_${deal.id}`;
+      try {
+        const raw = localStorage.getItem(kycStorageKey);
+        const parsed = raw ? JSON.parse(raw) : {};
+        localStorage.setItem(kycStorageKey, JSON.stringify({ ...parsed, ...payload }));
+      } catch {}
+
+      window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
+      onShowToast(`${SECTION_LABELS[key]} details updated and saved successfully!`);
+      setEditingSections(prev => ({ ...prev, [key]: false }));
+    } catch (err: any) {
+      onShowToast(`Failed to update ${SECTION_LABELS[key]}: ${err.message || 'Unknown error'}`);
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const renderSectionEditForm = (key: KycSectionKey) => {
+    return (
+      <div className="kvm-edit-card">
+        <div className="kvm-edit-title">
+          <Edit3 size={13} /> Edit &amp; Correct {SECTION_LABELS[key]}
+        </div>
+
+        {key === 'pan' && (
+          <div className="kvm-edit-grid">
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">PAN Number *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                maxLength={10}
+                placeholder="ABCDE1234F"
+                value={editValues.panNumber || ''}
+                onChange={e => setEditValues(p => ({ ...p, panNumber: e.target.value.toUpperCase() }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Name as per PAN *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Full Name on PAN"
+                value={editValues.nameAsPerPan || ''}
+                onChange={e => setEditValues(p => ({ ...p, nameAsPerPan: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Father's Name</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Father's Name"
+                value={editValues.fatherName || ''}
+                onChange={e => setEditValues(p => ({ ...p, fatherName: e.target.value }))}
+              />
+            </div>
+          </div>
+        )}
+
+        {key === 'aadhaar' && (
+          <div className="kvm-edit-grid">
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Aadhaar Number *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                maxLength={14}
+                placeholder="12 digit Aadhaar"
+                value={editValues.aadhaarNumber || ''}
+                onChange={e => setEditValues(p => ({ ...p, aadhaarNumber: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Date of Birth</label>
+              <input
+                type="date"
+                className="kvm-edit-input"
+                value={editValues.dob || ''}
+                onChange={e => setEditValues(p => ({ ...p, dob: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group" style={{ gridColumn: 'span 2' }}>
+              <label className="kvm-edit-label">Permanent Address</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="House / Street / Area"
+                value={editValues.address || ''}
+                onChange={e => setEditValues(p => ({ ...p, address: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">City</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="City"
+                value={editValues.city || ''}
+                onChange={e => setEditValues(p => ({ ...p, city: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Pincode</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                maxLength={6}
+                placeholder="Pincode"
+                value={editValues.pincode || ''}
+                onChange={e => setEditValues(p => ({ ...p, pincode: e.target.value }))}
+              />
+            </div>
+          </div>
+        )}
+
+        {key === 'bank' && (
+          <div className="kvm-edit-grid">
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Account Holder Name *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Account Holder Name"
+                value={editValues.accountHolderName || ''}
+                onChange={e => setEditValues(p => ({ ...p, accountHolderName: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Bank Name *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Bank Name (e.g. HDFC Bank)"
+                value={editValues.bankName || ''}
+                onChange={e => setEditValues(p => ({ ...p, bankName: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Account Number *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Bank Account Number"
+                value={editValues.accountNumber || ''}
+                onChange={e => setEditValues(p => ({ ...p, accountNumber: e.target.value }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">IFSC Code *</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                maxLength={11}
+                placeholder="e.g. HDFC0001234"
+                value={editValues.ifscCode || ''}
+                onChange={e => setEditValues(p => ({ ...p, ifscCode: e.target.value.toUpperCase() }))}
+              />
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Account Type</label>
+              <select
+                className="kvm-edit-input"
+                value={editValues.accountType || 'Savings Account'}
+                onChange={e => setEditValues(p => ({ ...p, accountType: e.target.value }))}
+              >
+                <option value="Savings Account">Savings Account</option>
+                <option value="Current Account">Current Account</option>
+                <option value="NRE / NRO">NRE / NRO Account</option>
+              </select>
+            </div>
+            <div className="kvm-edit-group">
+              <label className="kvm-edit-label">Branch Name</label>
+              <input
+                type="text"
+                className="kvm-edit-input"
+                placeholder="Branch / Location"
+                value={editValues.branchName || ''}
+                onChange={e => setEditValues(p => ({ ...p, branchName: e.target.value }))}
+              />
+            </div>
+          </div>
+        )}
+
+        {key === 'demat' && (
+          <div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(editValues.hasNoDemat)}
+                  onChange={e => setEditValues(p => ({ ...p, hasNoDemat: e.target.checked }))}
+                />
+                <span>Waive Demat (Investor has no Demat Account — Mutual Funds / Direct Only)</span>
+              </label>
+            </div>
+            {!editValues.hasNoDemat && (
+              <div className="kvm-edit-grid">
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Depository</label>
+                  <select
+                    className="kvm-edit-input"
+                    value={editValues.dematDepository || 'CDSL'}
+                    onChange={e => setEditValues(p => ({ ...p, dematDepository: e.target.value }))}
+                  >
+                    <option value="CDSL">CDSL</option>
+                    <option value="NSDL">NSDL</option>
+                  </select>
+                </div>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">DP ID</label>
+                  <input
+                    type="text"
+                    className="kvm-edit-input"
+                    placeholder="DP ID (e.g. 12081600)"
+                    value={editValues.dpId || ''}
+                    onChange={e => setEditValues(p => ({ ...p, dpId: e.target.value }))}
+                  />
+                </div>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Client ID / Demat A/C No.</label>
+                  <input
+                    type="text"
+                    className="kvm-edit-input"
+                    placeholder="Client ID (8 digits)"
+                    value={editValues.dematClientId || editValues.dematAccountNumber || ''}
+                    onChange={e => setEditValues(p => ({ ...p, dematClientId: e.target.value, dematAccountNumber: e.target.value }))}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {key === 'nominee' && (
+          <div>
+            {(editValues.nominees || []).map((nom: any, nIdx: number) => (
+              <div key={nIdx} className="kvm-edit-grid" style={{ marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid #f1f5f9' }}>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Nominee #{nIdx + 1} Name</label>
+                  <input
+                    type="text"
+                    className="kvm-edit-input"
+                    value={nom.name || ''}
+                    onChange={e => {
+                      const updated = [...(editValues.nominees || [])];
+                      updated[nIdx] = { ...updated[nIdx], name: e.target.value };
+                      setEditValues(p => ({ ...p, nominees: updated }));
+                    }}
+                  />
+                </div>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Relationship</label>
+                  <input
+                    type="text"
+                    className="kvm-edit-input"
+                    value={nom.relationship || ''}
+                    onChange={e => {
+                      const updated = [...(editValues.nominees || [])];
+                      updated[nIdx] = { ...updated[nIdx], relationship: e.target.value };
+                      setEditValues(p => ({ ...p, nominees: updated }));
+                    }}
+                  />
+                </div>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Date of Birth</label>
+                  <input
+                    type="date"
+                    className="kvm-edit-input"
+                    value={nom.dob || ''}
+                    onChange={e => {
+                      const updated = [...(editValues.nominees || [])];
+                      updated[nIdx] = { ...updated[nIdx], dob: e.target.value };
+                      setEditValues(p => ({ ...p, nominees: updated }));
+                    }}
+                  />
+                </div>
+                <div className="kvm-edit-group">
+                  <label className="kvm-edit-label">Share %</label>
+                  <input
+                    type="number"
+                    className="kvm-edit-input"
+                    value={nom.allocationPercentage ?? 100}
+                    onChange={e => {
+                      const updated = [...(editValues.nominees || [])];
+                      updated[nIdx] = { ...updated[nIdx], allocationPercentage: Number(e.target.value) };
+                      setEditValues(p => ({ ...p, nominees: updated }));
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="kvm-edit-actions">
+          <button
+            type="button"
+            className="btn-cancel"
+            onClick={() => setEditingSections(prev => ({ ...prev, [key]: false }))}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-save"
+            disabled={savingSection === key}
+            onClick={() => handleSaveSectionDetails(key)}
+          >
+            <Save size={13} />
+            <span>{savingSection === key ? 'Saving...' : 'Save Correction'}</span>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderSection = (key: KycSectionKey) => {
     const s = sections[key];
     const tickActive = s.status === 'verified';
@@ -736,6 +1263,34 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
             <span className="kvm-section-label">{SECTION_LABELS[key]}</span>
             {tickActive && <span className="kvm-status-chip kvm-status-chip--ok">Correct</span>}
             {crossActive && <span className="kvm-status-chip kvm-status-chip--wrong">Wrong</span>}
+            {canVerify && key !== 'liveness' && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 11,
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                  marginLeft: 'auto',
+                  marginRight: 6,
+                  color: editingSections[key] ? '#dc2626' : 'var(--text-secondary)',
+                  border: editingSections[key] ? '1px solid rgba(239, 68, 68, 0.4)' : undefined,
+                  backgroundColor: editingSections[key] ? 'rgba(239, 68, 68, 0.08)' : undefined,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  updateSection(key, { expanded: true });
+                  setEditingSections(prev => ({ ...prev, [key]: !prev[key] }));
+                }}
+                title={editingSections[key] ? 'Close editor' : 'Edit details for this section'}
+              >
+                <Edit3 size={11} />
+                <span>{editingSections[key] ? 'Cancel Edit' : 'Edit Details'}</span>
+              </button>
+            )}
           </div>
 
           {!s.expanded && (
@@ -763,12 +1318,15 @@ export const KycVerifyModal: React.FC<KycVerifyModalProps> = ({
 
           {s.expanded && (
             <>
-              {key === 'pan' && <PanDetails data={mergedData} onViewDoc={handleViewDoc} />}
+              {key === 'pan' && <PanDetails data={mergedData} onViewDoc={handleViewDoc} onShowToast={onShowToast} />}
               {key === 'aadhaar' && <AadhaarDetails data={mergedData} onViewDoc={handleViewDoc} />}
               {key === 'bank' && <BankDetails data={mergedData} onViewDoc={handleViewDoc} />}
               {key === 'demat' && <DematDetails data={mergedData} onViewDoc={handleViewDoc} />}
               {key === 'nominee' && <NomineeDetails data={mergedData} />}
               {key === 'liveness' && <LivenessDetails data={mergedData} onViewDoc={handleViewDoc} />}
+
+              {/* Editable form when editing is toggled or marked wrong */}
+              {editingSections[key] && key !== 'liveness' && renderSectionEditForm(key)}
             </>
           )}
 

@@ -10,6 +10,10 @@ public class Customer360CallSummaryDto
     public string Disposition { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; }
+    public string? CallerName { get; set; }
+    public string? CallerRole { get; set; }
+    public string? LeadStatusAtCall { get; set; }
+    public string? TwilioCallSid { get; set; }
 }
 
 public class Customer360Dto

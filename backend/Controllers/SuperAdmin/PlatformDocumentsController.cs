@@ -17,6 +17,13 @@ namespace backend.Controllers.SuperAdmin
         private readonly ApplicationDbContext _context;
         private readonly IWebHostEnvironment _env;
 
+        private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".ppt", ".pptx",
+            ".txt", ".png", ".jpg", ".jpeg", ".webp"
+        };
+        private const long MaxUploadSizeBytes = 25 * 1024 * 1024; // 25 MB
+
         public PlatformDocumentsController(ApplicationDbContext context, IWebHostEnvironment env)
         {
             _context = context;
@@ -143,6 +150,17 @@ namespace backend.Controllers.SuperAdmin
             if (dto.File == null || dto.File.Length == 0)
             {
                 return BadRequest(ApiResponse<object>.ErrorResponse("File is required for upload."));
+            }
+
+            if (dto.File.Length > MaxUploadSizeBytes)
+            {
+                return BadRequest(ApiResponse<object>.ErrorResponse("File size exceeds maximum allowed limit of 25 MB."));
+            }
+
+            var ext = Path.GetExtension(dto.File.FileName);
+            if (string.IsNullOrWhiteSpace(ext) || !AllowedExtensions.Contains(ext))
+            {
+                return BadRequest(ApiResponse<object>.ErrorResponse($"File extension '{ext}' is not permitted for security reasons. Allowed: {string.Join(", ", AllowedExtensions)}"));
             }
 
             var userName = User.FindFirstValue(ClaimTypes.Name) 

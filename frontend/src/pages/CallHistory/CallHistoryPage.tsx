@@ -13,6 +13,7 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { FilterBar } from '../../components/common/FilterBar';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './CallHistoryPage.css';
 
 export const CallHistoryPage: React.FC = () => {
@@ -475,7 +476,7 @@ export const CallHistoryPage: React.FC = () => {
         label: 'Call Back',
         icon: <Phone size={14} style={{ marginRight: 6 }} />,
         onClick: c => initiateCall(c.contactName, c.contactPhone),
-        hidden: c => isGhlAdmin && isIrmCall(c),
+        hidden: () => !canPlaceCalls(user),
       },
     ];
 
@@ -603,7 +604,7 @@ export const CallHistoryPage: React.FC = () => {
               tenantName={tenant?.name}
               consultationReason={irmConsultationReason}
               hideAutoNotes={true}
-              onCall={() => initiateCall(selectedCall.contactName, selectedCall.contactPhone)}
+              onCall={canPlaceCalls(user) ? () => initiateCall(selectedCall.contactName, selectedCall.contactPhone) : undefined}
             />
           )}
         </Drawer>
@@ -653,13 +654,15 @@ export const CallHistoryPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <button
-                    className="btn btn-primary btn-sm"
-                    style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
-                    onClick={() => initiateCall(transcriptCall.contactName, transcriptCall.contactPhone)}
-                  >
-                    <Phone size={13} /> Call Back
-                  </button>
+                  {canPlaceCalls(user) && (
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
+                      onClick={() => initiateCall(transcriptCall.contactName, transcriptCall.contactPhone)}
+                    >
+                      <Phone size={13} /> Call Back
+                    </button>
+                  )}
                 </div>
 
                 {/* Call Metadata Details */}

@@ -42,8 +42,15 @@ namespace backend.Services.Ai
             var tz = await clock.GetTimeZoneAsync(scope.CompanyId, ct);
             var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
 
+            string rolePersona = scope.IsSalesExecutive
+                ? "ROLE PERSONA: The user is a Sales Executive. Focus on their assigned leads, upcoming follow-ups, logged calls, customer conversions, and company products. Help them hit their sales targets and manage their daily sales pipeline efficiently."
+                : scope.IsIrm
+                ? "ROLE PERSONA: The user is an Investor Relations Manager (IRM). Focus on their assigned investors, investment opportunities, KYC status checks, consultations, and fund schemes. Help them manage high-net-worth investor relationships and AUM commitments."
+                : "ROLE PERSONA: The user is an Administrator. They have full visibility across company sales representatives, IRMs, leads, investors, deals, and organization-wide performance metrics.";
+
             var systemPrompt = $@"You are ""Nexus AI"", the built-in assistant of NexusSales.
 Today is {today:yyyy-MM-dd} ({tz.Id}). The user is {_currentUser.Email}, role: {scope.RoleCode}.
+{rolePersona}
 
 SCOPE
 You only help with:

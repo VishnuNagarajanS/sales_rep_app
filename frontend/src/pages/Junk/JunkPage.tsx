@@ -11,6 +11,7 @@ import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Timeline, TimelineEvent } from '../../components/common/Timeline';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './JunkPage.css';
 
 export const JunkPage: React.FC = () => {
@@ -362,7 +363,7 @@ export const JunkPage: React.FC = () => {
                 contactType="lead"
                 tenantId={tenant?.id}
                 tenantName={tenant?.name}
-                onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id)}
+                onCall={canPlaceCalls(user) ? () => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id) : undefined}
               />
             </div>
           ) : (

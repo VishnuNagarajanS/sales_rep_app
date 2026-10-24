@@ -1,5 +1,7 @@
 import { Device, Call } from '@twilio/voice-sdk';
 import { apiClient, ApiResponse } from './apiClient';
+import { canPlaceCalls } from '../utils/agentRoleUtils';
+import { storageService } from './storageService';
 
 export interface VoiceTokenResponse {
   token?: string;
@@ -94,6 +96,18 @@ class TwilioVoiceService {
   }
 
   public async initializeDevice(): Promise<{ success: boolean; isConfigured: boolean; error?: string }> {
+    const currentUser = storageService.getUser();
+    if (currentUser && !canPlaceCalls(currentUser)) {
+      this.isConfigured = false;
+      this.isRegistered = false;
+      this.lastError = 'Voice calling is not authorized for this role.';
+      return {
+        success: false,
+        isConfigured: false,
+        error: this.lastError,
+      };
+    }
+
     if (this.initPromise) {
       const ok = await this.initPromise;
       return {
@@ -183,6 +197,14 @@ class TwilioVoiceService {
         this.lastError = null;
         return true;
       } catch (err: any) {
+        const isForbidden = err?.message?.includes('Forbidden') || err?.status === 403 || err?.response?.status === 403;
+        if (isForbidden) {
+          this.isConfigured = false;
+          this.isRegistered = false;
+          this.lastError = 'Voice calling is not authorized for this role.';
+          this.notifyState('unconfigured', this.lastError);
+          return false;
+        }
         console.error('[TwilioVoice] Device initialization failed:', err);
         this.isRegistered = false;
         this.lastError = err.message || 'Failed to initialize Twilio Voice Device.';
@@ -202,6 +224,11 @@ class TwilioVoiceService {
   }
 
   public async makeCall(toPhoneNumber: string, customParams?: Record<string, string>): Promise<Call> {
+    const currentUser = storageService.getUser();
+    if (currentUser && !canPlaceCalls(currentUser)) {
+      throw new Error('Current user role is not permitted to place calls.');
+    }
+
     if (!this.device) {
       const initResult = await this.initializeDevice();
       if (!initResult.success || !this.device) {

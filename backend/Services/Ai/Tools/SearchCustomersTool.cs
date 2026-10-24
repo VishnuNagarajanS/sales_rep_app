@@ -36,6 +36,11 @@ namespace backend.Services.Ai.Tools
 
             var query = db.Customers.AsNoTracking().Where(c => c.CompanyId == scope.CompanyId);
 
+            if (!scope.IsAdmin)
+            {
+                query = query.Where(c => c.AssignedAgentId == scope.UserId || c.OriginalOwnerId == scope.UserId);
+            }
+
             if (!string.IsNullOrEmpty(args.Status))
             {
                 query = query.Where(c => c.Status == args.Status);

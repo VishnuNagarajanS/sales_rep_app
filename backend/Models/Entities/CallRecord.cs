@@ -31,6 +31,9 @@ public class CallRecord
     [MaxLength(50)]
     public string? CallModule { get; set; }
 
+    [MaxLength(50)]
+    public string? LeadStatusAtCall { get; set; }
+
     public string? Reason { get; set; }
 
     /// <summary>

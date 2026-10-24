@@ -19,6 +19,7 @@ import { storageService } from '../../services/storageService';
 import { isMockMode } from '../../config/environment';
 import { useAuth } from '../../context/AuthContext';
 import { useCall } from '../../context/CallContext';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import {
   getFollowups,
   saveFollowup as apiSaveFollowup,
@@ -979,47 +980,8 @@ export const FollowupsPage: React.FC = () => {
         return;
       }
 
-      // Check for time slot conflict: no two schedules can be booked at the same time for the same representative.
-      // Both roles (Sales Executive and IRM) are considered individually.
-      const targetMs = parsedDate.getTime();
-      const currentAgentId = rescheduleItem.assignedAgentId ? String(rescheduleItem.assignedAgentId) : (user?.id ? String(user.id) : '');
-      const rescheduleItemRole = getFollowupRole(rescheduleItem);
-
-      const conflict = followups.find(f => {
-        if (f.status !== 'Pending') return false;
-        if (String(f.id) === String(rescheduleItem.id)) return false;
-
-        // Must be the same representative: Sales Executive 1 only conflicts with Sales Executive 1; IRM only conflicts with that same IRM!
-        const fAgentId = f.assignedAgentId ? String(f.assignedAgentId) : '';
-        if (currentAgentId && fAgentId && fAgentId !== currentAgentId) return false;
-
-        const fRole = getFollowupRole(f);
-        if (fRole !== rescheduleItemRole) return false;
-
-        const fTime = new Date(f.scheduledAt).getTime();
-        if (isNaN(fTime)) return false;
-
-        // Overlapping 20-minute slot window
-        return Math.abs(targetMs - fTime) / (60 * 1000) < 20;
-      });
-
-      if (conflict) {
-        const conflictDateObj = new Date(conflict.scheduledAt);
-        const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-        const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
-        const pad = (n: number) => n.toString().padStart(2, '0');
-        const suggestedDateIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
-        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
-
-        setConflictModalData({
-          conflictTime: formattedConflictTime,
-          contactName: conflict.contactName || 'Another Contact',
-          suggestedTime: formattedSuggestedTime,
-          suggestedDateIso,
-        });
-        return;
-      }
-
+      // Submit directly to backend — it runs the authoritative smart-slot walk and returns
+      // SUGGESTED_TIME:<iso> in the errors array if there is a conflict.
       try {
         await apiSaveFollowup({ ...rescheduleItem, scheduledAt: parsedDate.toISOString(), status: 'Pending' });
         setRescheduleItem(null);
@@ -1029,14 +991,24 @@ export const FollowupsPage: React.FC = () => {
       } catch (err: any) {
         console.error('[FollowupsPage] API reschedule failed:', err);
         const msg = err?.message || '';
-        if (msg.includes('already booked') || msg.includes('time slot') || msg.includes('between calls')) {
-          const conflictDateObj = parsedDate;
-          const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-          const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+        const errorsArr: string[] = err?.errors || [];
+        const suggestedEntry = errorsArr.find((e: string) => e.startsWith('SUGGESTED_TIME:'));
+        if (suggestedEntry || msg.includes('already booked') || msg.includes('time slot') || msg.includes('between calls')) {
           const pad = (n: number) => n.toString().padStart(2, '0');
-          const suggestedDateIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
-          const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
-
+          let suggestedDateIso: string;
+          let formattedSuggestedTime: string;
+          if (suggestedEntry) {
+            // Backend sent the authoritative next-free slot as ISO UTC
+            const suggestedUtc = new Date(suggestedEntry.replace('SUGGESTED_TIME:', ''));
+            suggestedDateIso = `${suggestedUtc.getFullYear()}-${pad(suggestedUtc.getMonth() + 1)}-${pad(suggestedUtc.getDate())}T${pad(suggestedUtc.getHours())}:${pad(suggestedUtc.getMinutes())}`;
+            formattedSuggestedTime = suggestedUtc.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedUtc.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+          } else {
+            // Fallback: +20 from requested time (backend did not send SUGGESTED_TIME)
+            const suggestedDate = new Date(parsedDate.getTime() + 20 * 60 * 1000);
+            suggestedDateIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+            formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+          }
+          const formattedConflictTime = parsedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + parsedDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
           setConflictModalData({
             conflictTime: formattedConflictTime,
             contactName: 'Existing Appointment',
@@ -1202,6 +1174,57 @@ export const FollowupsPage: React.FC = () => {
       }
       return false;
     });
+
+    // Also synthesize follow-up tasks for any leads assigned to this Sales Executive that are in Follow-up/Callback stage
+    const existingFollowupContactIds = new Set(
+      scopedFollowups.map(f => String(f.contactId)).filter(Boolean)
+    );
+    const existingFollowupPhones = new Set(
+      scopedFollowups.map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10)).filter(Boolean)
+    );
+
+    const missingFollowupLeads = allLeads.filter(l => {
+      const isAssignedToMe =
+        (l.assignedAgentId && String(l.assignedAgentId) === String(user?.id)) ||
+        (l.assignedAgentName && user?.name && l.assignedAgentName.trim().toLowerCase() === user.name.trim().toLowerCase());
+      if (!isAssignedToMe) return false;
+      if (l.companyId && tenant?.id && !isTenantMatch(l.companyId, tenant.id)) return false;
+
+      const lStatus = (l.status || '').toLowerCase();
+      if (lStatus === 'interested' || lStatus === 'qualified' || lStatus === 'converted' || lStatus === 'not interested' || lStatus === 'junk') {
+        return false;
+      }
+
+      const isInFollowupStage =
+        l.status === 'Follow-up Required' ||
+        l.status === 'Callback';
+      if (!isInFollowupStage) return false;
+
+      const cleanPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
+      if (existingFollowupContactIds.has(String(l.id))) return false;
+      if (cleanPhone && existingFollowupPhones.has(cleanPhone)) return false;
+
+      return true;
+    });
+
+    for (const ml of missingFollowupLeads) {
+      scopedFollowups.push({
+        id: `lead-flw-${ml.id}`,
+        companyId: tenant?.id || 't-ghl-01',
+        contactId: String(ml.id),
+        contactType: 'lead',
+        contactName: ml.name,
+        contactPhone: ml.phone,
+        contactEmail: ml.email || '',
+        scheduledAt: ml.nextFollowupDate || new Date(Date.now() + 86400000).toISOString(),
+        priority: (ml.priority === 'Urgent' ? 'High' : (ml.priority || 'High')) as 'Low' | 'Medium' | 'High',
+        status: 'Pending',
+        notes: ml.notes || 'Scheduled follow-up callback',
+        assignedAgentId: String(user?.id || ''),
+        assignedAgentName: user?.name || ml.assignedAgentName || '',
+        assignedRole: 'Sales Executive',
+      });
+    }
   } else if (isIrm) {
     // IRM: Show pending follow-ups assigned to THIS authenticated IRM OR associated with a lead assigned to THIS IRM
     // Build sets of contacts that have moved beyond follow-up (KYC, Opportunities, Converted, etc.)
@@ -2103,22 +2126,24 @@ export const FollowupsPage: React.FC = () => {
                       Reschedule
                     </button>
                   )}
-                  <button
-                    className="btn btn-call btn-sm"
-                    onClick={e => {
-                      e.stopPropagation();
-                      initiateCall(
-                        f.contactName,
-                        f.contactPhone,
-                        f.contactType as any,
-                        f.contactId,
-                        f.id,
-                        'follow_up'
-                      );
-                    }}
-                  >
-                    <Phone size={13} /> Call
-                  </button>
+                  {canPlaceCalls(user) && (
+                    <button
+                      className="btn btn-call btn-sm"
+                      onClick={e => {
+                        e.stopPropagation();
+                        initiateCall(
+                          f.contactName,
+                          f.contactPhone,
+                          f.contactType as any,
+                          f.contactId,
+                          f.id,
+                          'follow_up'
+                        );
+                      }}
+                    >
+                      <Phone size={13} /> Call
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -2331,21 +2356,23 @@ export const FollowupsPage: React.FC = () => {
                       Reschedule
                     </button>
                   )}
-                  <button
-                    className="btn btn-call"
-                    onClick={() => {
-                      initiateCall(
-                        drawerFollowup.contactName,
-                        drawerFollowup.contactPhone,
-                        (drawerFollowup.contactType as any) || 'lead',
-                        drawerFollowup.contactId,
-                        drawerFollowup.id,
-                        'follow_up'
-                      );
-                    }}
-                  >
-                    <Phone size={14} /> Call Contact
-                  </button>
+                  {canPlaceCalls(user) && (
+                    <button
+                      className="btn btn-call"
+                      onClick={() => {
+                        initiateCall(
+                          drawerFollowup.contactName,
+                          drawerFollowup.contactPhone,
+                          (drawerFollowup.contactType as any) || 'lead',
+                          drawerFollowup.contactId,
+                          drawerFollowup.id,
+                          'follow_up'
+                        );
+                      }}
+                    >
+                      <Phone size={14} /> Call Contact
+                    </button>
+                  )}
                 </div>
               </div>
             )
@@ -2886,7 +2913,7 @@ export const FollowupsPage: React.FC = () => {
                   tenantName={tenant?.name}
                   calls={callsList}
                   lead={matchingLead}
-                  onCall={() =>
+                  onCall={canPlaceCalls(user) ? () =>
                     initiateCall(
                       drawerFollowup.contactName,
                       drawerFollowup.contactPhone,
@@ -2894,7 +2921,7 @@ export const FollowupsPage: React.FC = () => {
                       resolvedContactId,
                       drawerFollowup.id,
                       'follow_up'
-                    )
+                    ) : undefined
                   }
                   sectionsOnly={['callRecordings']}
                 />

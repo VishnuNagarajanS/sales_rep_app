@@ -1835,7 +1835,7 @@ export class SuperAdminService {
 
   async downloadDatabaseBackupApi(id: string, filename: string): Promise<void> {
     const token = sessionStorage.getItem('nexus_auth_token') || localStorage.getItem('nexus_auth_token');
-    const response = await fetch(`http://localhost:5106/api/super-admin/system/backups/${id}/download`, {
+    const response = await fetch(`${apiClient.getBaseUrl()}/super-admin/system/backups/${id}/download`, {
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },

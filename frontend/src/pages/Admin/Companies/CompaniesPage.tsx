@@ -158,7 +158,7 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
     if (!t) return '—';
     const found = didMappings.find(
       d => (d.tenantId && String(d.tenantId) === String(t.id)) ||
-        (d.tenantSlug && d.tenantSlug.toLowerCase() === (t.slug || '').toLowerCase())
+           (d.tenantSlug && d.tenantSlug.toLowerCase() === (t.slug || '').toLowerCase())
     );
     if (found?.phoneNumber) return found.phoneNumber;
     if (t.phone) return t.phone;
@@ -1878,4 +1878,4 @@ export const CompaniesPage: React.FC<CompaniesPageProps> = ({
       )}
     </div>
   );
-};
+};

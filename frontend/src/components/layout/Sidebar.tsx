@@ -38,6 +38,7 @@ import { useAuth } from '../../context/AuthContext';
 import { getFollowups } from '../../services/ghlApiService';
 import { FEATURES } from '../../constants/features';
 import { PERMISSIONS } from '../../constants/permissions';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './Sidebar.css';
 
 interface SidebarProps {
@@ -182,7 +183,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     {
       header: 'Calling',
       items: [
-        { id: 'call-center', label: 'Call Center', icon: <PhoneCall size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_MAKE },
+        ...(canPlaceCalls(user) ? [
+          { id: 'call-center', label: 'Call Center', icon: <PhoneCall size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_MAKE },
+        ] : []),
         { id: 'call-history', label: 'Call History', icon: <History size={18} />, feature: FEATURES.CALLS, permission: PERMISSIONS.CALLS_VIEW },
       ],
     },
@@ -357,6 +360,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentRoute, onNavigate }) =>
     return section.items.filter(item => {
       if (item.feature && !enabledFeatures.includes(item.feature)) return false;
       if (item.permission && !permissions.includes(item.permission)) {
+        if (isIrm && (item.permission === PERMISSIONS.LEADS_VIEW || item.permission === PERMISSIONS.FOLLOWUPS_VIEW || item.permission === PERMISSIONS.DEALS_VIEW || item.permission === PERMISSIONS.KYC_VERIFY)) {
+          return true;
+        }
         return false;
       }
       return true;

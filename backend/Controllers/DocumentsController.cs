@@ -16,6 +16,13 @@ namespace backend.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IWebHostEnvironment _env;
 
+        private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".ppt", ".pptx",
+            ".txt", ".png", ".jpg", ".jpeg", ".webp"
+        };
+        private const long MaxUploadSizeBytes = 25 * 1024 * 1024; // 25 MB
+
         public DocumentsController(ApplicationDbContext context, IWebHostEnvironment env)
         {
             _context = context;
@@ -131,9 +138,9 @@ namespace backend.Controllers
         [HttpPost]
         public async Task<IActionResult> UploadDocument([FromForm] CreateDocumentDto dto)
         {
-            if (!await CheckPermissionAsync("documents.manage") && !await CheckPermissionAsync("documents.view"))
+            if (!await CheckPermissionAsync("documents.manage"))
             {
-                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Access denied. Missing documents upload permission." });
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Access denied. Missing documents.manage permission." });
             }
             var userName = User.FindFirstValue(ClaimTypes.Name) ?? "Unknown User";
             string? fileUrl = null;
@@ -166,13 +173,24 @@ namespace backend.Controllers
 
             if (dto.File != null && dto.File.Length > 0)
             {
+                if (dto.File.Length > MaxUploadSizeBytes)
+                {
+                    return BadRequest(new { success = false, message = "File size exceeds the 25 MB limit." });
+                }
+
+                var ext = Path.GetExtension(dto.File.FileName);
+                if (string.IsNullOrWhiteSpace(ext) || !AllowedExtensions.Contains(ext))
+                {
+                    return BadRequest(new { success = false, message = $"File extension '{ext}' is not allowed for security reasons. Allowed formats: {string.Join(", ", AllowedExtensions)}" });
+                }
+
                 var uploadsFolder = Path.Combine(_env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
                 if (!Directory.Exists(uploadsFolder))
                 {
                     Directory.CreateDirectory(uploadsFolder);
                 }
 
-                var uniqueFileName = Guid.NewGuid().ToString() + "_" + Path.GetFileName(dto.File.FileName);
+                var uniqueFileName = Guid.NewGuid().ToString("N") + ext;
                 var filePath = Path.Combine(uploadsFolder, uniqueFileName);
 
                 using (var stream = new FileStream(filePath, FileMode.Create))
@@ -237,9 +255,9 @@ namespace backend.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteDocument(string id)
         {
-            if (!await CheckPermissionAsync("documents.manage") && !await CheckPermissionAsync("documents.view"))
+            if (!await CheckPermissionAsync("documents.manage"))
             {
-                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Access denied. Missing documents delete permission." });
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Access denied. Missing documents.manage permission." });
             }
             if (!int.TryParse(id, out var docId))
             {
@@ -248,6 +266,25 @@ namespace backend.Controllers
 
             var doc = await _context.Documents.FindAsync(docId);
             if (doc == null) return NotFound(new { success = false, message = "Document not found" });
+
+            // Enforce tenant isolation & ownership
+            var userRole = User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "";
+            var isSuperAdmin = userRole.Equals("super_admin", StringComparison.OrdinalIgnoreCase);
+
+            if (!isSuperAdmin)
+            {
+                if (doc.IsPlatformShared)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Access denied: Platform-shared documents cannot be deleted by company users." });
+                }
+
+                var userCompanyAliases = GetCompanyAliases(null);
+                if (string.Equals(doc.EntityType, "company", StringComparison.OrdinalIgnoreCase) &&
+                    !userCompanyAliases.Contains(doc.EntityId.ToLowerInvariant()))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = "Access denied: You cannot delete documents from another company." });
+                }
+            }
 
             if (!string.IsNullOrEmpty(doc.FileUrl))
             {

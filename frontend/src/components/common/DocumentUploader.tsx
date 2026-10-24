@@ -65,7 +65,7 @@ export const DocumentUploader: React.FC<DocumentUploaderProps> = ({
     try {
       if (isMockMode()) {
         const doc: DocumentItem = {
-          id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          id: `doc-${Date.now()}-${typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID().slice(0, 8) : Date.now().toString(36)}`,
           name: file.name,
           size: formatFileSize(file.size),
           type: file.type || 'application/octet-stream',

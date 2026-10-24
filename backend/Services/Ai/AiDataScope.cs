@@ -8,6 +8,10 @@ namespace backend.Services.Ai
         public int UserId { get; }
         public string RoleCode { get; }
 
+        public bool IsAdmin => RoleCode == "company_admin" || RoleCode == "super_admin" || RoleCode == "admin" || RoleCode == "ghl_admin";
+        public bool IsSalesExecutive => RoleCode == "sales_executive";
+        public bool IsIrm => RoleCode == "irm";
+
         public AiDataScope(ICurrentUserService currentUserService)
         {
             if (!currentUserService.CompanyId.HasValue || !currentUserService.UserId.HasValue || string.IsNullOrEmpty(currentUserService.Role))
@@ -17,12 +21,12 @@ namespace backend.Services.Ai
 
             CompanyId = currentUserService.CompanyId.Value;
             UserId = currentUserService.UserId.Value;
-            RoleCode = currentUserService.Role;
-            
-            // Temporary check: ensure only company_admin is allowed
-            if (RoleCode != "company_admin")
+            RoleCode = (currentUserService.Role ?? "").ToLowerInvariant();
+
+            var allowedRoles = new HashSet<string> { "company_admin", "sales_executive", "irm", "super_admin", "admin", "ghl_admin" };
+            if (!allowedRoles.Contains(RoleCode))
             {
-                throw new UnauthorizedAccessException("Currently, Nexus AI is only available for company admins.");
+                throw new UnauthorizedAccessException("Currently, Nexus AI is only available for authorized sales, IRM, and administrative roles.");
             }
         }
     }

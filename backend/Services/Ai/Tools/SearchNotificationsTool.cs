@@ -36,6 +36,11 @@ namespace backend.Services.Ai.Tools
 
             var query = db.Notifications.AsNoTracking().Where(n => n.CompanyId == scope.CompanyId);
 
+            if (!scope.IsAdmin)
+            {
+                query = query.Where(n => n.UserId == scope.UserId);
+            }
+
             if (args.IsRead.HasValue)
             {
                 query = query.Where(n => n.IsRead == args.IsRead.Value);

@@ -2,15 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   MoreVertical,
-  RotateCw,
   Ban,
   Copy,
-  FileSearch,
-  Eye,
-  FileCheck,
   Phone,
   ArrowRight,
   UserCheck,
+  Edit3,
 } from 'lucide-react';
 import { Deal } from '../../../types';
 import { getAuthHeaders } from '../../../utils/authHeaders';
@@ -18,27 +15,35 @@ import './KycLinkComponents.css';
 
 interface KycRowActionsMenuProps {
   deal: Deal;
-  onOpenReview: (deal: Deal) => void;
   onShowToast: (msg: string) => void;
+  onOpenReview?: (deal: Deal) => void;
   onViewProfile?: (deal: Deal) => void;
   onEditKyc?: (deal: Deal) => void;
   onAssistedKyc?: (deal: Deal) => void;
   onCallInvestor?: (deal: Deal) => void;
   onAdvanceStage?: (deal: Deal) => void;
   isGhlAdmin?: boolean;
+  isVerified?: boolean;
 }
 
 export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
   deal,
-  onOpenReview,
   onShowToast,
+  onOpenReview,
   onViewProfile,
   onEditKyc,
   onAssistedKyc,
   onCallInvestor,
   onAdvanceStage,
   isGhlAdmin = false,
+  isVerified,
 }) => {
+  const isVerifiedResolved =
+    isVerified ??
+    ((deal as any).kycStatus === 'Verified' ||
+      (deal as any).customerKycStatus === 'Verified' ||
+      (deal as any).kycRecord?.status?.toLowerCase() === 'approved');
+
   const [isOpen, setIsOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -85,13 +90,6 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
     } else {
       setIsOpen(false);
     }
-  };
-
-  const handleReview = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setIsOpen(false);
-    onOpenReview(deal);
   };
 
   const handleCopy = async (e: React.MouseEvent) => {
@@ -141,56 +139,6 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
     }
   };
 
-  const handleResend = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setIsOpen(false);
-    try {
-      const kycId = (deal as any).kycId || (deal as any).kycRecordId;
-      if (kycId) {
-        const res = await fetch(`/api/irm/kyc/${kycId}/resend-link`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...getAuthHeaders(),
-          },
-          body: JSON.stringify({ baseUrl: window.location.origin }),
-        });
-        const json = await res.json();
-        if (res.ok && json?.success) {
-          onShowToast(`KYC Link resent to ${deal.customerName}`);
-          return;
-        }
-      }
-
-      // Fallback to send-link endpoint
-      const sendRes = await fetch('/api/irm/kyc/send-link', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(),
-        },
-        body: JSON.stringify({
-          dealId: deal.id,
-          investorId: deal.customerId || deal.id,
-          customerName: deal.customerName,
-          email: deal.email || '',
-          phone: deal.phone || '',
-          forceNewToken: true,
-          baseUrl: window.location.origin,
-        }),
-      });
-      const sendJson = await sendRes.json();
-      if (sendRes.ok && sendJson?.success) {
-        onShowToast(`KYC Link resent to ${deal.customerName}`);
-      } else {
-        throw new Error(sendJson?.message || 'Could not resend KYC link');
-      }
-    } catch (err: any) {
-      onShowToast(err.message || `Failed to resend KYC link for ${deal.customerName}`);
-    }
-  };
-
   const handleRevoke = async (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -218,20 +166,6 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
     } catch (err: any) {
       onShowToast(err.message || `Failed to revoke KYC link for ${deal.customerName}`);
     }
-  };
-
-  const handleProfile = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setIsOpen(false);
-    if (onViewProfile) onViewProfile(deal);
-  };
-
-  const handleEditKyc = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setIsOpen(false);
-    if (onEditKyc) onEditKyc(deal);
   };
 
   const handleCall = (e: React.MouseEvent) => {
@@ -276,17 +210,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
           onClick={e => e.stopPropagation()}
           role="menu"
         >
-          <button
-            type="button"
-            className="kyc-link-menu-item"
-            role="menuitem"
-            onClick={handleReview}
-          >
-            <FileSearch size={14} color="#06b6d4" />
-            <span>Review Submission</span>
-          </button>
-
-          {!isGhlAdmin && (
+          {!isGhlAdmin && !isVerifiedResolved && (
             <>
               <button
                 type="button"
@@ -296,16 +220,6 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
               >
                 <Copy size={14} color="#64748b" />
                 <span>Copy Link</span>
-              </button>
-
-              <button
-                type="button"
-                className="kyc-link-menu-item"
-                role="menuitem"
-                onClick={handleResend}
-              >
-                <RotateCw size={14} color="#3b82f6" />
-                <span>Resend Link</span>
               </button>
 
               <button
@@ -320,23 +234,46 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
             </>
           )}
 
-          {(onViewProfile || onEditKyc || onCallInvestor || onAdvanceStage) && (
+          {!isVerifiedResolved && (onEditKyc || onAssistedKyc || onCallInvestor || onAdvanceStage) && !isGhlAdmin && (
             <div className="kyc-link-menu-divider" />
           )}
 
-          {onViewProfile && (
+          {!isGhlAdmin && !isVerifiedResolved && onEditKyc && (
             <button
               type="button"
               className="kyc-link-menu-item"
               role="menuitem"
-              onClick={handleProfile}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setIsOpen(false);
+                onEditKyc(deal);
+              }}
+              style={{
+                color:
+                  (deal as any).kycStatus === 'Wrong' || (deal as any).customerKycStatus === 'Needs Correction'
+                    ? '#dc2626'
+                    : 'var(--text-primary)',
+                fontWeight: 600,
+              }}
             >
-              <Eye size={14} color="#06b6d4" />
-              <span>View Full Profile</span>
+              <Edit3
+                size={14}
+                color={
+                  (deal as any).kycStatus === 'Wrong' || (deal as any).customerKycStatus === 'Needs Correction'
+                    ? '#dc2626'
+                    : 'var(--text-secondary)'
+                }
+              />
+              <span>
+                {(deal as any).kycStatus === 'Wrong' || (deal as any).customerKycStatus === 'Needs Correction'
+                  ? 'Correct Flagged Details'
+                  : 'Edit KYC Details'}
+              </span>
             </button>
           )}
 
-          {onAssistedKyc && (() => {
+          {!isGhlAdmin && !isVerifiedResolved && onAssistedKyc && (() => {
             const draftRaw = localStorage.getItem(`nexus_kyc_draft_${deal.id}`);
             let hasDraft = (deal as any).customerKycStatus === 'Assisted Draft';
             let draftStep = 1;
@@ -368,19 +305,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
             );
           })()}
 
-          {onEditKyc && (
-            <button
-              type="button"
-              className="kyc-link-menu-item"
-              role="menuitem"
-              onClick={handleEditKyc}
-            >
-              <FileCheck size={14} color="#10b981" />
-              <span>Complete / Edit KYC Flow</span>
-            </button>
-          )}
-
-          {onCallInvestor && (
+          {!isGhlAdmin && onCallInvestor && (
             <button
               type="button"
               className="kyc-link-menu-item"
@@ -392,7 +317,7 @@ export const KycRowActionsMenu: React.FC<KycRowActionsMenuProps> = ({
             </button>
           )}
 
-          {onAdvanceStage && (
+          {!isGhlAdmin && onAdvanceStage && (
             <button
               type="button"
               className="kyc-link-menu-item"

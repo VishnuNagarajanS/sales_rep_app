@@ -73,3 +73,85 @@
   background-color: #059669;
 }
 
+/* ── Fund Details Reference Section ── */
+.opp-fund-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 768px) {
+  .opp-fund-details-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+.opp-fund-left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.opp-fund-right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.opp-fund-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  font-size: 13px;
+}
+
+.opp-fund-label {
+  color: var(--text-muted, #64748b);
+  font-weight: 600;
+  min-width: 140px;
+  flex-shrink: 0;
+}
+
+.opp-fund-value {
+  color: var(--text-primary, #0f172a);
+  text-align: right;
+  word-break: break-word;
+}
+
+.opp-fund-subhead {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #475569);
+  margin-top: 10px;
+  margin-bottom: 2px;
+}
+
+.opp-fund-group-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+  margin-bottom: 6px;
+}
+
+.opp-fund-bullets {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary, #334155);
+  font-size: 12.5px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.opp-fund-bullets li {
+  margin-bottom: 2px;
+}
+
+

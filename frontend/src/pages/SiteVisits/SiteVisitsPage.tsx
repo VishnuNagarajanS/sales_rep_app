@@ -7,6 +7,7 @@ import { DataTable, Column, RowAction } from '../../components/common/DataTable'
 import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Modal } from '../../components/common/Modal';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import { jaminApiService } from '../../services/jaminApiService';
 import { storageService } from '../../services/storageService';
 import { getCustomers } from '../../services/ghlApiService';
@@ -628,17 +629,21 @@ export const SiteVisitsPage: React.FC = () => {
   ];
 
   const rowActions: RowAction<SiteVisit>[] = [
-    {
-      label: 'Call Client',
-      icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
-      onClick: sv =>
-        initiateCall(
-          sv.customerName || sv.leadName || 'Client',
-          sv.customerPhone || sv.leadPhone || '',
-          sv.contactType === 'customer' || sv.customerId ? 'customer' : 'lead',
-          sv.customerId ? String(sv.customerId) : sv.leadId ? String(sv.leadId) : undefined
-        ),
-    },
+    ...(canPlaceCalls(user)
+      ? [
+          {
+            label: 'Call Client',
+            icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
+            onClick: (sv: SiteVisit) =>
+              initiateCall(
+                sv.customerName || sv.leadName || 'Client',
+                sv.customerPhone || sv.leadPhone || '',
+                sv.contactType === 'customer' || sv.customerId ? 'customer' : 'lead',
+                sv.customerId ? String(sv.customerId) : sv.leadId ? String(sv.leadId) : undefined
+              ),
+          },
+        ]
+      : []),
     {
       label: 'Confirm Visit',
       icon: <CheckCircle2 size={14} color="#059669" style={{ marginRight: 6 }} />,

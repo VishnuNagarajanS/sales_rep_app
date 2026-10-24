@@ -40,6 +40,11 @@ namespace backend.Services.Ai.Tools
 
             var query = db.CallRecords.AsNoTracking().Where(c => c.CompanyId == scope.CompanyId);
 
+            if (!scope.IsAdmin)
+            {
+                query = query.Where(c => c.AgentId == scope.UserId);
+            }
+
             if (!string.IsNullOrEmpty(args.DateFrom) || !string.IsNullOrEmpty(args.DateTo))
             {
                 var clock = services.GetRequiredService<backend.Services.Interfaces.ICompanyClock>();

@@ -285,7 +285,7 @@ export const CompanyDocumentsPage: React.FC = () => {
     const text = encodeURIComponent(
       `Hello, here is the official ${doc.category} from ${tenant?.name || 'our company'}: "${doc.name}"\n${doc.fileUrl || ''}\n\nPlease let us know if you have any questions.`
     );
-    window.open(`https://wa.me/?text=${text}`, '_blank');
+    window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer');
   };
 
   const handleShareEmail = (doc: DocumentItem) => {
@@ -539,7 +539,12 @@ export const CompanyDocumentsPage: React.FC = () => {
                         title="Download file"
                         onClick={() => {
                           if (doc.fileUrl && doc.fileUrl !== '#') {
-                            window.open(doc.fileUrl, '_blank');
+                            const url = doc.fileUrl.trim();
+                            if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) {
+                              window.open(url, '_blank', 'noopener,noreferrer');
+                            } else {
+                              showToast('error', 'Invalid document file URL.');
+                            }
                           } else {
                             showToast('error', 'Sample document does not have a downloadable file.');
                           }

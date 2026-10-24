@@ -1214,7 +1214,7 @@ export const DispositionModal: React.FC = () => {
     setDisposition(defaultDispo);
     setNotes(isSimulated ? '[Provider Result: Simulated - Call Not Connected (0s)]' : (isNotConnected ? '[Twilio Voice: Call Not Answered (0s)]' : ''));
     setReason('');
-    setScheduleFollowup(defaultDispo === 'Follow-up Required' || defaultDispo === 'No Response');
+    setScheduleFollowup(defaultDispo === 'Follow-up Required' || defaultDispo === 'Call Back' || defaultDispo === 'No Response');
     setFollowupDate(freshTomorrow);
     setFollowupTime(getCallPreferences().defaultFollowupTime);
     setFollowupPriority('High');
@@ -1247,8 +1247,8 @@ export const DispositionModal: React.FC = () => {
 
   if (!showDispositionModal || !lastCallRecord) return null;
 
-  const roleCode = user?.role?.code || (user as any)?.roleCode;
-  const isIrm = roleCode === 'irm';
+  const roleCode = (user?.role?.code || (user as any)?.roleCode || (typeof user?.role === 'string' ? user.role : '') || '').toLowerCase();
+  const isIrm = roleCode === 'irm' || roleCode.includes('irm') || (user?.role?.name || '').toLowerCase().includes('irm');
   const isFollowupCall = !!lastCallRecord.sourceFollowupId;
   const isSimulated = !!lastCallRecord.isSimulated;
   const isNotConnected = !isSimulated && lastCallRecord.duration === 0;
@@ -1294,40 +1294,15 @@ export const DispositionModal: React.FC = () => {
       return;
     }
 
-    const isKycOrIrmModule = isIrm || currentModule === 'kyc' || currentModule === 'opportunities' || currentModule === 'investor_360';
+    const isKycOrIrmModule = isIrm || currentModule === 'kyc' || currentModule === 'opportunities' || currentModule === 'investor_360' || currentModule === 'my_leads' || currentModule === 'follow_up' || currentModule === 'all_leads';
 
     if (disposition === 'No Response') {
-      if (!isKycOrIrmModule && !customerMessage.trim()) {
-        alert('Please provide a message for the customer before saving wrap-up.');
-        return;
-      }
-
-      // Validate contact for selected channel if message is provided
-      if (customerMessage.trim()) {
-        if (selectedChannel === 'email') {
-          if (!recipientEmail.trim() && !isKycOrIrmModule) {
-            setSendDeliveryNotice({
-              type: 'error',
-              text: 'Message delivery unavailable: No email address on file. Please enter a valid recipient email address above.',
-            });
-            return;
-          }
-          if (recipientEmail.trim() && (!recipientEmail.includes('@') || !recipientEmail.includes('.'))) {
-            setSendDeliveryNotice({
-              type: 'error',
-              text: `Message delivery failed: "${recipientEmail}" is not a valid email address.`,
-            });
-            return;
-          }
-        } else {
-          const phone = recipientPhone.trim() || (lastCallRecord.contactPhone || '').trim();
-          if (!phone && !isKycOrIrmModule) {
-            setSendDeliveryNotice({
-              type: 'error',
-              text: `Message delivery unavailable: No phone number provided for ${selectedChannel.toUpperCase()}.`,
-            });
-            return;
-          }
+      if (customerMessage.trim() && selectedChannel === 'email' && recipientEmail.trim()) {
+        if (!recipientEmail.includes('@') || !recipientEmail.includes('.')) {
+          setSendDeliveryNotice({
+            type: 'error',
+            text: `Notice: "${recipientEmail}" is not a valid email address.`,
+          });
         }
       }
     }
@@ -1339,7 +1314,7 @@ export const DispositionModal: React.FC = () => {
       return d.toISOString().slice(0, 10);
     })();
     const targetTime = followupTime || '11:00';
-    const combinedDateTime = (scheduleFollowup || disposition === 'Follow-up Required' || disposition === 'No Response')
+    const combinedDateTime = (scheduleFollowup || disposition === 'Follow-up Required' || disposition === 'Call Back' || disposition === 'No Response')
       ? new Date(`${targetDate}T${targetTime}:00`).toISOString()
       : '';
 
@@ -1404,16 +1379,7 @@ export const DispositionModal: React.FC = () => {
         });
 
         if (!sendResult.delivered) {
-          if (!isKycOrIrmModule) {
-            setSendDeliveryNotice({
-              type: 'error',
-              text: sendResult.deliveryResult || `Message delivery via ${selectedChannel.toUpperCase()} is unavailable or failed. State preserved for retry.`,
-            });
-            setIsSubmitting(false);
-            return;
-          } else {
-            console.warn('[CallCenterComponents] Message dispatch unavailable for IRM/KYC:', sendResult.deliveryResult);
-          }
+          console.warn('[CallCenterComponents] Message dispatch unavailable:', sendResult.deliveryResult);
         } else {
           const channelLabel = selectedChannel.toUpperCase();
           const contactTarget = selectedChannel === 'email' ? recipientEmail.trim() : effectivePhone;
@@ -1436,13 +1402,25 @@ export const DispositionModal: React.FC = () => {
       );
     } catch (err: any) {
       const errMsg = err?.message || '';
-      if (errMsg.includes('already booked') || errMsg.includes('time slot') || errMsg.includes('between calls')) {
+      const errorsArr: string[] = err?.errors || [];
+      const suggestedEntry = errorsArr.find((e: string) => e.startsWith('SUGGESTED_TIME:'));
+      if (suggestedEntry || errMsg.includes('already booked') || errMsg.includes('time slot') || errMsg.includes('between calls')) {
         const conflictDateObj = new Date(combinedDateTime);
         const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-        const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
         const pad = (n: number) => n.toString().padStart(2, '0');
-        const suggestedTimeValue = `${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
-        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+        let suggestedTimeValue: string;
+        let formattedSuggestedTime: string;
+        if (suggestedEntry) {
+          // Backend sent the authoritative next-free slot as ISO UTC
+          const suggestedUtc = new Date(suggestedEntry.replace('SUGGESTED_TIME:', ''));
+          suggestedTimeValue = `${pad(suggestedUtc.getHours())}:${pad(suggestedUtc.getMinutes())}`;
+          formattedSuggestedTime = suggestedUtc.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedUtc.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+        } else {
+          // Fallback: +20 from requested time (backend did not send SUGGESTED_TIME)
+          const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+          suggestedTimeValue = `${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+          formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+        }
 
         setSlotConflictData({
           conflictTime: formattedConflictTime,

@@ -197,7 +197,7 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               title="Share via WhatsApp"
               onClick={() => {
                 const text = encodeURIComponent(`Hi, here is the document you requested: ${doc.name}\n${doc.fileUrl || ''}`);
-                window.open(`https://wa.me/?text=${text}`, '_blank');
+                window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer');
               }}
             >
               <MessageSquare size={16} color="#25D366" />
@@ -219,7 +219,12 @@ export const DocumentList: React.FC<DocumentListProps> = ({
               onClick={() => {
                 navigator.clipboard.writeText(doc.fileUrl || '');
                 if (doc.fileUrl) {
-                  window.open(doc.fileUrl, '_blank');
+                  const url = doc.fileUrl.trim();
+                  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) {
+                    window.open(url, '_blank', 'noopener,noreferrer');
+                  } else {
+                    alert('Invalid document file URL.');
+                  }
                 } else {
                   alert('This is a mock document metadata log. No actual file was uploaded yet.');
                 }

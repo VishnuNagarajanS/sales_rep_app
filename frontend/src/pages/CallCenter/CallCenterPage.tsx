@@ -6,6 +6,7 @@ import { getCalls, getFollowups, getLeads } from '../../services/ghlApiService';
 import { AgentAvailabilityToggle } from '../../components/calling/CallCenterComponents';
 import { EmptyState } from '../../components/common/EmptyState';
 import { CallRecord, Followup, Lead } from '../../types';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './CallCenterPage.css';
 // ── Calendar-day comparison helper (same pattern as elsewhere in the app) ──────
 const isSameCalendarDay = (dateStr: string, ref: Date): boolean => {
@@ -39,6 +40,16 @@ const PRIORITY_ORDER: Record<string, number> = {
 export const CallCenterPage: React.FC = () => {
   const { tenant, user } = useAuth();
   const { availability, initiateCall, simulateIncomingCall } = useCall();
+
+  useEffect(() => {
+    if (!canPlaceCalls(user)) {
+      window.location.href = '/dashboard';
+    }
+  }, [user]);
+
+  if (!canPlaceCalls(user)) {
+    return null;
+  }
 
   const [dialNumber, setDialNumber] = useState('+91 ');
   const [contactName, setContactName] = useState('');

@@ -580,10 +580,46 @@ export const CustomersPage: React.FC = () => {
     return { tier: 'Normal', label: raw || (totalVal > 0 ? formatCurrency(totalVal) : 'Standard Ticket') };
   };
 
+  const getIrmAssignedWorkload = (irm: IrmProfile) => {
+    const irmIdStr = String(irm.id);
+    const irmNameLower = (irm.name || '').trim().toLowerCase();
+
+    const assignedLeads = (leads || []).filter(l =>
+      (l.assignedAgentId && String(l.assignedAgentId) === irmIdStr) ||
+      (l.assignedIrmId && String(l.assignedIrmId) === irmIdStr) ||
+      (l.assignedAgentName && l.assignedAgentName.trim().toLowerCase() === irmNameLower) ||
+      (l.assignedIrmName && l.assignedIrmName.trim().toLowerCase() === irmNameLower) ||
+      (l.customFields?.assignedIrmId && String(l.customFields.assignedIrmId) === irmIdStr) ||
+      (l.customFields?.assignedIrmName && String(l.customFields.assignedIrmName).trim().toLowerCase() === irmNameLower)
+    );
+
+    const assignedCustomers = (allCustomers || []).filter(c =>
+      (c.assignedIrmId && String(c.assignedIrmId) === irmIdStr) ||
+      (c.assignedIrmName && c.assignedIrmName.trim().toLowerCase() === irmNameLower) ||
+      (c.assignedAgentId && String(c.assignedAgentId) === irmIdStr && (c as any).assignedAgentRole === 'irm')
+    );
+
+    const convertedCount = assignedLeads.filter(l => (l.status || '').toLowerCase() === 'converted').length;
+    const activeLeadsCount = assignedLeads.filter(l => (l.status || '').toLowerCase() !== 'converted').length;
+    const totalCount = assignedLeads.length + assignedCustomers.length;
+
+    const workload: 'Low' | 'Medium' | 'High' =
+      totalCount === 0 ? 'Low' : totalCount <= 3 ? 'Medium' : 'High';
+
+    return {
+      totalCount,
+      assignedLeadsCount: assignedLeads.length,
+      activeLeadsCount,
+      convertedCount,
+      customersCount: assignedCustomers.length,
+      workload,
+    };
+  };
+
   const runAutoAssignmentAlgorithm = (custs: Customer[], activeIrms = irms): AutoRecommendation[] => {
     const liveCountMap: Record<string, number> = {};
     activeIrms.forEach((irm: IrmProfile) => {
-      liveCountMap[irm.id] = allCustomers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
+      liveCountMap[irm.id] = getIrmAssignedWorkload(irm).totalCount;
     });
 
     const tierPriority = { Premium: 5, 'Very High': 4, High: 3, Medium: 2, Normal: 1 };
@@ -869,7 +905,7 @@ export const CustomersPage: React.FC = () => {
     const custDigits = (selectedCustomer.phone || '').replace(/\D/g, '').slice(-10);
     const custName = (selectedCustomer.name || '').trim().toLowerCase();
 
-    return calls.filter(c => {
+    const filtered = calls.filter(c => {
       if (c.customerId && (c.customerId === selectedCustomer.id || String(c.customerId) === String(selectedCustomer.id))) {
         return true;
       }
@@ -884,6 +920,24 @@ export const CustomersPage: React.FC = () => {
       }
       return false;
     });
+
+    // Deduplicate by twilioCallSid / id so duplicates never render
+    const seenSids = new Set<string>();
+    const seenIds = new Set<string>();
+    const uniqueCalls: CallRecord[] = [];
+    for (const c of filtered) {
+      if (c.twilioCallSid) {
+        if (seenSids.has(c.twilioCallSid)) continue;
+        seenSids.add(c.twilioCallSid);
+      }
+      if (c.id) {
+        const idStr = String(c.id);
+        if (seenIds.has(idStr)) continue;
+        seenIds.add(idStr);
+      }
+      uniqueCalls.push(c);
+    }
+    return uniqueCalls;
   }, [calls, selectedCustomer]);
 
   // Respect existing call ownership and role permissions: An IRM user is strictly authorized only to view their own calls
@@ -1491,7 +1545,7 @@ export const CustomersPage: React.FC = () => {
                                   <span className="customer-call-duration">
                                     <Clock size={12} /> {formatCallDuration(c.duration)}
                                   </span>
-                                  <StatusChip status={c.disposition} size="sm" />
+                                  <StatusChip status={c.leadStatusAtCall || c.disposition} size="sm" />
                                 </div>
                                 <div className="customer-call-meta-right">
                                   <span className={`customer-call-connect-badge ${c.callerType === 'IRM' || c.connectVia === 'Connect via IRM' ? 'is-irm' : 'is-agent'}`}>
@@ -1507,11 +1561,12 @@ export const CustomersPage: React.FC = () => {
                                   </span>
                                   <span className="customer-call-agent-label">
                                     <User size={12} />
-                                    <strong>{c.agentName || 'System'}</strong>
-                                    <span className={`customer-call-role-tag ${c.callerType === 'IRM' ? 'role-irm' : 'role-agent'}`}>
-                                      {c.callerType === 'IRM' ? 'IRM' : 'Agent'}
+                                    <strong>{c.agentName || 'Sales Executive'}</strong>
+                                    <span className={`customer-call-role-tag ${c.callerType === 'IRM' || c.agentRole === 'IRM' ? 'role-irm' : 'role-agent'}`}>
+                                      {c.agentRole || (c.callerType === 'IRM' ? 'IRM' : 'Sales Executive')}
                                     </span>
                                   </span>
+                                </div>
                                   <button
                                     type="button"
                                     className="btn btn-ghost btn-sm customer-call-expand-btn"
@@ -1530,7 +1585,6 @@ export const CustomersPage: React.FC = () => {
                                     )}
                                   </button>
                                 </div>
-                              </div>
                               {isExpanded && (
                                 <div className="customer-call-expanded-panel">
                                   {c.notes && (
@@ -1684,7 +1738,7 @@ export const CustomersPage: React.FC = () => {
                               <span className="customer-call-duration">
                                 <Clock size={12} /> {formatCallDuration(c.duration)}
                               </span>
-                              <StatusChip status={c.disposition} size="sm" />
+                              <StatusChip status={c.leadStatusAtCall || c.disposition} size="sm" />
                             </div>
 
                             <div className="customer-call-meta-right">
@@ -1704,9 +1758,9 @@ export const CustomersPage: React.FC = () => {
                               {/* Caller Name & Role */}
                               <span className="customer-call-agent-label">
                                 <User size={12} />
-                                <strong>{c.agentName || 'System'}</strong>
-                                <span className={`customer-call-role-tag ${c.callerType === 'IRM' ? 'role-irm' : 'role-agent'}`}>
-                                  {c.callerType === 'IRM' ? 'IRM' : 'Agent'}
+                                <strong>{c.agentName || 'Sales Executive'}</strong>
+                                <span className={`customer-call-role-tag ${c.callerType === 'IRM' || c.agentRole === 'IRM' ? 'role-irm' : 'role-agent'}`}>
+                                  {c.agentRole || (c.callerType === 'IRM' ? 'IRM' : 'Sales Executive')}
                                 </span>
                               </span>
 
@@ -1968,8 +2022,7 @@ export const CustomersPage: React.FC = () => {
               </div>
             ) : (
               irms.map((irm: IrmProfile) => {
-                const currentCount = allCustomers.filter(c => c.assignedIrmName === irm.name || c.assignedIrmId === irm.id).length;
-                const workload = currentCount <= 2 ? 'Low' : currentCount <= 5 ? 'Medium' : 'High';
+                const workloadInfo = getIrmAssignedWorkload(irm);
                 const isSelected = selectedIrmId === irm.id;
 
                 return (
@@ -1994,15 +2047,24 @@ export const CustomersPage: React.FC = () => {
                     {/* Col 2 – IRM Info */}
                     <div className="irm-col-info">
                       <div className="irm-item-name">{irm.name}</div>
-                      <div className="irm-item-meta-row">Experience: <strong>{irm.experience}</strong> ({irm.experienceLevel})</div>
-                      <div className="irm-item-meta-row">Performance: <strong>{irm.performance}%</strong></div>
-                      <div className="irm-item-meta-row">Customers: <strong>{currentCount}</strong></div>
+                      <div className="irm-item-meta-row">Specialization: <strong>{irm.experience || 'Wealth & Private Advisory'}</strong></div>
+                      <div className="irm-item-meta-row">
+                        Assigned Load: <strong>{workloadInfo.totalCount}</strong>
+                        {workloadInfo.totalCount > 0
+                          ? ` (${workloadInfo.assignedLeadsCount} Leads · ${workloadInfo.customersCount} Customers)`
+                          : ' (Available for new prospects)'}
+                      </div>
+                      {workloadInfo.convertedCount > 0 && (
+                        <div className="irm-item-meta-row" style={{ color: '#10b981' }}>
+                          Converted Deals: <strong>{workloadInfo.convertedCount}</strong>
+                        </div>
+                      )}
                     </div>
 
                     {/* Col 3 – Workload */}
                     <div className="irm-col-pill">
-                      <span className={`irm-pill workload-${workload.toLowerCase()}`}>
-                        Workload: {workload}
+                      <span className={`irm-pill workload-${workloadInfo.workload.toLowerCase()}`}>
+                        Workload: {workloadInfo.workload}
                       </span>
                     </div>
 

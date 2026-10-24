@@ -12,6 +12,7 @@ import {
   InCallBar,
   DispositionModal,
 } from '../components/calling/CallCenterComponents';
+import { canPlaceCalls } from '../utils/agentRoleUtils';
 
 import { workHandoverService, WorkHandoverDto } from '../services/workHandoverService';
 import { Modal } from '../components/common/Modal';
@@ -168,7 +169,7 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
   }, [user?.role?.code, tenant?.id, user?.companyId]);
 
   return (
-    <div className={`app-container ${theme === 'dark' ? 'dark-theme' : ''}`}>
+    <div className={`app-container ${theme === 'dark' ? 'dark-theme' : 'light-theme'}`}>
       <NetworkStatusBanner />
       {/* Dynamic Tenant-Aware Sidebar */}
       <Sidebar currentRoute={currentRoute} onNavigate={onNavigate} />
@@ -312,9 +313,13 @@ export const SalesLayout: React.FC<SalesLayoutProps> = ({
       </div>
 
       {/* Global Persistent Call Surfaces (Section 3.3 & 7.6) */}
-      <IncomingCallPopup />
-      <InCallBar />
-      {currentRoute !== 'customers' && <DispositionModal />}
+      {canPlaceCalls(user) && (
+        <>
+          <IncomingCallPopup />
+          <InCallBar />
+          {currentRoute !== 'customers' && <DispositionModal />}
+        </>
+      )}
 
       {/* Return Summary Panel */}
       {showEndedPanel && recentlyEnded && (

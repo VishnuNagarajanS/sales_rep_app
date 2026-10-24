@@ -36,6 +36,10 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { Deal, CallRecord, Consultation, Followup } from '../../types';
+import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
+import './OpportunityProfileWorkspace.css';
 
 export interface InvestmentRouteDetails {
   id: 'direct_aif' | 'debenture';
@@ -180,7 +184,7 @@ export interface OpportunityProfileWorkspaceProps {
   isEditingAmount: boolean;
   activeDossierTab?: 'all' | 'basic' | 'identity' | 'bank' | 'demat' | 'nominees';
   copiedField: string | null;
-  isDark: boolean;
+  isDark?: boolean;
   calls?: CallRecord[];
   consultations?: Consultation[];
   followups?: Followup[];
@@ -217,6 +221,10 @@ export const OpportunityProfileWorkspace: React.FC<OpportunityProfileWorkspacePr
   copyToClipboard,
   getDealKycStatus,
 }) => {
+  const { user } = useAuth();
+  const { theme } = useTheme();
+  const effectiveIsDark = isDark !== undefined ? isDark : theme === 'dark';
+
   // Determine initial route:
   const initialRoute: 'direct_aif' | 'debenture' =
     deal.investorType?.toLowerCase().includes('debenture') ||
@@ -376,7 +384,7 @@ Date: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short',
   };
 
   return (
-    <div className={`opp-dealroom-root ${isDark ? 'dark-theme' : 'light-theme'}`}>
+    <div className={`opp-dealroom-root ${effectiveIsDark ? 'dark-theme' : 'light-theme'}`}>
       {/* ── 1. Top Executive Deal Room Ribbon (Zero Vertical Waste) ─────────── */}
       <header className="opp-dealroom-ribbon">
         <div className="opp-ribbon-left">
@@ -427,7 +435,7 @@ Date: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short',
             <span className="opp-ribbon-metric-val">{formatCurrency(dealValueNum)}</span>
           </div>
 
-          {deal.phone && (
+          {deal.phone && canPlaceCalls(user) && (
             <button
               type="button"
               className="opp-ribbon-btn-call"
@@ -1004,7 +1012,7 @@ Date: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short',
                       Recorded consultations, phone touchpoints and follow-up activities
                     </p>
                   </div>
-                  {deal.phone && (
+                  {deal.phone && canPlaceCalls(user) && (
                     <button
                       type="button"
                       className="opp-ribbon-btn-call"
@@ -1279,7 +1287,7 @@ Date: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short',
       {/* ── 3. Fund Details & Terms Modal (Matching GHL screenshots) ── */}
       {showFundModal && (
         <div className="opp-fund-modal-overlay" onClick={() => setShowFundModal(false)}>
-          <div className={`opp-fund-modal-dialog ${isDark ? 'dark-theme' : 'light-theme'}`} onClick={e => e.stopPropagation()}>
+          <div className={`opp-fund-modal-dialog ${effectiveIsDark ? 'dark-theme' : 'light-theme'}`} onClick={e => e.stopPropagation()}>
             <div className="opp-fund-modal-head">
               <h2 className="opp-fund-modal-title">
                 <FileText size={18} color="#9b1c24" />

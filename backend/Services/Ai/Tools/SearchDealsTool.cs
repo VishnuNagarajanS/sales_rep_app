@@ -36,6 +36,11 @@ namespace backend.Services.Ai.Tools
 
             var query = db.GhlDeals.AsNoTracking().Where(d => d.CompanyId == scope.CompanyId);
 
+            if (!scope.IsAdmin)
+            {
+                query = query.Where(d => d.AssignedAgentId == scope.UserId || d.OriginalOwnerId == scope.UserId);
+            }
+
             if (!string.IsNullOrEmpty(args.Stage))
             {
                 query = query.Where(d => d.Stage == args.Stage);

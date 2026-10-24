@@ -41,6 +41,20 @@ public class GhlLeadAssignmentController : ControllerBase
         return _currentUserService.UserId ?? 0;
     }
 
+    private async Task<List<backend.Models.Entities.LeaveRequest>> GetApprovedLeavesAsync(int companyId, DateOnly date, CancellationToken ct = default)
+    {
+        return await _context.LeaveRequests
+            .AsNoTracking()
+            .Where(lr => lr.CompanyId == companyId && lr.Status == "Approved" && lr.StartDate <= date && date <= lr.EndDate)
+            .ToListAsync(ct);
+    }
+
+    private async Task<List<int>> GetUserIdsOnLeaveAsync(int companyId, DateOnly date, CancellationToken ct = default)
+    {
+        var leaves = await GetApprovedLeavesAsync(companyId, date, ct);
+        return leaves.Select(lr => lr.UserId).Distinct().ToList();
+    }
+
     [HttpGet("agents")]
     public async Task<IActionResult> GetAgents(CancellationToken ct)
     {
@@ -52,9 +66,7 @@ public class GhlLeadAssignmentController : ControllerBase
             .Where(wh => wh.CompanyId == companyId && wh.Status == "active")
             .ToListAsync(ct);
 
-        var approvedLeaves = await _context.LeaveRequests
-            .Where(lr => lr.CompanyId == companyId && lr.Status == "Approved" && lr.StartDate <= today && today <= lr.EndDate)
-            .ToListAsync(ct);
+        var approvedLeaves = await GetApprovedLeavesAsync(companyId, today, ct);
 
         var agents = await _context.Users
             .Include(u => u.Role)
@@ -102,9 +114,7 @@ public class GhlLeadAssignmentController : ControllerBase
             .Where(wh => wh.CompanyId == companyId && wh.Status == "active")
             .ToListAsync(ct);
 
-        var approvedLeaves = await _context.LeaveRequests
-            .Where(lr => lr.CompanyId == companyId && lr.Status == "Approved" && lr.StartDate <= targetDate && targetDate <= lr.EndDate)
-            .ToListAsync(ct);
+        var approvedLeaves = await GetApprovedLeavesAsync(companyId, targetDate, ct);
 
         var users = await _context.Users
             .Include(u => u.Role)
@@ -171,10 +181,7 @@ public class GhlLeadAssignmentController : ControllerBase
             .Select(wh => wh.OriginalUserId)
             .ToListAsync(ct);
 
-        var usersOnLeave = await _context.LeaveRequests
-            .Where(lr => lr.CompanyId == companyId && lr.Status == "Approved" && lr.StartDate <= today && today <= lr.EndDate)
-            .Select(lr => lr.UserId)
-            .ToListAsync(ct);
+        var usersOnLeave = await GetUserIdsOnLeaveAsync(companyId, today, ct);
 
         var unavailableUsers = usersCovered.Concat(usersOnLeave).Distinct().ToList();
 
@@ -326,8 +333,8 @@ public class GhlLeadAssignmentController : ControllerBase
             .Include(wh => wh.CoveringUser)
             .FirstOrDefaultAsync(wh => wh.CompanyId == companyId && wh.Status == "active" && wh.OriginalUserId == agentId, ct);
 
-        var leave = await _context.LeaveRequests
-            .FirstOrDefaultAsync(lr => lr.CompanyId == companyId && lr.UserId == agentId && lr.Status == "Approved" && lr.StartDate <= today && today <= lr.EndDate, ct);
+        var leaves = await GetApprovedLeavesAsync(companyId, today, ct);
+        var leave = leaves.FirstOrDefault(l => l.UserId == agentId);
 
         if (leave != null)
         {

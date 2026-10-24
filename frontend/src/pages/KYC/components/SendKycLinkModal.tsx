@@ -238,7 +238,7 @@ Please click the secure link below to complete your verification:
         const cleanPhone = getCleanPhone(resolvedPhone || deal.phone || '');
         const smsText = `Hello ${deal.customerName || 'Investor'}, please complete your GHL India KYC verification: ${returnedLink}`;
         if (cleanPhone) {
-          window.open(`sms:${cleanPhone}?body=${encodeURIComponent(smsText)}`, '_blank');
+          window.open(`sms:${cleanPhone}?body=${encodeURIComponent(smsText)}`, '_blank', 'noopener,noreferrer');
         }
         onShowToast(`SMS app launched for ${deal.customerName}! (Server gateway offline)`);
         onClose();

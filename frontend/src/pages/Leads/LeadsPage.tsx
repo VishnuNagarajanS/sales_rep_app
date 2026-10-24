@@ -14,6 +14,7 @@ import {
   Clock,
   ArrowRight,
   UserCheck,
+  RefreshCw,
 } from 'lucide-react';
 import { Lead, Customer, Deal, Followup, IrmProfile } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -43,7 +44,7 @@ import { FilterBar } from '../../components/common/FilterBar';
 import { StatusChip } from '../../components/common/StatusChip';
 import { Drawer } from '../../components/common/Drawer';
 import { Modal } from '../../components/common/Modal';
-import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../../utils/agentRoleUtils';
+import { getAgentRoleInfo, getAssigningSalesAgentInfo, canPlaceCalls } from '../../utils/agentRoleUtils';
 import { LeadDetailDrawerContent } from '../../components/common/LeadDetailDrawerContent';
 import './LeadsPage.css';
 
@@ -106,6 +107,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [allFollowups, setAllFollowups] = useState<any[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Duplicate in Follow-up & Customer Resolution States
   interface DuplicateFollowupModalData {
@@ -167,35 +169,54 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const agentsList = useMemo(() => storageService.getAgents(tenant?.id), [tenant?.id]);
 
-  const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Not Interested', 'Junk'];
+  const MOVED_LEAD_STATUSES = ['Interested', 'Converted', 'Follow-up Required', 'Callback', 'Not Interested', 'Junk'];
 
   const pendingFollowupContactIds = useMemo(() => {
+    const directLocalFus = storageService.getFollowups ? storageService.getFollowups() : [];
+    const merged = [...(allFollowups || []), ...(directLocalFus || [])];
     return new Set(
-      (allFollowups || [])
-        .filter((f: any) => f.status === 'Pending')
+      merged
+        .filter((f: any) => String(f.status || '').toLowerCase() === 'pending')
         .map((f: any) => String(f.contactId || ''))
         .filter(Boolean)
     );
   }, [allFollowups]);
 
   const pendingFollowupPhones = useMemo(() => {
+    const directLocalFus = storageService.getFollowups ? storageService.getFollowups() : [];
+    const merged = [...(allFollowups || []), ...(directLocalFus || [])];
     return new Set(
-      (allFollowups || [])
-        .filter((f: any) => f.status === 'Pending')
+      merged
+        .filter((f: any) => String(f.status || '').toLowerCase() === 'pending')
         .map((f: any) => (f.contactPhone || '').replace(/\D/g, '').slice(-10))
         .filter(Boolean)
     );
   }, [allFollowups]);
 
+  const pendingFollowupNames = useMemo(() => {
+    const directLocalFus = storageService.getFollowups ? storageService.getFollowups() : [];
+    const merged = [...(allFollowups || []), ...(directLocalFus || [])];
+    return new Set(
+      merged
+        .filter((f: any) => String(f.status || '').toLowerCase() === 'pending')
+        .map((f: any) => (f.contactName || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+  }, [allFollowups]);
+
   const isLeadInFollowupOrMoved = (l: Lead) => {
-    // Leads with status 'Callback', 'No Response', 'New', or 'Contacted' strictly belong in My Leads!
-    if (l.status === 'Callback' || l.status === 'No Response' || l.status === 'New' || l.status === 'Contacted') {
-      return false;
-    }
-    if (MOVED_LEAD_STATUSES.includes(l.status)) return true;
+    const sNorm = (l.status || '').trim().toLowerCase();
+    if (sNorm === 'callback' || sNorm === 'follow-up required') return true;
     if (pendingFollowupContactIds.has(String(l.id))) return true;
     const phoneDigits = (l.phone || '').replace(/\D/g, '').slice(-10);
     if (phoneDigits && pendingFollowupPhones.has(phoneDigits)) return true;
+    const lName = (l.name || '').trim().toLowerCase();
+    if (lName && pendingFollowupNames.has(lName)) return true;
+
+    if (l.status === 'No Response' || l.status === 'New' || l.status === 'Contacted') {
+      return false;
+    }
+    if (MOVED_LEAD_STATUSES.includes(l.status)) return true;
     return false;
   };
 
@@ -237,22 +258,32 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       const uId = String(user?.id);
       const uName = (user?.name || '').trim().toLowerCase();
 
+      const directLocalFollowups = storageService.getFollowups ? storageService.getFollowups() : [];
+      const combinedAllFus = [...(allFollowups || []), ...(directLocalFollowups || [])];
+
       const pendingFollowupContactIds = new Set<string>(
-        (allFollowups || [])
-          .filter(f => f.status === 'Pending')
+        combinedAllFus
+          .filter(f => String(f.status || '').toLowerCase() === 'pending')
           .map(f => String(f.contactId || ''))
           .filter(Boolean)
       );
       const pendingFollowupPhones = new Set<string>(
-        (allFollowups || [])
-          .filter(f => f.status === 'Pending')
+        combinedAllFus
+          .filter(f => String(f.status || '').toLowerCase() === 'pending')
           .map(f => (f.contactPhone || '').replace(/\D/g, '').slice(-10))
+          .filter(Boolean)
+      );
+      const pendingFollowupNames = new Set<string>(
+        combinedAllFus
+          .filter(f => String(f.status || '').toLowerCase() === 'pending')
+          .map(f => (f.contactName || '').trim().toLowerCase())
           .filter(Boolean)
       );
 
       const raw = tenantLeads.filter(l => {
         const sNorm = (l.status || '').trim().toLowerCase();
-        const allowedIrmStatuses = ['interested', 'no response', 'callback', 'new', 'contacted'];
+        if (sNorm === 'callback' || sNorm === 'follow-up required') return false;
+        const allowedIrmStatuses = ['interested', 'no response', 'new', 'contacted'];
         if (!allowedIrmStatuses.includes(sNorm)) return false;
 
         const isAssignedToThisIrm =
@@ -269,6 +300,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         if (pendingFollowupContactIds.has(String(l.id))) return false;
         const lPhone = (l.phone || '').replace(/\D/g, '').slice(-10);
         if (lPhone && pendingFollowupPhones.has(lPhone)) return false;
+        const lName = (l.name || '').trim().toLowerCase();
+        if (lName && pendingFollowupNames.has(lName)) return false;
         return true;
       });
 
@@ -298,7 +331,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const [parsedRows, setParsedRows] = useState<any[]>([]);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [columnMap, setColumnMap] = useState<Record<string, string>>({});
-  const [importResults, setImportResults] = useState<{ success: number; skipped: number } | null>(null);
+  const [importResults, setImportResults] = useState<{ success: number; skipped: number; reasons?: string[]; error?: string } | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   // Filter states
   const [statusFilter, setStatusFilter] = useState('All');
@@ -317,7 +351,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     if (coveringNames.length === 0 && returnedNames.length === 0) return [];
 
     return [
-      { value: 'All', label: 'All Leads' },
+
       { value: 'Mine', label: 'Mine (Regular)' },
       ...coveringNames.map(name => ({ value: `Handover_${name}`, label: `Covering for ${name}` })),
       ...(returnedNames.length > 0 ? [{ value: 'Returned', label: 'Returned from Handover' }] : []),
@@ -406,6 +440,10 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiDistribution, setAiDistribution] = useState<Record<string, Lead[]>>({});
   const [isAiEditMode, setIsAiEditMode] = useState(false);
+  const [aiSearchQuery, setAiSearchQuery] = useState('');
+  const [draggedLeadInfo, setDraggedLeadInfo] = useState<{ leadId: string; fromAgentId: string } | null>(null);
+  const [dragOverAgentId, setDragOverAgentId] = useState<string | null>(null);
+  const [isAiConfirming, setIsAiConfirming] = useState(false);
   const [assignedLeadIds, setAssignedLeadIds] = useState<Set<string>>(new Set());
   const [agentAssignments, setAgentAssignments] = useState<
     Array<{ leadId: string; leadName: string; agentId: number; agentName: string; assignedAt: string }>
@@ -483,12 +521,20 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     try {
       setLoadError(null);
       const [updatedFollowups, updatedCustomers, updatedDeals, irmsList] = await Promise.all([
-        getFollowups(tenant?.id).catch(() => []),
-        getCustomers(tenant?.id).catch(() => []),
-        getDeals(tenant?.id).catch(() => []),
+        getFollowups(tenant?.id).catch(() => storageService.getFollowups(tenant?.id) || []),
+        getCustomers(tenant?.id).catch(() => storageService.getCustomers(tenant?.id) || []),
+        getDeals(tenant?.id).catch(() => storageService.getDeals(tenant?.id) || []),
         getCompanyIrms(tenant?.id).catch(() => []),
       ]);
-      const pendingFus = (updatedFollowups || []).filter((f: any) => f.status === 'Pending');
+      const localFus = storageService.getFollowups(tenant?.id) || [];
+      const combinedFusMap = new Map<string, any>();
+      (updatedFollowups || []).forEach((f: any) => {
+        if (f && f.id) combinedFusMap.set(String(f.id), f);
+      });
+      (localFus || []).forEach((f: any) => {
+        if (f && f.id && !combinedFusMap.has(String(f.id))) combinedFusMap.set(String(f.id), f);
+      });
+      const pendingFus = Array.from(combinedFusMap.values()).filter((f: any) => f.status === 'Pending');
       setAllFollowups(pendingFus);
       setCustomers(updatedCustomers || []);
       setDeals(updatedDeals || []);
@@ -525,7 +571,14 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       console.error('Failed to load leads from API', err);
       setLeads([]);
       setLoadError(err?.message || 'Failed to load leads from server.');
+    } finally {
+      setIsRefreshing(false);
     }
+  };
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await loadData();
   };
 
   useEffect(() => {
@@ -566,14 +619,39 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
   const matchCapacity = (lead: Lead, filterRange: string): boolean => {
     if (!filterRange || filterRange === 'All') return true;
+    // 1.3: Check all field names where investment capacity might be stored
     const rawCap = (
       lead.customFields?.investmentCapacity ||
+      lead.customFields?.investmentRange ||
+      lead.customFields?.capacityRange ||
       lead.customFields?.budgetRange ||
       (lead as any).investmentAmount ||
+      (lead as any).investmentRange ||
       ''
     ).trim();
 
     if (!rawCap) return false;
+
+    // Parse Indian numeric format to crore value
+    const parseInrToCrore = (s: string): number | null => {
+      const clean = s.replace(/[₹,\s]/g, '').toLowerCase();
+      const lakhMatch = clean.match(/^(\d+\.?\d*)\s*l(?:akh)?/);
+      if (lakhMatch) return parseFloat(lakhMatch[1]) / 100;
+      const crMatch = clean.match(/^(\d+\.?\d*)\s*(?:cr(?:ore)?)/);
+      if (crMatch) return parseFloat(crMatch[1]);
+      const num = parseFloat(clean.replace(/[^\d.]/g, ''));
+      if (!isNaN(num) && num > 0) return num / 1e7;
+      return null;
+    };
+
+    const extractFirstValue = (s: string): number | null => {
+      const parts = s.split(/[-–—]/);
+      for (const p of parts) {
+        const v = parseInrToCrore(p.trim());
+        if (v !== null) return v;
+      }
+      return null;
+    };
 
     const normalize = (s: string) => s.replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
     const nCap = normalize(rawCap);
@@ -581,52 +659,36 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
     if (nCap === nFilter) return true;
 
-    // Match range buckets
-    if (filterRange === '₹1 Cr – ₹5 Cr') {
-      return (
-        nCap.includes('1 cr') ||
-        nCap.includes('1.5 cr') ||
-        nCap.includes('2 cr') ||
-        nCap.includes('3 cr') ||
-        nCap.includes('4 cr') ||
-        nCap.includes('5 cr') ||
-        nCap.includes('75l')
-      );
-    }
-    if (filterRange === '₹5 Cr – ₹10 Cr') {
-      return (
-        nCap.includes('5 cr') ||
-        nCap.includes('6 cr') ||
-        nCap.includes('7 cr') ||
-        nCap.includes('8 cr') ||
-        nCap.includes('10 cr')
-      );
-    }
-    if (filterRange === '₹10 Cr – ₹25 Cr') {
-      return (
-        nCap.includes('10 cr') ||
-        nCap.includes('15 cr') ||
-        nCap.includes('20 cr') ||
-        nCap.includes('25 cr')
-      );
-    }
-    if (filterRange === '₹25 Cr+') {
-      return (
-        nCap.includes('25 cr') ||
-        nCap.includes('25cr') ||
-        nCap.includes('30 cr') ||
-        nCap.includes('50 cr')
-      );
-    }
+    const capValue = extractFirstValue(rawCap);
+
     if (filterRange === 'Contact for Co-Invest Details') {
       return nCap.includes('co-invest') || nCap.includes('contact');
+    }
+    if (filterRange === '₹1 Cr – ₹5 Cr') {
+      if (capValue !== null) return capValue >= 1 && capValue <= 5;
+      return nCap.includes('1 cr') || nCap.includes('1.5 cr') || nCap.includes('2 cr') || nCap.includes('3 cr') || nCap.includes('4 cr') || nCap.includes('5 cr') || nCap.includes('75l');
+    }
+    if (filterRange === '₹5 Cr – ₹10 Cr') {
+      if (capValue !== null) return capValue > 5 && capValue <= 10;
+      return nCap.includes('5 cr') || nCap.includes('6 cr') || nCap.includes('7 cr') || nCap.includes('8 cr') || nCap.includes('10 cr');
+    }
+    if (filterRange === '₹10 Cr – ₹25 Cr') {
+      if (capValue !== null) return capValue > 10 && capValue <= 25;
+      return nCap.includes('10 cr') || nCap.includes('15 cr') || nCap.includes('20 cr') || nCap.includes('25 cr');
+    }
+    if (filterRange === '₹25 Cr+') {
+      if (capValue !== null) return capValue > 25;
+      return nCap.includes('25 cr') || nCap.includes('25cr') || nCap.includes('30 cr') || nCap.includes('50 cr');
     }
 
     return false;
   };
 
+
   const filteredLeads = scopedLeads.filter(lead => {
     if (assignedLeadIds.has(lead.id)) return false;
+    const sNorm = (lead.status || '').trim().toLowerCase();
+    if (sNorm === 'callback' || sNorm === 'follow-up required') return false;
     if (isGhlSalesExec && lead.status !== 'Callback') {
       const leadPhoneDigits = (lead.phone || '').replace(/\D/g, '').slice(-10);
       const hasPendingFollowup = ghlPendingFollowups.some(f => {
@@ -638,8 +700,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       });
       if (hasPendingFollowup) return false;
     }
-    if (!isGhlAdmin && statusFilter !== 'All' && (lead.status as string) !== statusFilter) return false;
-    if (agentFilter !== 'All' && lead.assignedAgentName !== agentFilter) return false;
+    if (!isGhlAdmin && !isIrm && statusFilter !== 'All' && (lead.status as string) !== statusFilter) return false;
+    // Agent filter is only shown for non-admin, non-GhlAdmin scoped views
+    if (!isGhlAdmin && agentFilter !== 'All' && lead.assignedAgentName !== agentFilter) return false;
     if (capacityFilter !== 'All') {
       if (!matchCapacity(lead, capacityFilter)) return false;
     }
@@ -792,15 +855,14 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     });
     setAiDistribution(dist);
     setIsAiEditMode(false);
+    setAiSearchQuery('');
+    setDraggedLeadInfo(null);
+    setDragOverAgentId(null);
     setIsAiModalOpen(true);
   };
 
-  const handleAiMoveLead = (leadId: string, fromAgentId: string, direction: 'left' | 'right') => {
-    const agentIds = agents.map(a => a.id);
-    const fromIdx = agentIds.indexOf(fromAgentId);
-    const toIdx = direction === 'left' ? fromIdx - 1 : fromIdx + 1;
-    if (toIdx < 0 || toIdx >= agentIds.length) return;
-    const toAgentId = agentIds[toIdx];
+  const handleAiMoveLeadToAgent = (leadId: string, fromAgentId: string, toAgentId: string) => {
+    if (fromAgentId === toAgentId) return;
     setAiDistribution(prev => {
       const fromLeads = [...(prev[fromAgentId] || [])].filter(l => l.id !== leadId);
       const movedLead = (prev[fromAgentId] || []).find(l => l.id === leadId);
@@ -810,20 +872,42 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     });
   };
 
+  const handleAiMoveLead = (leadId: string, fromAgentId: string, direction: 'left' | 'right') => {
+    const agentIds = agents.map(a => a.id);
+    const fromIdx = agentIds.indexOf(fromAgentId);
+    const toIdx = direction === 'left' ? fromIdx - 1 : fromIdx + 1;
+    if (toIdx < 0 || toIdx >= agentIds.length) return;
+    const toAgentId = agentIds[toIdx];
+    handleAiMoveLeadToAgent(leadId, fromAgentId, toAgentId);
+  };
+
+  const handleAiResetRoundRobin = () => {
+    const allLeads = Object.values(aiDistribution).flat();
+    const dist: Record<string, Lead[]> = {};
+    agents.forEach(a => { dist[a.id] = []; });
+    allLeads.forEach((lead, i) => {
+      const agent = agents[i % agents.length];
+      dist[agent.id].push(lead);
+    });
+    setAiDistribution(dist);
+    showToast('↻ Re-balanced leads equally among sales agents.');
+  };
+
   const handleAiConfirm = async () => {
+    setIsAiConfirming(true);
     let okCount = 0;
 
-    if (apiClient.isMockMode()) {
-      const pairs: Array<{ lead: Lead; agent: AssignableAgent }> = [];
-      Object.entries(aiDistribution).forEach(([agentId, agentLeads]) => {
-        const agent = agents.find(a => a.id === agentId);
-        if (!agent) return;
-        agentLeads.forEach(lead => pairs.push({ lead, agent }));
-      });
-      okCount = await assignLeads(pairs);
-    } else {
-      // Send exactly the distribution the admin previewed/edited: one assign call per agent.
-      try {
+    try {
+      if (apiClient.isMockMode()) {
+        const pairs: Array<{ lead: Lead; agent: AssignableAgent }> = [];
+        Object.entries(aiDistribution).forEach(([agentId, agentLeads]) => {
+          const agent = agents.find(a => a.id === agentId);
+          if (!agent) return;
+          agentLeads.forEach(lead => pairs.push({ lead, agent }));
+        });
+        okCount = await assignLeads(pairs);
+      } else {
+        // Send exactly the distribution the admin previewed/edited: one assign call per agent.
         let skippedCount = 0;
         for (const [agentId, agentLeads] of Object.entries(aiDistribution)) {
           const agent = agents.find(a => a.id === agentId);
@@ -836,18 +920,19 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           skippedCount += (res?.data?.skipped || []).length;
         }
         if (skippedCount > 0) showToast(`⚠️ ${skippedCount} lead(s) were skipped (already assigned).`);
-      } catch (err: any) {
-        console.error('Auto assign failed', err);
-        showToast(`❌ Auto assign failed: ${err.message || 'Unknown error'}`);
-        loadData();
-        return;
       }
-    }
 
-    setIsAiModalOpen(false);
-    loadData();
-    if (okCount > 0) {
-      showToast(`✓ ${okCount} lead${okCount !== 1 ? 's' : ''} assigned via AI Suggestion`);
+      setIsAiModalOpen(false);
+      await loadData();
+      if (okCount > 0) {
+        showToast(`✓ ${okCount} lead${okCount !== 1 ? 's' : ''} assigned successfully!`);
+      }
+    } catch (err: any) {
+      console.error('Auto assign failed', err);
+      showToast(`❌ Auto assign failed: ${err.message || 'Unknown error'}`);
+      loadData();
+    } finally {
+      setIsAiConfirming(false);
     }
   };
 
@@ -947,16 +1032,28 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       setIsEditDrawerOpen(false);
       await loadData();
     } catch (err: any) {
-      console.error('Failed to schedule follow-up activity:', err);
       const msg = err.message || '';
-      if (msg.includes('already booked') || msg.includes('time slot') || msg.includes('between calls')) {
+      // 2.1: Backend returns SUGGESTED_TIME:<isoUtc> in the errors array
+      const errorsArr: string[] = err?.errors || err?.response?.errors || [];
+      const suggestedEntry = errorsArr.find((e: string) => e.startsWith('SUGGESTED_TIME:'));
+      if (suggestedEntry || msg.includes('already booked') || msg.includes('time slot') || msg.includes('between calls')) {
+        let suggestedDateIso: string;
+        let formattedSuggestedTime: string;
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        if (suggestedEntry) {
+          // Backend sent the authoritative suggested time as ISO UTC
+          const suggestedUtc = new Date(suggestedEntry.replace('SUGGESTED_TIME:', ''));
+          suggestedDateIso = `${suggestedUtc.getFullYear()}-${pad(suggestedUtc.getMonth() + 1)}-${pad(suggestedUtc.getDate())}T${pad(suggestedUtc.getHours())}:${pad(suggestedUtc.getMinutes())}`;
+          formattedSuggestedTime = suggestedUtc.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedUtc.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+        } else {
+          // Fallback: +20 from requested time (less accurate but better than nothing)
+          const conflictDateObj = new Date(targetIso);
+          const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
+          suggestedDateIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
+          formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
+        }
         const conflictDateObj = new Date(targetIso);
         const formattedConflictTime = conflictDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + conflictDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-        const suggestedDate = new Date(conflictDateObj.getTime() + 20 * 60 * 1000);
-        const pad = (n: number) => n.toString().padStart(2, '0');
-        const suggestedDateIso = `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth() + 1)}-${pad(suggestedDate.getDate())}T${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}`;
-        const formattedSuggestedTime = suggestedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + suggestedDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ')';
-
         setSlotConflictModal({
           conflictTime: formattedConflictTime,
           contactName: 'Existing Appointment',
@@ -1362,18 +1459,34 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
+      transformHeader: (h: string) => h.trim(),
       complete: (results) => {
-        const headers = results.meta.fields || [];
+        const headers = (results.meta.fields || []).map(h => h.trim()).filter(Boolean);
         setCsvHeaders(headers);
         setParsedRows(results.data);
 
-        // Auto-map
+        // Auto-map with alias awareness
         const newMap: Record<string, string> = {};
-        const targetFields = ['name', 'phone', 'email', 'location', 'source', 'priority'];
-        targetFields.forEach(tf => {
-          const match = headers.find(h => h.toLowerCase().includes(tf.toLowerCase()));
-          if (match) newMap[tf] = match;
+
+        // Alias map: target field → list of substrings to check (first match wins)
+        const fieldAliases: Record<string, string[]> = {
+          name: ['fullname', 'full_name', 'full name', 'contact name', 'name'],
+          phone: ['phone', 'mobile', 'contact'],
+          email: ['email'],
+          location: ['city', 'state', 'location', 'area', 'region'],
+          source: ['utm', 'platform', 'campaign', 'source', 'channel'],
+        };
+
+        Object.entries(fieldAliases).forEach(([field, aliases]) => {
+          for (const alias of aliases) {
+            const match = headers.find(h => h.toLowerCase().includes(alias));
+            if (match) {
+              newMap[field] = match;
+              break;
+            }
+          }
         });
+
         setColumnMap(newMap);
       }
     });
@@ -1385,95 +1498,80 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
     if (file) handleFileSelect(file);
   };
 
-  const handleImportLeads = () => {
+  const handleImportLeads = async () => {
+    setIsImporting(true);
     let successCount = 0;
     let skipCount = 0;
-    let updatedCount = 0;
-    const companyId = tenant?.id || 't-ghl-01';
+    const skipReasons: string[] = [];
 
-    // Build a dedup set from current leads AND customers so we detect duplicates across both
-    const normalizePhone = (ph: string) => (ph || '').replace(/\D/g, '').slice(-10);
-    const normalizeEmail = (em: string) => (em || '').trim().toLowerCase();
+    // Collect and pre-dedup rows before sending to backend
+    const rowsToImport: Array<{ name: string; phone: string; email?: string; location?: string; source?: string }> = [];
+    const normalizePhoneLocal = (ph: string) => (ph || '').replace(/\D/g, '').slice(-10);
+    const normalizeEmailLocal = (em: string) => (em || '').trim().toLowerCase();
 
-    const existingPhones = new Set(leads.map(l => normalizePhone(l.phone)).filter(Boolean));
-    const existingEmails = new Set(leads.map(l => normalizeEmail(l.email)).filter(Boolean));
+    const seenPhones = new Set<string>();
+    const seenEmails = new Set<string>();
 
-    const existingCompanyCustomers = storageService.getCustomers(tenant?.id) || [];
-    existingCompanyCustomers.forEach((c: any) => {
-      const cPh = normalizePhone(c.phone);
-      if (cPh) existingPhones.add(cPh);
-      const cEm = normalizeEmail(c.email);
-      if (cEm) existingEmails.add(cEm);
-    });
-
-    parsedRows.forEach((row, index) => {
-      const nameVal = row[columnMap['name']];
-      const phoneVal = row[columnMap['phone']];
+    parsedRows.forEach((row, idx) => {
+      const nameVal = (row[columnMap['name']] || '').trim();
+      const phoneVal = (row[columnMap['phone']] || '').trim();
 
       if (!nameVal || !phoneVal) {
         skipCount++;
+        skipReasons.push(`Row ${idx + 1}: Missing name or phone`);
         return;
       }
 
-      const emailVal = row[columnMap['email']] || '';
-      const locationVal = row[columnMap['location']] || '';
-      const sourceVal = row[columnMap['source']] || 'CSV Import';
-      const rawPriority = row[columnMap['priority']];
-      let priorityVal = 'Medium';
-      if (['Low', 'Medium', 'High', 'Urgent'].includes(String(rawPriority))) {
-        priorityVal = rawPriority;
-      }
+      const emailVal = (row[columnMap['email']] || '').trim();
+      const locationVal = (row[columnMap['location']] || '').trim();
+      const sourceVal = (row[columnMap['source']] || '').trim() || 'CSV Import';
 
-      // Check for existing lead by phone in this company
-      const existingMatch = storageService.findLeadByPhone(phoneVal, companyId);
-      if (existingMatch) {
-        const updatedLead: Lead = {
-          ...existingMatch,
-          name: nameVal || existingMatch.name,
-          email: emailVal || existingMatch.email,
-          location: locationVal || existingMatch.location,
-          source: sourceVal || existingMatch.source,
-          priority: (priorityVal as any) || existingMatch.priority,
-        };
-        storageService.saveLead(updatedLead);
-        updatedCount++;
-        successCount++;
-        return;
-      }
-
-      // ── Duplicate check ──────────────────────────────────────────────────────
-      const normPhone = normalizePhone(phoneVal);
-      const normEmail = normalizeEmail(emailVal);
-      if ((normPhone && existingPhones.has(normPhone)) || (normEmail && existingEmails.has(normEmail))) {
-        console.info(`[CSV Import] Skipping duplicate: ${nameVal} — phone ${phoneVal} or email ${emailVal} already exists`);
+      // Intra-batch dedup
+      const normPhone = normalizePhoneLocal(phoneVal);
+      const normEmail = normalizeEmailLocal(emailVal);
+      if (normPhone && seenPhones.has(normPhone)) {
         skipCount++;
+        skipReasons.push(`Row ${idx + 1}: Duplicate phone ${phoneVal} within file`);
         return;
       }
-      // Register the new values so later rows in the same batch don't duplicate each other
-      if (normPhone) existingPhones.add(normPhone);
-      if (normEmail) existingEmails.add(normEmail);
-      // ─────────────────────────────────────────────────────────────────────────
+      if (normEmail && seenEmails.has(normEmail)) {
+        skipCount++;
+        skipReasons.push(`Row ${idx + 1}: Duplicate email ${emailVal} within file`);
+        return;
+      }
+      if (normPhone) seenPhones.add(normPhone);
+      if (normEmail) seenEmails.add(normEmail);
 
-      const newLead: Lead = {
-        id: `lead-${Date.now()}-${index}`,
-        companyId,
-        name: nameVal,
-        phone: phoneVal,
-        email: emailVal,
-        location: locationVal,
-        source: sourceVal,
-        priority: priorityVal as any,
-        status: isIrm ? 'Interested' : 'New',
-        assignedAgentId: user?.id || 'usr-exec',
-        assignedAgentName: user?.name || 'Agent',
-        createdAt: new Date().toISOString().split('T')[0],
-        notes: '',
-        customFields: {}
-      };
-
-      storageService.saveLead(newLead);
-      successCount++;
+      rowsToImport.push({ name: nameVal, phone: phoneVal, email: emailVal || undefined, location: locationVal || undefined, source: sourceVal });
     });
+
+    if (rowsToImport.length === 0) {
+      setImportResults({ success: 0, skipped: skipCount, reasons: skipReasons, error: 'No valid rows found to import.' });
+      setIsImporting(false);
+      return;
+    }
+
+    try {
+      // Single bulk-import API call — backend handles DB dedup per row
+      const res = await apiClient.post<any>('/sales-executive/leads/bulk-import', { leads: rowsToImport });
+      if (res?.success && res.data) {
+        successCount = res.data.created ?? 0;
+        skipCount += res.data.skipped ?? 0;
+        if (res.data.skipReasons && Array.isArray(res.data.skipReasons)) {
+          skipReasons.push(...res.data.skipReasons);
+        }
+        setImportResults({ success: successCount, skipped: skipCount, reasons: skipReasons });
+      } else {
+        const errMsg = res?.message || 'Server returned an unsuccessful response during import.';
+        skipCount += rowsToImport.length;
+        setImportResults({ success: 0, skipped: skipCount, error: errMsg });
+      }
+    } catch (err: any) {
+      console.error('[CSV Import] Bulk import API call failed:', err);
+      skipCount += rowsToImport.length;
+      const errMsg = err?.message || 'Failed to reach backend service.';
+      setImportResults({ success: 0, skipped: skipCount, error: errMsg });
+    }
 
     storageService.addAuditLog({
       id: `aud-${Date.now()}`,
@@ -1485,12 +1583,14 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       entityId: `batch-${Date.now()}`,
       companyId: tenant?.id,
       companyName: tenant?.name,
-      details: `Bulk imported ${successCount} leads (${updatedCount} updated, ${successCount - updatedCount} created), skipped ${skipCount}.`,
+      details: `Bulk imported ${successCount} leads via CSV, skipped ${skipCount}.`,
     });
 
-    setImportResults({ success: successCount, skipped: skipCount });
-    loadData();
+    setIsImporting(false);
+    await loadData();
+    window.dispatchEvent(new CustomEvent('nexus_storage_updated'));
   };
+
 
 
   const resetImportState = () => {
@@ -1548,12 +1648,18 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       l.customFields?.qualifiedByAgentName ||
       l.customFields?.assignedByAgentName ||
       l.customFields?.agentName ||
-      (String(l.assignedAgentId) === '3' || String(l.assignedById) === '3' ? 'Naveen' : null) ||
-      (String(l.assignedAgentId) === '2' || String(l.assignedById) === '2' ? 'Vishnu' : null) ||
-      (user?.role?.code === 'sales_executive' ? user?.name : 'Naveen') ||
-      'Naveen';
+      (user?.role?.code === 'sales_executive' ? user?.name : null) ||
+      null;
 
-    return getAgentRoleInfo(assignedName, l.assignedAgentId || l.assignedById);
+    return getAgentRoleInfo(assignedName || 'Unassigned', l.assignedAgentId || l.assignedById);
+  };
+
+  // Returns true only when the lead has a real persisted assignment (not a preview/default)
+  const hasRealAssignment = (l: Lead): boolean => {
+    if (!l.assignedAgentId) return false;
+    // Exclude if the only agent is an admin (admin-owned = unassigned in GHL context)
+    if (adminIds.has(String(l.assignedAgentId))) return false;
+    return true;
   };
 
   const assignedAgentColumn: Column<Lead> = {
@@ -1680,11 +1786,12 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       },
     },
     ...(isIrm ? [assignedAgentColumn] : [statusColumn, sourceColumn]),
-    {
+    // Quick Call is hidden for Admin roles
+    ...(canPlaceCalls(user) ? [{
       key: 'quickCall',
       header: 'Quick Call',
-      align: 'center',
-      render: l => (
+      align: 'center' as const,
+      render: (l: Lead) => (
         <div className="lead-quick-call-cell">
           <button
             className="btn btn-call btn-sm btn-icon customer-list-call-btn"
@@ -1699,7 +1806,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
           </button>
         </div>
       ),
-    },
+    } as Column<Lead>] : []),
   ];
 
   const rowActions: RowAction<Lead>[] = [
@@ -1726,7 +1833,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
       icon: <Trash2 size={14} color="#ef4444" className="leads-action-icon" />,
       danger: true,
       onClick: l => handleDeleteLead(l),
-      hidden: () => isIrm,
+      // Hide Delete for Admin role (1.5) and IRM
+      hidden: () => isIrm || isGhlAdmin,
     },
   ];
 
@@ -1744,6 +1852,15 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         </div>
 
         <div className="leads-header-actions">
+          <button
+            className="btn btn-secondary"
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            title="Refresh leads list from server"
+          >
+            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+            <span>Refresh</span>
+          </button>
           <button
             className="btn btn-secondary"
             onClick={() => setIsImportModalOpen(true)}
@@ -1801,7 +1918,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   onChange: setHandoverFilter,
                   options: handoverOptions
                 }] : []),
-                ...(isGhlAdmin ? [] : [{
+                ...(isGhlAdmin || isIrm ? [] : [{
                   key: 'status',
                   label: 'Status',
                   value: statusFilter,
@@ -1812,7 +1929,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                     { value: 'No Response', label: 'No Response' },
                   ],
                 }]),
-                ...(!isExec ? [{
+                // 1.2: Agent filter hidden for GhlAdmin (they see all unassigned leads already)
+                ...(!isExec && !isGhlAdmin ? [{
                   key: 'agent',
                   label: 'Agent',
                   value: agentFilter,
@@ -1836,7 +1954,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 onChange: handleCustomDateChange,
               }}
               onClearAll={() => {
-                setStatusFilter('All');
+                if (!isIrm) setStatusFilter('All');
                 setAgentFilter('All');
                 setCapacityFilter('All');
                 setHandoverFilter('Mine');
@@ -1900,14 +2018,17 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
             >
               <Edit size={14} /> Edit Record
             </button>
-            <button
-              className="btn btn-call"
-              onClick={() => {
-                if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined);
-              }}
-            >
-              <Phone size={14} /> Call Lead
-            </button>
+            {/* Call button hidden for Admin roles */}
+            {canPlaceCalls(user) && (
+              <button
+                className="btn btn-call"
+                onClick={() => {
+                  if (selectedLead) initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined);
+                }}
+              >
+                <Phone size={14} /> Call Lead
+              </button>
+            )}
           </>
         }
       >
@@ -1936,15 +2057,17 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
 
           return (
             <>
-              {/* ── Quick Info Banner (Assigned Agent) ── */}
-              <div className="lead-quick-banner">
-                <div className="lead-assigned-note" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {isIrm ? 'Assigned Sales Agent' : 'Assigned'} : <strong>{getLeadDisplayAgent(selectedLead).name}</strong>
-                  <span className={`badge-role-inline ${getLeadDisplayAgent(selectedLead).badgeClass}`}>
-                    {getLeadDisplayAgent(selectedLead).role}
-                  </span>
+              {/* ── Quick Info Banner (Assigned Agent) — only shown when lead has a real assignment (1.4) ── */}
+              {hasRealAssignment(selectedLead) && (
+                <div className="lead-quick-banner">
+                  <div className="lead-assigned-note" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {isIrm ? 'Assigned Sales Agent' : 'Assigned'} : <strong>{getLeadDisplayAgent(selectedLead).name}</strong>
+                    <span className={`badge-role-inline ${getLeadDisplayAgent(selectedLead).badgeClass}`}>
+                      {getLeadDisplayAgent(selectedLead).role}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {isLeadReturned(selectedLead) && (
                 <div style={{
@@ -2092,7 +2215,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                 contactType="lead"
                 tenantId={tenant?.id}
                 tenantName={tenant?.name}
-                onCall={() => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined)}
+                onCall={canPlaceCalls(user) ? () => initiateCall(selectedLead.name, selectedLead.phone, 'lead', selectedLead.id, undefined, isIrm ? 'my_leads' : undefined) : undefined}
                 sectionsOnly={['callRecordings']}
               />
             </>
@@ -2413,9 +2536,9 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               <button
                 className="btn btn-primary"
                 onClick={handleImportLeads}
-                disabled={!columnMap['name'] || !columnMap['phone']}
+                disabled={!columnMap['name'] || !columnMap['phone'] || isImporting}
               >
-                Import Leads
+                {isImporting ? 'Importing…' : 'Import Leads'}
               </button>
             </div>
           ) : (
@@ -2428,11 +2551,32 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         <div className="lead-modal-content">
           {importResults ? (
             <div className="lead-import-success-card">
-              <CheckCircle2 size={48} color="var(--primary-600)" className="lead-import-success-icon" />
-              <h3 className="lead-import-success-title">Import Complete</h3>
+              <CheckCircle2
+                size={48}
+                color={importResults.success > 0 ? "var(--primary-600)" : "#ef4444"}
+                className="lead-import-success-icon"
+              />
+              <h3 className="lead-import-success-title">
+                {importResults.success > 0 ? "Import Complete" : "Import Failed"}
+              </h3>
               <p className="lead-import-success-sub">
-                {importResults.success} leads imported successfully, {importResults.skipped} skipped — missing name or phone.
+                {importResults.success} lead{importResults.success === 1 ? '' : 's'} imported successfully
+                {importResults.skipped > 0 ? `, ${importResults.skipped} skipped` : ''}
+                {importResults.error ? ` — ${importResults.error}` : '.'}
               </p>
+              {importResults.reasons && importResults.reasons.length > 0 && (
+                <div style={{ maxHeight: '140px', overflowY: 'auto', textAlign: 'left', marginTop: '12px', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', borderRadius: '6px', fontSize: '12px' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '4px', color: 'var(--text-muted, #aaa)' }}>Details:</div>
+                  {importResults.reasons.slice(0, 10).map((r, i) => (
+                    <div key={i} style={{ color: 'var(--text-muted, #888)', lineHeight: '1.4' }}>• {r}</div>
+                  ))}
+                  {importResults.reasons.length > 10 && (
+                    <div style={{ color: 'var(--text-muted, #666)', fontStyle: 'italic', marginTop: '4px' }}>
+                      ...and {importResults.reasons.length - 10} more
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : parsedRows.length > 0 ? (
             <>
@@ -2445,7 +2589,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
                   </div>
                 )}
                 <div className="lead-form-grid-2">
-                  {['name', 'phone', 'email', 'location', 'source', 'priority'].map(tf => (
+                  {['name', 'phone', 'email', 'location', 'source'].map(tf => (
                     <div key={tf} className="lead-mapping-row">
                       <span className="lead-mapping-label">
                         {tf}{['name', 'phone'].includes(tf) ? ' *' : ''}
@@ -2534,7 +2678,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               )}
 
               <div className="lead-sample-cols">
-                <strong>Sample Columns Supported:</strong> Name, Phone, Email, Location, Source, Priority, Custom Fields.
+                <strong>Sample Columns Supported:</strong> Name, Phone, Email, Location, Source — also accepts variations like <em>fullname</em>, <em>city</em>, <em>utm</em>.
               </div>
             </>
           )}
@@ -2629,55 +2773,182 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
         <div className="assign-modal-overlay" onClick={() => setIsAiModalOpen(false)}>
           <div className="ai-dist-modal" onClick={e => e.stopPropagation()}>
             <div className="assign-modal-header">
-              <div>
-                <h3 className="assign-modal-title">✦ AI Suggestion — Round Robin</h3>
-                <p className="assign-modal-sub" style={{ margin: '2px 0 0' }}>
-                  {Object.values(aiDistribution).flat().length} leads distributed across {agents.length} agents
-                </p>
+              <div className="ai-dist-title-wrap">
+                <div className="ai-dist-title-badge">
+                  <span>✦ AI Auto-Distribution</span>
+                  <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.85, background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: 4 }}>
+                    Round Robin
+                  </span>
+                </div>
+                <div className="ai-dist-title-sub">
+                  {Object.values(aiDistribution).flat().length} leads distributed across {agents.length} sales agents
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+
+              <div className="ai-dist-header-actions">
+                <input
+                  type="text"
+                  className="ai-dist-search-input"
+                  placeholder="Search lead, phone, city..."
+                  value={aiSearchQuery}
+                  onChange={e => setAiSearchQuery(e.target.value)}
+                />
+
+                {isAiEditMode && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleAiResetRoundRobin}
+                    title="Rebalance leads equally among all sales agents"
+                  >
+                    ↺ Rebalance
+                  </button>
+                )}
+
                 <button
+                  type="button"
                   className={`btn btn-sm ${isAiEditMode ? 'btn-primary' : 'btn-secondary'}`}
                   onClick={() => setIsAiEditMode(e => !e)}
                 >
-                  {isAiEditMode ? '✓ Done Editing' : '✎ Edit'}
+                  {isAiEditMode ? '✓ Done Editing' : '✎ Edit Distribution'}
                 </button>
                 <button className="assign-modal-close" onClick={() => setIsAiModalOpen(false)}>✕</button>
               </div>
             </div>
 
-            <div className="ai-dist-grid">
+            <div className="ai-dist-board">
               {agents.map((agent, agentIdx) => {
                 const agentLeads = aiDistribution[agent.id] || [];
+                const filteredAgentLeads = agentLeads.filter(l => {
+                  if (!aiSearchQuery.trim()) return true;
+                  const q = aiSearchQuery.trim().toLowerCase();
+                  return (
+                    (l.name || '').toLowerCase().includes(q) ||
+                    (l.phone || '').includes(q) ||
+                    (l.location || '').toLowerCase().includes(q) ||
+                    (l.email || '').toLowerCase().includes(q)
+                  );
+                });
+
+                const isDragOver = dragOverAgentId === agent.id;
+                const otherAgents = agents.filter(a => a.id !== agent.id);
+
                 return (
-                  <div key={agent.id} className="ai-dist-col">
+                  <div
+                    key={agent.id}
+                    className={`ai-dist-col ${isDragOver ? 'is-drag-over' : ''}`}
+                    onDragOver={e => {
+                      if (isAiEditMode) {
+                        e.preventDefault();
+                        if (dragOverAgentId !== agent.id) setDragOverAgentId(agent.id);
+                      }
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverAgentId === agent.id) setDragOverAgentId(null);
+                    }}
+                    onDrop={() => {
+                      setDragOverAgentId(null);
+                      if (draggedLeadInfo && draggedLeadInfo.fromAgentId !== agent.id) {
+                        handleAiMoveLeadToAgent(draggedLeadInfo.leadId, draggedLeadInfo.fromAgentId, agent.id);
+                        setDraggedLeadInfo(null);
+                      }
+                    }}
+                  >
                     <div className="ai-dist-col-header">
-                      <div className="ai-dist-avatar">{agent.name[0]}</div>
-                      <span className="ai-dist-agent-name">{agent.name}</span>
-                      <span className="ai-dist-count">{agentLeads.length}</span>
+                      <div className="ai-dist-col-header-left">
+                        <div className="ai-dist-avatar">
+                          {agent.name ? agent.name[0].toUpperCase() : 'A'}
+                        </div>
+                        <div className="ai-dist-agent-info">
+                          <span className="ai-dist-agent-name" title={agent.name}>
+                            {agent.name}
+                          </span>
+                          <span className="ai-dist-agent-sub">Sales Executive</span>
+                        </div>
+                      </div>
+                      <div className="ai-dist-count-badge">
+                        <span>{agentLeads.length}</span>
+                        <span style={{ fontSize: 10, fontWeight: 500, opacity: 0.8 }}>leads</span>
+                      </div>
                     </div>
+
                     <div className="ai-dist-col-body">
-                      {agentLeads.length === 0 ? (
-                        <div className="ai-dist-empty">No leads</div>
+                      {filteredAgentLeads.length === 0 ? (
+                        <div className="ai-dist-empty">
+                          {agentLeads.length === 0
+                            ? 'No leads assigned'
+                            : `No leads match "${aiSearchQuery}"`}
+                        </div>
                       ) : (
-                        agentLeads.map(lead => (
-                          <div key={lead.id} className="ai-dist-lead-card">
-                            <div className="ai-dist-lead-name">{lead.name}</div>
-                            <div className="ai-dist-lead-phone">{lead.phone}</div>
+                        filteredAgentLeads.map((lead, idx) => (
+                          <div
+                            key={lead.id}
+                            className={`ai-dist-lead-card ${isAiEditMode ? 'is-draggable' : ''}`}
+                            draggable={isAiEditMode}
+                            onDragStart={() => {
+                              if (isAiEditMode) {
+                                setDraggedLeadInfo({ leadId: lead.id, fromAgentId: agent.id });
+                              }
+                            }}
+                          >
+                            <div className="ai-dist-lead-card-header">
+                              <div className="ai-dist-lead-name-box">
+                                <span className="ai-dist-lead-idx">#{idx + 1}</span>
+                                <span className="ai-dist-lead-name" title={lead.name}>
+                                  {lead.name}
+                                </span>
+                              </div>
+                              {lead.location && (
+                                <span className="ai-dist-lead-tag" title={`Location: ${lead.location}`}>
+                                  {lead.location}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="ai-dist-lead-meta">
+                              <span className="ai-dist-lead-phone">
+                                📞 {lead.phone}
+                              </span>
+                              {lead.email && (
+                                <span className="ai-dist-lead-location" title={lead.email}>
+                                  ✉️ {lead.email}
+                                </span>
+                              )}
+                            </div>
+
                             {isAiEditMode && (
                               <div className="ai-dist-move-btns">
-                                <button
-                                  className="ai-move-btn"
-                                  disabled={agentIdx === 0}
-                                  onClick={() => handleAiMoveLead(lead.id, agent.id, 'left')}
-                                  title="Move left"
-                                >◀</button>
-                                <button
-                                  className="ai-move-btn"
-                                  disabled={agentIdx === agents.length - 1}
-                                  onClick={() => handleAiMoveLead(lead.id, agent.id, 'right')}
-                                  title="Move right"
-                                >▶</button>
+                                {agents.length === 2 ? (
+                                  <button
+                                    type="button"
+                                    className="ai-move-btn"
+                                    onClick={() => handleAiMoveLeadToAgent(lead.id, agent.id, otherAgents[0].id)}
+                                    title={`Move to ${otherAgents[0].name}`}
+                                  >
+                                    ⇄ Move to {otherAgents[0].name}
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="ai-move-btn"
+                                      disabled={agentIdx === 0}
+                                      onClick={() => handleAiMoveLead(lead.id, agent.id, 'left')}
+                                      title={agentIdx > 0 ? `Move to ${agents[agentIdx - 1].name}` : 'At leftmost agent'}
+                                    >
+                                      ◀ Move Left
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="ai-move-btn"
+                                      disabled={agentIdx === agents.length - 1}
+                                      onClick={() => handleAiMoveLead(lead.id, agent.id, 'right')}
+                                      title={agentIdx < agents.length - 1 ? `Move to ${agents[agentIdx + 1].name}` : 'At rightmost agent'}
+                                    >
+                                      Move Right ▶
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
@@ -2689,11 +2960,29 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({ onNavigate }) => {
               })}
             </div>
 
-            <div className="assign-modal-footer" style={{ borderTop: '1px solid var(--border-base)', marginTop: 0 }}>
-              <button className="btn btn-secondary" onClick={() => setIsAiModalOpen(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleAiConfirm}>
-                Confirm Distribution
-              </button>
+            <div className="assign-modal-footer">
+              <div className="ai-dist-footer-info">
+                <span>
+                  Total: <strong>{Object.values(aiDistribution).flat().length}</strong> leads ready for distribution
+                </span>
+                {isAiEditMode && (
+                  <span style={{ color: '#f87171' }}>
+                    • Edit mode active (click button or drag card to move between agents)
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn btn-secondary" onClick={() => setIsAiModalOpen(false)}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleAiConfirm}
+                  disabled={isAiConfirming}
+                >
+                  {isAiConfirming ? 'Assigning Leads…' : 'Confirm Distribution'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

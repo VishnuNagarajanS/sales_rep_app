@@ -63,33 +63,4 @@ public class IrmPipelineController : ControllerBase
 
         return Ok(result);
     }
-
-    [HttpPost("{cardId:int}/activity")]
-    public async Task<IActionResult> LogActivity(int cardId, [FromBody] LogIrmActivityDto dto, CancellationToken ct)
-    {
-        if (User.IsGhlAdmin())
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<string>.ErrorResponse("Access denied: GHL Admin has read-only access to IRM pipeline data."));
-        }
-
-        var role = (User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role") ?? "").ToLowerInvariant();
-        var isPlatformAdmin = role == "admin" || role == "ghl_admin" || role == "super_admin" || role == "company_admin";
-        var companyId = User.GetCompanyId();
-        var irmId = User.GetUserId();
-
-        if (!isPlatformAdmin && _pipelineRepo != null)
-        {
-            var card = await _pipelineRepo.GetByIdAsync(cardId, companyId, ct);
-            if (card != null && card.AssignedIrmId > 0 && card.AssignedIrmId != irmId)
-            {
-                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<string>.ErrorResponse("Access denied: You can only log activity on pipeline cards assigned to you."));
-            }
-        }
-
-        var result = await _pipelineService.LogActivityAsync(cardId, companyId, irmId, dto, ct);
-        if (!result.Success)
-            return BadRequest(result);
-
-        return Ok(result);
-    }
 }

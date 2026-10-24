@@ -507,25 +507,64 @@ public class FollowupService : IFollowupService
                  (cleanPhone10 != "" && f.ContactPhone != null && f.ContactPhone.Contains(cleanPhone10))))
             .ToListAsync(ct);
 
-        // Check for time slot conflict: no agent can have two pending follow-ups within 20 minutes
-        var slotStart = scheduledAtUtc.AddMinutes(-19.9);
-        var slotEnd = scheduledAtUtc.AddMinutes(19.9);
-        var conflictFollowup = await _context.Followups.AsNoTracking()
+        // 2.1: Smart next-free-slot detection.
+        // Load ALL pending follow-ups for this agent on this day (excluding same contact) so we can
+        // walk forward through contiguous booked blocks rather than blindly adding 20 min.
+        var dayStart = scheduledAtUtc.Date;
+        var dayEnd = dayStart.AddDays(1);
+        var agentFollowupsDay = await _context.Followups.AsNoTracking()
             .Where(f => f.CompanyId == companyId.Value &&
                         f.AssignedAgentId == targetAgentId &&
                         f.Status == FollowupStatus.Pending &&
-                        f.ScheduledAt >= slotStart &&
-                        f.ScheduledAt <= slotEnd &&
+                        f.ScheduledAt >= dayStart &&
+                        f.ScheduledAt < dayEnd &&
                         f.ContactId != cleanContactId &&
                         (!string.IsNullOrEmpty(cleanPhone10) ? !f.ContactPhone.Contains(cleanPhone10) : true))
-            .FirstOrDefaultAsync(ct);
+            .Select(f => f.ScheduledAt)
+            .OrderBy(t => t)
+            .ToListAsync(ct);
 
-        if (conflictFollowup != null)
+        // Check if the requested time conflicts with any existing slot
+        var requestedSlotStart = scheduledAtUtc.AddMinutes(-19.9);
+        var requestedSlotEnd = scheduledAtUtc.AddMinutes(19.9);
+        bool hasConflict = agentFollowupsDay.Any(t => t >= requestedSlotStart && t <= requestedSlotEnd);
+
+        if (hasConflict)
         {
-            var conflictTime = conflictFollowup.ScheduledAt.ToString("g");
-            var suggestedTime = conflictFollowup.ScheduledAt.AddMinutes(20).ToString("t");
+            // Walk forward: find the end of the contiguous booked block starting at the requested time
+            // A block is contiguous if each next slot is within 20 min of the previous.
+            var candidate = scheduledAtUtc;
+            const int gapMinutes = 20;
+            bool moved;
+            do
+            {
+                moved = false;
+                foreach (var bookedTime in agentFollowupsDay)
+                {
+                    var diff = Math.Abs((bookedTime - candidate).TotalMinutes);
+                    if (diff < gapMinutes)
+                    {
+                        // This slot conflicts with our candidate — push candidate past it
+                        candidate = bookedTime.AddMinutes(gapMinutes);
+                        moved = true;
+                    }
+                }
+            } while (moved);
+
+            // Respect working hours: if candidate pushes past end of day (22:00), roll to next day 09:00
+            var workDayEnd = dayStart.AddHours(22);
+            if (candidate >= workDayEnd)
+                candidate = dayStart.AddDays(1).AddHours(9);
+
+            var suggestedIso = candidate.ToString("O"); // ISO 8601 UTC
+            var suggestedDisplay = candidate.ToString("t");
+            var conflictingContact = agentFollowupsDay.Count > 0
+                ? "(existing follow-up)"
+                : "another follow-up";
             return ApiResponse<FollowupResponseDto>.FailureResult(
-                $"This time slot is already booked for another follow-up with {conflictFollowup.ContactName} (at {conflictTime}). Please allow at least 15 to 20 minutes between calls and schedule after {suggestedTime}.");
+                $"This time slot is already booked. Please schedule after {suggestedDisplay}.",
+                null,
+                new List<string> { $"SLOT_CONFLICT", $"SUGGESTED_TIME:{suggestedIso}" });
         }
 
         if (existingOldPending.Count > 0)
@@ -641,25 +680,55 @@ public class FollowupService : IFollowupService
                 _ => DateTime.SpecifyKind(dto.ScheduledAt.Value, DateTimeKind.Utc)
             };
 
-            // Check for time slot conflict: no agent can have two pending follow-ups within 20 minutes
-            var slotStart = schedUtc.AddMinutes(-19.9);
-            var slotEnd = schedUtc.AddMinutes(19.9);
-
-            var conflictFollowup = await _context.Followups.AsNoTracking()
+            // Smart next-free-slot detection (same algorithm as CreateFollowupAsync).
+            // Load ALL pending follow-ups for this agent on this day, excluding this follow-up itself.
+            var updateDayStart = schedUtc.Date;
+            var updateDayEnd = updateDayStart.AddDays(1);
+            var agentSlotsDay = await _context.Followups.AsNoTracking()
                 .Where(f => f.CompanyId == followup.CompanyId &&
                             f.Id != followup.Id &&
                             f.AssignedAgentId == followup.AssignedAgentId &&
                             f.Status == FollowupStatus.Pending &&
-                            f.ScheduledAt >= slotStart &&
-                            f.ScheduledAt <= slotEnd)
-                .FirstOrDefaultAsync(ct);
+                            f.ScheduledAt >= updateDayStart &&
+                            f.ScheduledAt < updateDayEnd)
+                .Select(f => f.ScheduledAt)
+                .OrderBy(t => t)
+                .ToListAsync(ct);
 
-            if (conflictFollowup != null)
+            // Check if the requested time falls within ±20 min of any booked slot
+            var updateSlotStart = schedUtc.AddMinutes(-19.9);
+            var updateSlotEnd = schedUtc.AddMinutes(19.9);
+            bool updateHasConflict = agentSlotsDay.Any(t => t >= updateSlotStart && t <= updateSlotEnd);
+
+            if (updateHasConflict)
             {
-                var conflictTime = conflictFollowup.ScheduledAt.ToString("g");
-                var suggestedTime = conflictFollowup.ScheduledAt.AddMinutes(20).ToString("t");
+                // Walk forward through contiguous booked blocks to find the first free slot
+                var candidate = schedUtc;
+                const int gapMins = 20;
+                bool moved;
+                do
+                {
+                    moved = false;
+                    foreach (var booked in agentSlotsDay)
+                    {
+                        if (Math.Abs((booked - candidate).TotalMinutes) < gapMins)
+                        {
+                            candidate = booked.AddMinutes(gapMins);
+                            moved = true;
+                        }
+                    }
+                } while (moved);
+
+                // Clamp to working hours: roll to next day 09:00 if past 22:00
+                var updateWorkDayEnd = updateDayStart.AddHours(22);
+                if (candidate >= updateWorkDayEnd)
+                    candidate = updateDayStart.AddDays(1).AddHours(9);
+
+                var updateSuggestedIso = candidate.ToString("O");
                 return ApiResponse<FollowupResponseDto>.FailureResult(
-                    $"This time slot is already booked for another follow-up with {conflictFollowup.ContactName} (at {conflictTime}). Please allow at least 15 to 20 minutes between calls and schedule after {suggestedTime}.");
+                    $"This time slot is already booked. Please schedule after {candidate:t}.",
+                    null,
+                    new List<string> { "SLOT_CONFLICT", $"SUGGESTED_TIME:{updateSuggestedIso}" });
             }
 
             followup.ScheduledAt = schedUtc;

@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AgentAvailabilityToggle } from '../calling/CallCenterComponents';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import { PersonaSwitcher } from './PersonaSwitcher';
 import { storageService } from '../../services/storageService';
 import { FEATURES } from '../../constants/features';
@@ -318,8 +319,8 @@ export const TopBar: React.FC<TopBarProps> = ({ onNavigate, onOpenQuickCreate })
           </button>
         )}
 
-        {/* Agent Availability (Only for company users) */}
-        {!isSuperAdmin && <AgentAvailabilityToggle />}
+        {/* Agent Availability (Only for calling agents) */}
+        {!isSuperAdmin && canPlaceCalls(user) && <AgentAvailabilityToggle />}
 
         {/* Persona Switcher for easy demo */}
         <PersonaSwitcher />

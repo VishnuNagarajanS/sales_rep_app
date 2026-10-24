@@ -18,11 +18,13 @@ import {
   AlertCircle,
   Info,
   Lock,
+  Edit3,
 } from 'lucide-react';
 import { Deal } from '../../../types';
 import { normalizeLegacyKycStatus } from '../../../services/kycService';
 import { saveDeal } from '../../../services/ghlApiService';
 import { getAuthHeaders } from '../../../utils/authHeaders';
+import { EXTERNAL_VERIFICATION_LINKS } from '../../../constants/externalLinks';
 import './KycLinkComponents.css';
 
 interface KycReviewDrawerProps {
@@ -37,6 +39,8 @@ interface KycReviewDrawerProps {
     checklist?: any
   ) => Promise<void>;
   onShowToast: (msg: string) => void;
+  isReadOnly?: boolean;
+  onEditKyc?: (deal: Deal) => void;
 }
 
 function maskAadhaar(v?: string | null): string {
@@ -58,6 +62,8 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
   deal,
   onShowToast,
   onChangeKycStatus,
+  isReadOnly = false,
+  onEditKyc,
 }) => {
   const [showCorrectionModal, setShowCorrectionModal] = useState<boolean>(false);
   const [correctionNote, setCorrectionNote] = useState<string>(
@@ -366,10 +372,10 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
   const handleSendCorrection = async () => {
     if (liveKyc?.id) {
       try {
-        const res = await fetch(`/api/irm/kyc/${liveKyc.id}/review`, {
-          method: 'POST',
+        const res = await fetch(`/api/irm/kyc/${liveKyc.id}/status`, {
+          method: 'PATCH',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ action: 'ReuploadRequested', remarks: correctionNote }),
+          body: JSON.stringify({ status: 'Wrong', comment: correctionNote }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -397,14 +403,58 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
 
   const handleViewDoc = (doc: { name: string; url?: string }) => {
     if (doc.url) {
-      const w = window.open('');
+      const cleanUrl = doc.url.trim();
+      const isAllowedScheme =
+        cleanUrl.startsWith('http://') ||
+        cleanUrl.startsWith('https://') ||
+        cleanUrl.startsWith('blob:') ||
+        cleanUrl.startsWith('data:application/pdf') ||
+        cleanUrl.startsWith('data:image/');
+      if (!isAllowedScheme) {
+        onShowToast('Invalid or unsafe document URL.');
+        return;
+      }
+
+      const w = window.open('', '_blank');
       if (w) {
-        if (doc.url.startsWith('data:application/pdf')) {
-          w.document.write(`<iframe src="${doc.url}" style="width:100%;height:100%;border:none;"></iframe>`);
-        } else {
-          w.document.write(
-            `<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a;margin:0;"><img src="${doc.url}" style="max-width:90%;max-height:90vh;border-radius:8px;" alt="${doc.name}" /></div>`
-          );
+        try {
+          w.opener = null;
+          w.document.title = doc.name;
+          w.document.body.style.margin = '0';
+          w.document.body.style.background = '#0f172a';
+
+          if (cleanUrl.startsWith('data:application/pdf') || cleanUrl.toLowerCase().includes('.pdf')) {
+            const iframe = w.document.createElement('iframe');
+            iframe.src = cleanUrl;
+            iframe.style.width = '100%';
+            iframe.style.height = '100%';
+            iframe.style.border = 'none';
+            iframe.style.position = 'fixed';
+            iframe.style.top = '0';
+            iframe.style.left = '0';
+            iframe.style.right = '0';
+            iframe.style.bottom = '0';
+            w.document.body.appendChild(iframe);
+          } else {
+            const container = w.document.createElement('div');
+            container.style.display = 'flex';
+            container.style.alignItems = 'center';
+            container.style.justifyContent = 'center';
+            container.style.minHeight = '100vh';
+            container.style.background = '#0f172a';
+            container.style.margin = '0';
+
+            const img = w.document.createElement('img');
+            img.src = cleanUrl;
+            img.alt = doc.name;
+            img.style.maxWidth = '90%';
+            img.style.maxHeight = '90vh';
+            img.style.borderRadius = '8px';
+            container.appendChild(img);
+            w.document.body.appendChild(container);
+          }
+        } catch (err) {
+          console.error('Error rendering preview:', err);
         }
       }
     } else {
@@ -586,8 +636,39 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
             <div className="kyc-link-field-grid">
               <div>
                 <div className="kyc-link-field-label">Permanent Account Number (PAN)</div>
-                <div className="kyc-link-field-val kyc-link-field-val-masked" style={{ color: '#0284c7' }}>
-                  {reviewData.identityDetails.panNumber}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div className="kyc-link-field-val kyc-link-field-val-masked" style={{ color: '#0284c7' }}>
+                    {reviewData.identityDetails.panNumber}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    title="Verify PAN on Income Tax portal"
+                    aria-label="Verify PAN on Income Tax portal"
+                    onClick={() => {
+                      const cleanPan = liveKyc?.panNumber || reviewData.identityDetails.panNumber;
+                      const rawPan = cleanPan && cleanPan !== 'Not provided' && cleanPan !== '—' && cleanPan.toLowerCase() !== 'not specified' ? String(cleanPan).trim() : '';
+                      if (rawPan) {
+                        try {
+                          navigator.clipboard.writeText(rawPan);
+                          onShowToast('PAN copied. Paste it on the Income Tax portal.');
+                        } catch {}
+                      }
+                      window.open(EXTERNAL_VERIFICATION_LINKS.PAN, '_blank', 'noopener,noreferrer');
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '2px 8px',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      borderRadius: 6,
+                    }}
+                  >
+                    <ShieldCheck size={12} /> <span>Verify PAN</span>
+                  </button>
                 </div>
               </div>
               <div>
@@ -596,8 +677,31 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
               </div>
               <div>
                 <div className="kyc-link-field-label">Aadhaar (Masked UID)</div>
-                <div className="kyc-link-field-val kyc-link-field-val-masked" style={{ color: '#0284c7' }}>
-                  {reviewData.identityDetails.aadhaarNumber}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div className="kyc-link-field-val kyc-link-field-val-masked" style={{ color: '#0284c7' }}>
+                    {reviewData.identityDetails.aadhaarNumber}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    title="Verify Aadhaar on UIDAI portal"
+                    aria-label="Verify Aadhaar on UIDAI portal"
+                    onClick={() => {
+                      window.open(EXTERNAL_VERIFICATION_LINKS.AADHAAR, '_blank', 'noopener,noreferrer');
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '2px 8px',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      borderRadius: 6,
+                    }}
+                  >
+                    <ShieldCheck size={12} /> <span>Verify Aadhaar</span>
+                  </button>
                 </div>
               </div>
               <div>
@@ -892,6 +996,7 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  disabled={isReadOnly}
                   checked={reviewChecklist.identity}
                   onChange={e => setReviewChecklist(prev => ({ ...prev, identity: e.target.checked }))}
                 />
@@ -899,9 +1004,10 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
                   1. <strong>Identity & Personal Details:</strong> I have verified the PAN and Identity against submitted documents.
                 </span>
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: isReadOnly ? 'default' : 'pointer' }}>
                 <input
                   type="checkbox"
+                  disabled={isReadOnly}
                   checked={reviewChecklist.bank}
                   onChange={e => setReviewChecklist(prev => ({ ...prev, bank: e.target.checked }))}
                 />
@@ -909,9 +1015,10 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
                   2. <strong>Bank Account Details:</strong> I have verified the bank account, IFSC code, and account holder name.
                 </span>
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: isReadOnly ? 'default' : 'pointer' }}>
                 <input
                   type="checkbox"
+                  disabled={isReadOnly}
                   checked={reviewChecklist.documents}
                   onChange={e => setReviewChecklist(prev => ({ ...prev, documents: e.target.checked }))}
                 />
@@ -920,9 +1027,10 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
                 </span>
               </label>
               {hasNominees ? (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: isReadOnly ? 'default' : 'pointer' }}>
                   <input
                     type="checkbox"
+                    disabled={isReadOnly}
                     checked={reviewChecklist.nominee}
                     onChange={e => setReviewChecklist(prev => ({ ...prev, nominee: e.target.checked }))}
                   />
@@ -938,9 +1046,10 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
                   </span>
                 </div>
               )}
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: isReadOnly ? 'default' : 'pointer' }}>
                 <input
                   type="checkbox"
+                  disabled={isReadOnly}
                   checked={reviewChecklist.demat}
                   onChange={e => setReviewChecklist(prev => ({ ...prev, demat: e.target.checked }))}
                 />
@@ -957,44 +1066,79 @@ export const KycReviewDrawer: React.FC<KycReviewDrawerProps> = ({
           className="kyc-link-drawer-footer"
           style={{
             display: 'flex',
-            justifyContent: 'space-between',
+            justifyContent: isReadOnly ? 'flex-end' : 'space-between',
             alignItems: 'center',
             padding: '16px 20px',
             borderTop: '1px solid var(--border-color, #e2e8f0)',
             background: 'var(--bg-surface, #ffffff)',
           }}
         >
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setShowCorrectionModal(true)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <AlertTriangle size={14} color="#f59e0b" /> Request Correction
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!hasRealSubmission || !allChecklistCompleted || approving}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              backgroundColor: hasRealSubmission && allChecklistCompleted ? '#10b981' : '#94a3b8',
-              borderColor: hasRealSubmission && allChecklistCompleted ? '#10b981' : '#94a3b8',
-              cursor: hasRealSubmission && allChecklistCompleted ? 'pointer' : 'not-allowed',
-            }}
-            onClick={handleApprove}
-            title={
-              !hasRealSubmission
-                ? 'Cannot approve: Customer has not submitted KYC details yet'
-                : !allChecklistCompleted
-                ? 'Please complete all 5 checklist verification items'
-                : 'Confirm KYC Verification'
-            }
-          >
-            <CheckCircle size={15} /> {approving ? 'Verifying...' : 'Approve & Confirm KYC'}
-          </button>
+          {isReadOnly ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onClose}
+            >
+              Close
+            </button>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowCorrectionModal(true)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  <AlertTriangle size={14} color="#f59e0b" /> Request Correction
+                </button>
+                {onEditKyc && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      onClose();
+                      onEditKyc(deal);
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      color: '#7c3aed',
+                      borderColor: 'rgba(124, 58, 237, 0.4)',
+                      fontWeight: 600,
+                    }}
+                    title="Open Assisted KYC Form to edit details directly"
+                  >
+                    <Edit3 size={14} color="#7c3aed" /> Edit Details
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!hasRealSubmission || !allChecklistCompleted || approving}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  backgroundColor: hasRealSubmission && allChecklistCompleted ? '#10b981' : '#94a3b8',
+                  borderColor: hasRealSubmission && allChecklistCompleted ? '#10b981' : '#94a3b8',
+                  cursor: hasRealSubmission && allChecklistCompleted ? 'pointer' : 'not-allowed',
+                }}
+                onClick={handleApprove}
+                title={
+                  !hasRealSubmission
+                    ? 'Cannot approve: Customer has not submitted KYC details yet'
+                    : !allChecklistCompleted
+                    ? 'Please complete all 5 checklist verification items'
+                    : 'Confirm KYC Verification'
+                }
+              >
+                <CheckCircle size={15} /> {approving ? 'Verifying...' : 'Approve & Confirm KYC'}
+              </button>
+            </>
+          )}
         </div>
 
         {/* Sub-modal for Request Correction */}

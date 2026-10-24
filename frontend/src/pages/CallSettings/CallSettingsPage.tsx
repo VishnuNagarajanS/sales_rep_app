@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useCall } from '../../context/CallContext';
 import { useAuth } from '../../context/AuthContext';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './CallSettingsPage.css';
 import { storageService } from '../../services/storageService';
 
@@ -268,15 +269,17 @@ export const CallSettingsPage: React.FC = () => {
                 The active call window also opens at this corner when you accept a call — and you can drag it anywhere on screen during the call.
               </p>
             </div>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => simulateIncomingCall('Rahul Sharma (VIP Lead)', '+91 98765 43210')}
-              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-              title="Test the popup at the currently selected position"
-            >
-              <Volume2 size={14} color="var(--primary-600)" /> Simulate Incoming Call
-            </button>
+            {canPlaceCalls(user) && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => simulateIncomingCall('Rahul Sharma (VIP Lead)', '+91 98765 43210')}
+                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                title="Test the popup at the currently selected position"
+              >
+                <Volume2 size={14} color="var(--primary-600)" /> Simulate Incoming Call
+              </button>
+            )}
           </div>
 
           {/* Radio Options List */}

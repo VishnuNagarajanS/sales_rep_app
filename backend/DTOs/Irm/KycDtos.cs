@@ -327,9 +327,49 @@ public class VerifyKycOtpResponseDto
     public string? Email { get; set; }
 }
 
-public class ResendKycLinkDto
+public class UpdateKycDetailsDto
 {
-    public string? BaseUrl { get; set; }
-    public int? ExpiryDays { get; set; }
+    // Basic
+    public string? InvestorName { get; set; }
+    public string? Phone { get; set; }
+    public string? Email { get; set; }
+    public string? FatherName { get; set; }
+    public string? DateOfBirth { get; set; }
+    public string? NameAsPerPan { get; set; }
+    public string? Gender { get; set; }
+    public string? InvestorType { get; set; }
+    public string? ResidentType { get; set; }
+    public string? Occupation { get; set; }
+
+    // Address & Identity
+    public string? PanNumber { get; set; }
+    public string? AadhaarNumber { get; set; }
+    public string? AddressLine1 { get; set; }
+    public string? AddressLine2 { get; set; }
+    public string? City { get; set; }
+    public string? State { get; set; }
+    public string? Pincode { get; set; }
+    public string? Country { get; set; }
+
+    // Bank
+    public string? BankName { get; set; }
+    public string? AccountNumber { get; set; }
+    public string? IfscCode { get; set; }
+    public string? AccountType { get; set; }
+    public string? AccountHolderName { get; set; }
+    public string? BranchName { get; set; }
+
+    // Demat
+    public string? DematAccountNumber { get; set; }
+    public string? DpId { get; set; }
+    public string? DematClientId { get; set; }
+    public string? DematDepository { get; set; }
+    public bool? HasNoDemat { get; set; }
+
+    // Nominees (JSON string)
+    public string? NomineesJson { get; set; }
+
+    // Optional section tag corrected (e.g. 'pan', 'bank', etc.)
+    public string? CorrectedSection { get; set; }
 }
 

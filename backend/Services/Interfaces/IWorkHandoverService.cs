@@ -6,7 +6,7 @@ namespace backend.Services.Interfaces;
 public interface IWorkHandoverService
 {
     Task<List<WorkHandoverCandidateDto>> GetCandidatesAsync(int companyId, string roleCode, CancellationToken ct = default);
-    Task<WorkHandoverPreviewDto> GetPreviewAsync(int companyId, int fromUserId, int toUserId, CancellationToken ct = default);
+    Task<WorkHandoverPreviewDto> GetPreviewAsync(int companyId, int fromUserId, int toUserId = 0, CancellationToken ct = default);
     Task<WorkHandoverDto> StartHandoverAsync(int companyId, int actorId, string actorName, string actorEmail, StartWorkHandoverRequestDto request, CancellationToken ct = default);
     Task<List<WorkHandoverDto>> GetActiveHandoversAsync(int companyId, CancellationToken ct = default);
     Task<List<WorkHandoverDto>> GetHandoverHistoryAsync(int companyId, CancellationToken ct = default);

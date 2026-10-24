@@ -129,23 +129,55 @@ public class CustomerService : ICustomerService
 
         var customerIdStr = customer.Id.ToString();
 
-        // 1. Fetch related calls from CallRecords
-        var callRecords = await _context.CallRecords
+        // 1. Fetch related calls from CallRecords with Agent and Role for caller details
+        var rawCalls = await _context.CallRecords
             .AsNoTracking()
+            .Include(cr => cr.Agent)
+                .ThenInclude(a => a!.Role)
             .Where(cr => cr.CompanyId == customer.CompanyId &&
                          (cr.CustomerId == customer.Id || cr.ContactPhone == customer.Phone))
             .OrderByDescending(cr => cr.Timestamp)
-            .Take(50)
-            .Select(cr => new Customer360CallSummaryDto
+            .ToListAsync(ct);
+
+        var seenSids = new HashSet<string>();
+        var seenIds = new HashSet<int>();
+        var callRecords = new List<Customer360CallSummaryDto>();
+
+        foreach (var cr in rawCalls)
+        {
+            if (!string.IsNullOrWhiteSpace(cr.TwilioCallSid))
+            {
+                if (seenSids.Contains(cr.TwilioCallSid)) continue;
+                seenSids.Add(cr.TwilioCallSid);
+            }
+            if (seenIds.Contains(cr.Id)) continue;
+            seenIds.Add(cr.Id);
+
+            var callerRoleCode = cr.Agent?.Role?.Code?.ToLowerInvariant();
+            var isIrm = callerRoleCode == "irm" ||
+                        (cr.CallModule != null && cr.CallModule.Contains("irm", StringComparison.OrdinalIgnoreCase)) ||
+                        (cr.Notes != null && cr.Notes.Contains("[Source: irm]", StringComparison.OrdinalIgnoreCase));
+            var callerRole = isIrm ? "IRM" : "Sales Executive";
+            var statusAtCall = cr.LeadStatusAtCall;
+            if (string.IsNullOrWhiteSpace(statusAtCall))
+            {
+                statusAtCall = !string.IsNullOrWhiteSpace(cr.Disposition) ? cr.Disposition : customer.Status;
+            }
+
+            callRecords.Add(new Customer360CallSummaryDto
             {
                 Id = cr.Id,
                 Direction = cr.Direction,
                 Duration = cr.Duration,
                 Disposition = cr.Disposition,
                 Notes = cr.Notes ?? string.Empty,
-                Timestamp = cr.Timestamp
-            })
-            .ToListAsync(ct);
+                Timestamp = cr.Timestamp,
+                CallerName = cr.Agent?.Name ?? "Sales Executive",
+                CallerRole = callerRole,
+                LeadStatusAtCall = statusAtCall,
+                TwilioCallSid = cr.TwilioCallSid
+            });
+        }
 
         // 2. Fetch associated follow-ups
         var followups = await _context.Followups

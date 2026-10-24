@@ -17,6 +17,7 @@ import { storageService } from '../services/storageService';
 import { apiClient } from '../services/apiClient';
 import { useAuth } from './AuthContext';
 import { twilioVoiceService } from '../services/twilioVoiceService';
+import { canPlaceCalls } from '../utils/agentRoleUtils';
 import { Call } from '@twilio/voice-sdk';
 
 export type AgentAvailability = 'Available' | 'Busy' | 'Offline';
@@ -133,7 +134,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Register Twilio Voice device and incoming call listener
   useEffect(() => {
-    if (user?.id) {
+    if (user?.id && canPlaceCalls(user)) {
       twilioVoiceService.initializeDevice().catch(err => {
         console.warn('[CallContext] Twilio Voice initialization notice:', err?.message || err);
       });
@@ -236,7 +237,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
         unsubIncoming();
       };
     }
-  }, [user?.id, availability, leads]);
+  }, [user?.id, user?.role?.code, availability, leads]);
 
   // Timer for connected or simulated active calls
   useEffect(() => {
@@ -261,6 +262,11 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
     callModule?: string,
     isFromOther?: boolean
   ) => {
+    if (!canPlaceCalls(user)) {
+      console.warn('[CallContext] Current user role is not permitted to initiate calls.');
+      return;
+    }
+
     const callId = `call-${Date.now()}`;
     const newCall: ActiveCall = {
       id: callId,
@@ -364,7 +370,7 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const simulateIncomingCall = (name = 'Kishore Varma', phone = '+91 98860 77112') => {
-    if (availability === 'Offline' || availability === 'Busy') {
+    if (!canPlaceCalls(user) || availability === 'Offline' || availability === 'Busy') {
       return;
     }
 
@@ -626,13 +632,13 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // Detect whether this call originated from Follow-ups or has a source follow-up
+      const isCustomerContact = lastCallRecord.matchedRecord?.type === 'customer' || Boolean(rawCustomerId) || Boolean(lastCallRecord.customerId);
       const callMod = (lastCallRecord.callModule || '').toLowerCase();
       const isCallFromFollowup = callMod === 'follow_up' || Boolean(lastCallRecord.sourceFollowupId);
       const isCallFromKyc = callMod === 'kyc';
       const isCallFromOpportunities = callMod === 'opportunities';
       const isCallFromInvestor360 = callMod === 'investor_360';
       const isCallFromOther = callMod === 'other';
-      const isCustomerContact = lastCallRecord.matchedRecord?.type === 'customer' || Boolean(lastCallRecord.customerId);
       const isIrmRole = user?.role?.code === 'irm' || (user as any)?.roleCode === 'irm';
       const isCallFromMyLeads = isIrmRole && (callMod === 'my_leads' || (!isCallFromFollowup && !isCallFromKyc && !isCallFromOpportunities && !isCallFromInvestor360 && !isCallFromOther && !isCustomerContact));
 
@@ -808,6 +814,23 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
               assignedAgentId: isIrmRole ? user.id : (existingFollowup.assignedAgentId || user.id),
               assignedRole: isIrmRole ? 'irm' : existingFollowup.assignedRole,
             });
+          } else if (scheduleFollowup) {
+            await apiSaveFollowup({
+              id: `flw-${Date.now()}`,
+              companyId: tenant.id,
+              contactId: matchedDeal?.id || matchedCustomer?.id || matchedLead?.id || lastCallRecord.matchedRecord?.id || `contact-${Date.now()}`,
+              contactName: lastCallRecord.contactName,
+              contactPhone: lastCallRecord.contactPhone,
+              contactEmail: (matchedDeal as any)?.email || (matchedCustomer as any)?.email || (matchedLead as any)?.email || undefined,
+              contactType: lastCallRecord.matchedRecord?.type === 'lead' ? 'lead' : 'customer',
+              scheduledAt: followupScheduledAt,
+              priority: followupPriority,
+              status: 'Pending',
+              notes: cbNotes,
+              assignedAgentId: isIrmRole ? user.id : (matchedDeal?.assignedAgentId || user.id),
+              assignedAgentName: isIrmRole ? user.name : (matchedDeal?.assignedAgentName || user.name),
+              assignedRole: isIrmRole ? 'irm' : undefined,
+            });
           }
 
           if (matchedDeal) {
@@ -890,7 +913,10 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             storageService.saveLead(matchedLead);
           }
         } else {
-          // Stay in My Leads: update lead only, DO NOT create any follow-up row
+          // General / My Leads call: update lead status to Callback and create/update pending follow-up record
+          const targetAgentId = isIrmRole ? user.id : (matchedLead?.assignedAgentId || user.id);
+          const targetAgentName = isIrmRole ? user.name : (matchedLead?.assignedAgentName || user.name);
+
           if (matchedLead) {
             matchedLead.status = 'Callback';
             matchedLead.nextFollowupDate = followupScheduledAt;
@@ -932,15 +958,37 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
             storageService.saveLead(newLead);
           }
 
-          // If an accidental pending follow-up existed previously for this lead, complete it so the lead stays in My Leads
+          // Create or update pending follow-up task so callback is properly scheduled in Follow-ups
           if (existingFollowup) {
-            try {
-              await apiSaveFollowup({
-                ...existingFollowup,
-                status: 'Completed',
-                notes: `${existingFollowup.notes ? existingFollowup.notes + ' | ' : ''}Lead remains in My Leads (Callback)`,
-              });
-            } catch {}
+            await apiSaveFollowup({
+              ...existingFollowup,
+              scheduledAt: followupScheduledAt,
+              priority: followupPriority,
+              status: 'Pending',
+              notes: cbNotes,
+              assignedAgentId: targetAgentId,
+              assignedAgentName: targetAgentName,
+              assignedRole: isIrmRole ? 'irm' : existingFollowup.assignedRole,
+              assignedByName: isIrmRole && (!existingFollowup.assignedByName || existingFollowup.assignedByName === 'Created by IRM') ? 'Created by IRM' : existingFollowup.assignedByName,
+            });
+          } else {
+            await apiSaveFollowup({
+              id: `flw-${Date.now()}`,
+              companyId: tenant.id,
+              contactId: matchedLead?.id || lastCallRecord.matchedRecord?.id || `contact-${Date.now()}`,
+              contactName: lastCallRecord.contactName,
+              contactPhone: lastCallRecord.contactPhone,
+              contactEmail: (matchedLead as any)?.email || (lastCallRecord.matchedRecord as any)?.email || undefined,
+              contactType: lastCallRecord.matchedRecord?.type === 'customer' ? 'customer' : 'lead',
+              scheduledAt: followupScheduledAt,
+              priority: followupPriority,
+              status: 'Pending',
+              notes: cbNotes,
+              assignedAgentId: targetAgentId,
+              assignedAgentName: targetAgentName,
+              assignedRole: isIrmRole ? 'irm' : undefined,
+              assignedByName: isIrmRole && (!matchedLead?.assignedByName || matchedLead.assignedByName === 'Created by IRM') ? 'Created by IRM' : matchedLead?.assignedByName,
+            });
           }
         }
       }
@@ -1049,6 +1097,23 @@ export const CallProvider: React.FC<{ children: React.ReactNode }> = ({ children
               status: 'Pending',
               notes: nrNotes,
               assignedRole: isIrmRole ? 'irm' : existingFollowup.assignedRole,
+            });
+          } else if (scheduleFollowup) {
+            await apiSaveFollowup({
+              id: `flw-${Date.now()}`,
+              companyId: tenant.id,
+              contactId: matchedDeal?.id || matchedCustomer?.id || matchedLead?.id || lastCallRecord.matchedRecord?.id || `contact-${Date.now()}`,
+              contactName: lastCallRecord.contactName,
+              contactPhone: lastCallRecord.contactPhone,
+              contactEmail: (matchedDeal as any)?.email || (matchedCustomer as any)?.email || (matchedLead as any)?.email || undefined,
+              contactType: lastCallRecord.matchedRecord?.type === 'lead' ? 'lead' : 'customer',
+              scheduledAt: followupScheduledAt,
+              priority: followupPriority,
+              status: 'Pending',
+              notes: nrNotes,
+              assignedAgentId: isIrmRole ? user.id : (matchedDeal?.assignedAgentId || user.id),
+              assignedAgentName: isIrmRole ? user.name : (matchedDeal?.assignedAgentName || user.name),
+              assignedRole: isIrmRole ? 'irm' : undefined,
             });
           }
 

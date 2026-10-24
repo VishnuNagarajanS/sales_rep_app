@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { CallDisposition } from '../types';
-import { getAgentRoleInfo, getAssigningSalesAgentInfo } from '../utils/agentRoleUtils';
+import { getAgentRoleInfo, getAssigningSalesAgentInfo, canPlaceCalls } from '../utils/agentRoleUtils';
 
 describe('Role Feature Isolation & Boundary Enforcement', () => {
   // Navigation section models
@@ -62,7 +62,7 @@ describe('Role Feature Isolation & Boundary Enforcement', () => {
     'customers',
     'pipeline',
     'archived-leads',
-    'call-center',
+    // call-center is removed for Admin roles
     'call-history',
     'investors',
     'consultations',
@@ -147,6 +147,30 @@ describe('Role Feature Isolation & Boundary Enforcement', () => {
     expect(adminIds).not.toContain('irm-other');
     expect(adminIds).not.toContain('junk');
     expect(adminIds).not.toContain('not-interested');
+
+    // Part 1: Admin must NOT have Call Center in sidebar navigation
+    expect(adminIds).not.toContain('call-center');
+    // Call History and Call Settings must remain available for Admin
+    expect(adminIds).toContain('call-history');
+    expect(adminIds).toContain('call-settings');
+  });
+
+  it('enforces call placing capability isolation (canPlaceCalls)', () => {
+    // Admin roles must NOT be able to place calls
+    expect(canPlaceCalls('company_admin')).toBe(false);
+    expect(canPlaceCalls('admin')).toBe(false);
+    expect(canPlaceCalls('ghl_admin')).toBe(false);
+    expect(canPlaceCalls({ role: { code: 'company_admin' } })).toBe(false);
+    expect(canPlaceCalls({ role: { code: 'admin' } })).toBe(false);
+    expect(canPlaceCalls({ role: { code: 'ghl_admin' } })).toBe(false);
+
+    // Sales Executive, IRM, and Super Admin MUST be able to place calls
+    expect(canPlaceCalls('sales_executive')).toBe(true);
+    expect(canPlaceCalls('irm')).toBe(true);
+    expect(canPlaceCalls('super_admin')).toBe(true);
+    expect(canPlaceCalls({ role: { code: 'sales_executive' } })).toBe(true);
+    expect(canPlaceCalls({ role: { code: 'irm' } })).toBe(true);
+    expect(canPlaceCalls({ role: { code: 'super_admin' } })).toBe(true);
   });
 
   it('validates call outcome separation between IRM and Sales Executive', () => {

@@ -5,7 +5,7 @@ export type AppEnvironment = 'dev' | 'prod';
  * Always targets real backend API and database operations.
  */
 export function getAppEnv(): AppEnvironment {
-  return 'dev';
+  return import.meta.env.PROD ? 'prod' : 'dev';
 }
 
 /**
@@ -16,10 +16,10 @@ export function isMockMode(): boolean {
 }
 
 /**
- * Returns true when running in real API / database mode.
+ * Returns true when running in Vite development mode.
  */
 export function isDevMode(): boolean {
-  return true;
+  return import.meta.env.DEV;
 }
 
 /**

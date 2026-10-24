@@ -231,3 +231,23 @@ export function getAssigningSalesAgentInfo(
   return getAgentRoleInfo('Naveen', '3');
 }
 
+/**
+ * ONE central permission check for placing/receiving calls across the entire frontend.
+ * Allowed: sales_executive, irm, super_admin.
+ * Admin roles (company_admin, ghl_admin, admin) cannot place or receive calls.
+ */
+export function canPlaceCalls(
+  userOrRole?: { role?: { code?: string } | string } | string | null
+): boolean {
+  if (!userOrRole) return false;
+  let code = '';
+  if (typeof userOrRole === 'string') {
+    code = userOrRole.toLowerCase().trim();
+  } else if (typeof userOrRole.role === 'string') {
+    code = userOrRole.role.toLowerCase().trim();
+  } else if (userOrRole.role && typeof userOrRole.role === 'object' && userOrRole.role.code) {
+    code = userOrRole.role.code.toLowerCase().trim();
+  }
+  return code === 'sales_executive' || code === 'irm' || code === 'super_admin';
+}
+

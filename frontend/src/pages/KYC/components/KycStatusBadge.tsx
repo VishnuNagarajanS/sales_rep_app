@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   UserCheck,
 } from 'lucide-react';
+import { getCustomerKycStatus as getKycStatusFromService } from '../../../services/kycService';
 import './KycLinkComponents.css';
 
 export type CustomerKycStatus =
@@ -146,7 +147,6 @@ export const KycStatusBadge: React.FC<KycStatusBadgeProps> = ({ status }) => {
   }
 };
 
-import { getCustomerKycStatus as getKycStatusFromService } from '../../../services/kycService';
 
 export const getMockCustomerKycStatus = (dealId: string, currentStatus?: string): CustomerKycStatus => {
   return getKycStatusFromService(dealId, currentStatus);

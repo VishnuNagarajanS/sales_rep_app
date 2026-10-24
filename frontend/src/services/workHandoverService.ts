@@ -10,6 +10,8 @@ export interface HandoverCandidateUser {
   openItemsCount: number;
   isCovered: boolean;   // backend: IsCovered
   isCovering: boolean;  // backend: IsCovering
+  onLeave?: boolean;
+  leaveReason?: string | null;
   activeHandoverId?: number | null;
 }
 
@@ -134,9 +136,12 @@ export const workHandoverService = {
     return res.data || [];
   },
 
-  async getPreview(fromUserId: number, toUserId: number): Promise<HandoverPreviewCounts> {
+  async getPreview(fromUserId: number, toUserId?: number): Promise<HandoverPreviewCounts> {
     // Backend endpoint is POST preview with body { fromUserId, toUserId }
-    const res = await apiClient.post<ApiResponse<HandoverPreviewCounts>>('/ghl/handover/preview', { fromUserId, toUserId });
+    const res = await apiClient.post<ApiResponse<HandoverPreviewCounts>>('/ghl/handover/preview', { 
+      fromUserId, 
+      toUserId: toUserId || 0 
+    });
     return res.data;
   },
 

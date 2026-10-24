@@ -34,7 +34,7 @@ const addStoredAuditLog = (log: any) => {
     localStorage.setItem('nexus_audit_logs', JSON.stringify(all));
     window.dispatchEvent(new Event('nexus_storage_updated'));
     window.dispatchEvent(new Event('nexus_admin_updated'));
-  } catch { }
+  } catch {}
 };
 
 export const CompanyUsersPage: React.FC = () => {
@@ -758,8 +758,9 @@ export const CompanyUsersPage: React.FC = () => {
               gap: 8,
               padding: '10px 18px',
               borderRadius: 'var(--radius-md)',
-              border: `1px solid ${toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
-                }`,
+              border: `1px solid ${
+                toast.type === 'success' ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'
+              }`,
               backgroundColor:
                 toast.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
               backdropFilter: 'blur(6px)',
@@ -939,7 +940,7 @@ export const CompanyUsersPage: React.FC = () => {
                 className="form-input"
                 value={invitePhone}
                 onChange={e => setInvitePhone(e.target.value)}
-                placeholder="+91 "
+                placeholder="+91 98450 00000"
               />
             </div>
 
@@ -1192,11 +1193,11 @@ export const CompanyUsersPage: React.FC = () => {
       >
         <div className="company-user-form">
           <div style={{ backgroundColor: '#fff3cd', color: '#856404', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
-            <strong>Action Required:</strong> {transferFromUser?.name} is changing roles from
+            <strong>Action Required:</strong> {transferFromUser?.name} is changing roles from 
             <strong> {transferFromUser?.role.name}</strong> to <strong>{transferTargetRole?.name}</strong>.
             You must reassign their active pipeline (Leads and Follow-ups) to another agent before proceeding.
           </div>
-
+          
           <div className="form-group">
             <label className="form-label">Transfer pipeline to:</label>
             <select
@@ -1276,8 +1277,8 @@ export const CompanyUsersPage: React.FC = () => {
           // Strictly filter successors to ONLY users of the exact same role
           const eligibleSuccessors = usersList.filter(
             u => String(u.id) !== String(deleteModalUser.id) &&
-              u.status === 'Active' &&
-              u.role.code === deleteModalUser.role.code
+                 u.status === 'Active' &&
+                 u.role.code === deleteModalUser.role.code
           );
 
           return (

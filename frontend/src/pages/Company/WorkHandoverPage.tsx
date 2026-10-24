@@ -216,11 +216,8 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
     const fetchPreview = async () => {
       try {
         setLoadingPreview(true);
-        // Preview needs both from and to user to be meaningful; fetch when both are selected
-        if (sourceUserId && coveringUserId) {
-          const data = await workHandoverService.getPreview(Number(sourceUserId), Number(coveringUserId));
-          if (isMounted) setPreview(data);
-        }
+        const data = await workHandoverService.getPreview(Number(sourceUserId), coveringUserId ? Number(coveringUserId) : 0);
+        if (isMounted) setPreview(data);
       } catch (err) {
         console.error('Failed to fetch preview counts:', err);
       } finally {
@@ -310,12 +307,13 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
     }
   };
 
-  // Eligible covering users filter (strictly isolated to selected role)
+  // Eligible covering users filter (strictly isolated to selected role, excludes on-leave, covered, covering, and source user)
   const eligibleCoveringUsers = candidates.filter(u => {
     if (u.roleCode && u.roleCode.toLowerCase() !== selectedRole.toLowerCase()) return false;
     if (sourceUserId && u.userId === Number(sourceUserId)) return false;
     if (u.isCovering) return false;
     if (u.isCovered) return false;
+    if (u.onLeave) return false;
     return true;
   });
 
@@ -477,12 +475,23 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
                 type="button"
                 className="btn btn-secondary"
                 style={{ padding: '6px 12px', fontSize: 12 }}
-                onClick={() => {
+                onClick={async () => {
                   loadCandidates(selectedRole);
                   loadHandovers(selectedRole);
+                  if (sourceUserId) {
+                    try {
+                      setLoadingPreview(true);
+                      const data = await workHandoverService.getPreview(Number(sourceUserId), coveringUserId ? Number(coveringUserId) : 0);
+                      setPreview(data);
+                    } catch (err) {
+                      console.error('Failed to refresh preview counts:', err);
+                    } finally {
+                      setLoadingPreview(false);
+                    }
+                  }
                 }}
               >
-                <RefreshCw size={14} className={loadingCandidates ? 'spin' : ''} />
+                <RefreshCw size={14} className={loadingCandidates || loadingPreview ? 'spin' : ''} />
                 Refresh Candidates
               </button>
             </div>
@@ -506,6 +515,7 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
                         let labelTag = '';
                         if (u.isCovered) labelTag = ' (Already covered)';
                         else if (u.isCovering) labelTag = ' (Currently covering someone)';
+                        else if (u.onLeave) labelTag = ' (On Leave)';
 
                         return (
                           <option key={u.userId} value={u.userId} disabled={isUnavailable}>
@@ -527,22 +537,23 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
                     disabled={!sourceUserId || loadingSuggestions}
                   >
                     <option value="">-- Select Covering Peer --</option>
-                    {coverSuggestions.length > 0 ? (
-                      coverSuggestions.map(s => {
-                        let extra = '';
-                        if (s.recommended) extra += ' — (Recommended)';
-                        if (s.currentlyCovering) extra += ' — (Currently covering)';
-                        if (s.disabled && s.disabledReason) extra += ` — [${s.disabledReason}]`;
-                        return (
-                          <option key={s.userId} value={s.userId} disabled={s.disabled}>
-                            {s.name} ({s.openItemCount} open items){extra}
-                          </option>
-                        );
-                      })
+                    {coverSuggestions.filter(s => !s.disabled && s.userId !== Number(sourceUserId)).length > 0 ? (
+                      coverSuggestions
+                        .filter(s => !s.disabled && s.userId !== Number(sourceUserId))
+                        .map(s => {
+                          let extra = '';
+                          if (s.recommended) extra += ' — (Recommended)';
+                          if (s.currentlyCovering) extra += ' — (Currently covering)';
+                          return (
+                            <option key={s.userId} value={s.userId}>
+                              {s.name} ({s.openItemCount} open items){extra}
+                            </option>
+                          );
+                        })
                     ) : (
                       eligibleCoveringUsers.map(u => (
                         <option key={u.userId} value={u.userId}>
-                          {u.name} ({u.email})
+                          {u.name} ({u.openItemsCount} open items)
                         </option>
                       ))
                     )}
@@ -553,7 +564,7 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
                       Loading cover suggestions...
                     </span>
                   )}
-                  {!loadingSuggestions && sourceUserId && coverSuggestions.length > 0 && coverSuggestions.every(s => s.disabled) && (
+                  {!loadingSuggestions && sourceUserId && coverSuggestions.length > 0 && coverSuggestions.every(s => s.disabled || s.userId === Number(sourceUserId)) && (
                     <span style={{ fontSize: 11, color: '#f59e0b', marginTop: 4 }}>
                       <ShieldAlert size={12} style={{ display: 'inline', marginRight: 4 }} />
                       No eligible covering peers available (all are on leave or covered).
@@ -562,7 +573,7 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
                   {!loadingSuggestions && sourceUserId && coverSuggestions.length === 0 && eligibleCoveringUsers.length === 0 && (
                     <span style={{ fontSize: 11, color: '#f59e0b', marginTop: 4 }}>
                       <ShieldAlert size={12} style={{ display: 'inline', marginRight: 4 }} />
-                      No eligible covering peers available (all are active in existing handovers).
+                      No eligible covering peers available (all are on leave or active in existing handovers).
                     </span>
                   )}
                 </div>
@@ -616,16 +627,8 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
                           <span className="preview-chip-count">{preview.leadsCount}</span>
                         </div>
                         <div className="preview-chip">
-                          <span>Active Customers:</span>
-                          <span className="preview-chip-count">{preview.customersCount}</span>
-                        </div>
-                        <div className="preview-chip">
                           <span>Pending Follow-ups:</span>
                           <span className="preview-chip-count">{preview.followupsCount}</span>
-                        </div>
-                        <div className="preview-chip">
-                          <span>Active Deals:</span>
-                          <span className="preview-chip-count">{preview.dealsCount}</span>
                         </div>
                       </>
                     ) : (
@@ -637,6 +640,10 @@ export const WorkHandoverPage: React.FC<WorkHandoverPageProps> = ({ initialParam
                         <div className="preview-chip">
                           <span>Pending Follow-ups:</span>
                           <span className="preview-chip-count">{preview.followupsCount}</span>
+                        </div>
+                        <div className="preview-chip">
+                          <span>KYC Reviews:</span>
+                          <span className="preview-chip-count">{preview.kycsCount}</span>
                         </div>
                         <div className="preview-chip">
                           <span>Scheduled Consultations:</span>

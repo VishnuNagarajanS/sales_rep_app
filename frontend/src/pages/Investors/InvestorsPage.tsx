@@ -13,6 +13,7 @@ import { Modal } from '../../components/common/Modal';
 import { DocumentUploader } from '../../components/common/DocumentUploader';
 import { DocumentList } from '../../components/common/DocumentList';
 import { Investor360Modal } from './Investor360Modal';
+import { canPlaceCalls } from '../../utils/agentRoleUtils';
 import './InvestorsPage.css';
 
 // ─── Form state shape ────────────────────────────────────────────────────────
@@ -79,7 +80,6 @@ export const InvestorsPage: React.FC = () => {
   // ── Filters ───────────────────────────────────────────────────────────────
   const [statusFilter, setStatusFilter] = useState('All');
   const [assetClassFilter, setAssetClassFilter] = useState('All');
-  const [consultantFilter, setConsultantFilter] = useState('All');
 
   // ── Create / Edit modal ───────────────────────────────────────────────────
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -184,20 +184,49 @@ export const InvestorsPage: React.FC = () => {
 
   const convertedInvestors = scopedInvestors.filter(isConvertedInvestor);
 
-  // ── Filter options ────────────────────────────────────────────────────────
-  const assetClassOptions = Array.from(new Set(convertedInvestors.map(inv => inv.preferredAssetClass)))
-    .filter(Boolean)
-    .map(cls => ({ value: cls, label: cls }));
+  // ── Helper: resolve preferred asset class according to Option A ('Debenture' | 'Direct AIF') ──
+  const getResolvedAssetClass = (inv: Investor, matchingDeal?: Deal): string => {
+    const raw = (inv.preferredAssetClass || '').trim();
+    if (raw) {
+      const lower = raw.toLowerCase();
+      if (lower.includes('debenture')) return 'Debenture';
+      if (lower.includes('direct') || lower === 'aif') return 'Direct AIF';
+      return raw;
+    }
+    const mandate = (inv.investmentMandate || '').toLowerCase();
+    if (mandate.includes('debenture')) return 'Debenture';
+    if (mandate.includes('direct')) return 'Direct AIF';
 
-  const consultantOptions = Array.from(new Set(convertedInvestors.map(inv => inv.assignedAgentName)))
-    .filter(Boolean)
-    .map(name => ({ value: name, label: name }));
+    if (matchingDeal) {
+      if (matchingDeal.investmentRoute === 'debenture') return 'Debenture';
+      if (matchingDeal.investmentRoute === 'direct_aif') return 'Direct AIF';
+      const dType = (matchingDeal.investorType || '').toLowerCase();
+      if (dType.includes('debenture')) return 'Debenture';
+      if (dType.includes('direct')) return 'Direct AIF';
+      if (matchingDeal.preferredAssetClass) {
+        const dPref = matchingDeal.preferredAssetClass.toLowerCase();
+        if (dPref.includes('debenture')) return 'Debenture';
+        if (dPref.includes('direct') || dPref === 'aif') return 'Direct AIF';
+        return matchingDeal.preferredAssetClass;
+      }
+    }
+    return '';
+  };
+
+  // ── Filter options (Option A: Debenture, Direct AIF) ──────────────────────
+  const assetClassOptions = [
+    { value: 'Debenture', label: 'Debenture' },
+    { value: 'Direct AIF', label: 'Direct AIF' },
+  ];
 
   // ── Filtered list ─────────────────────────────────────────────────────────
   const filteredInvestors = convertedInvestors.filter(inv => {
     if (statusFilter !== 'All' && inv.status !== statusFilter) return false;
-    if (assetClassFilter !== 'All' && inv.preferredAssetClass !== assetClassFilter) return false;
-    if (consultantFilter !== 'All' && inv.assignedAgentName !== consultantFilter) return false;
+    if (assetClassFilter !== 'All') {
+      const matchingDeal = getMatchingDeal(inv);
+      const resolved = getResolvedAssetClass(inv, matchingDeal);
+      if (resolved !== assetClassFilter) return false;
+    }
     return true;
   });
 
@@ -370,10 +399,10 @@ export const InvestorsPage: React.FC = () => {
       header: 'Preferred Asset Class',
       sortable: true,
       render: (inv: Investor) => {
-        const pref = inv.preferredAssetClass;
-        const hasPref = pref && pref !== '—' && pref.trim() !== '' && pref.toLowerCase() !== 'not specified';
-        return hasPref ? (
-          <span style={{ fontSize: 12 }}>{pref}</span>
+        const matchingDeal = getMatchingDeal(inv);
+        const pref = getResolvedAssetClass(inv, matchingDeal);
+        return pref ? (
+          <span style={{ fontSize: 12, fontWeight: 600 }}>{pref}</span>
         ) : (
           <span className="not-specified-badge">Not Specified</span>
         );
@@ -419,6 +448,7 @@ export const InvestorsPage: React.FC = () => {
       label: 'Call Customer',
       icon: <Phone size={14} color="#059669" style={{ marginRight: 6 }} />,
       onClick: inv => initiateCall(inv.name, inv.phone, 'customer', inv.id, undefined, 'investor_360'),
+      hidden: () => !canPlaceCalls(user),
     },
     {
       label: 'View Investor 360',
@@ -473,9 +503,13 @@ export const InvestorsPage: React.FC = () => {
           onEditInvestor={inv => {
             openEditModal(inv);
           }}
-          onCallCustomer={(name, phone, entityId) => {
-            initiateCall(name, phone, 'customer', entityId, undefined, 'investor_360');
-          }}
+          onCallCustomer={
+            canPlaceCalls(user)
+              ? (name, phone, entityId) => {
+                  initiateCall(name, phone, 'customer', entityId, undefined, 'investor_360');
+                }
+              : undefined
+          }
         />
       ) : (
         <>
@@ -554,18 +588,10 @@ export const InvestorsPage: React.FC = () => {
                     onChange: setAssetClassFilter,
                     options: assetClassOptions,
                   }]),
-                  {
-                    key: 'consultant',
-                    label: 'Consultant',
-                    value: consultantFilter,
-                    onChange: setConsultantFilter,
-                    options: consultantOptions,
-                  },
                 ]}
                 onClearAll={() => {
                   setStatusFilter('All');
                   setAssetClassFilter('All');
-                  setConsultantFilter('All');
                 }}
               />
             }

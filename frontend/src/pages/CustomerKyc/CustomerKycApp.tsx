@@ -35,7 +35,7 @@ import {
   ACCOUNT_TYPE_OPTIONS,
   NOMINEE_RELATIONSHIP_OPTIONS,
 } from '../../utils/kycValidators';
-import { isMockMode } from '../../config/environment';
+import { isMockMode, isDevMode } from '../../config/environment';
 import { apiUrl } from '../../utils/apiUrl';
 
 type ScreenId =
@@ -413,12 +413,55 @@ export const CustomerKycApp: React.FC = () => {
   const handlePreviewDoc = (docKey: 'pan' | 'aadhaar' | 'bank' | 'demat') => {
     const doc = documents[docKey];
     if (!doc.dataUrl) return;
-    const w = window.open('');
+    const cleanUrl = doc.dataUrl.trim();
+    const isAllowedScheme =
+      cleanUrl.startsWith('http://') ||
+      cleanUrl.startsWith('https://') ||
+      cleanUrl.startsWith('blob:') ||
+      cleanUrl.startsWith('data:application/pdf') ||
+      cleanUrl.startsWith('data:image/');
+    if (!isAllowedScheme) return;
+
+    const w = window.open('', '_blank');
     if (w) {
-      if (doc.dataUrl.startsWith('data:application/pdf')) {
-        w.document.write(`<iframe src="${doc.dataUrl}" style="width:100%;height:100%;border:none;"></iframe>`);
-      } else {
-        w.document.write(`<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a;margin:0;"><img src="${doc.dataUrl}" style="max-width:90%;max-height:90vh;border-radius:8px;" alt="${doc.name}" /></div>`);
+      try {
+        w.opener = null;
+        w.document.title = doc.name;
+        w.document.body.style.margin = '0';
+        w.document.body.style.background = '#0f172a';
+
+        if (cleanUrl.startsWith('data:application/pdf') || cleanUrl.toLowerCase().includes('.pdf')) {
+          const iframe = w.document.createElement('iframe');
+          iframe.src = cleanUrl;
+          iframe.style.width = '100%';
+          iframe.style.height = '100%';
+          iframe.style.border = 'none';
+          iframe.style.position = 'fixed';
+          iframe.style.top = '0';
+          iframe.style.left = '0';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          w.document.body.appendChild(iframe);
+        } else {
+          const container = w.document.createElement('div');
+          container.style.display = 'flex';
+          container.style.alignItems = 'center';
+          container.style.justifyContent = 'center';
+          container.style.minHeight = '100vh';
+          container.style.background = '#0f172a';
+          container.style.margin = '0';
+
+          const img = w.document.createElement('img');
+          img.src = cleanUrl;
+          img.alt = doc.name;
+          img.style.maxWidth = '90%';
+          img.style.maxHeight = '90vh';
+          img.style.borderRadius = '8px';
+          container.appendChild(img);
+          w.document.body.appendChild(container);
+        }
+      } catch (err) {
+        console.error('Error rendering preview:', err);
       }
     }
   };
@@ -2755,37 +2798,39 @@ export const CustomerKycApp: React.FC = () => {
         )}
       </div>
 
-      {/* ── Fixed Dev-Only Preview Switcher Bar at Bottom ── */}
-      <div className="ckyc-preview-bar">
-        <span>⚡ Dev Preview:</span>
-        <select
-          className="ckyc-preview-select"
-          value={currentScreen}
-          onChange={e => setCurrentScreen(e.target.value as ScreenId)}
-        >
-          <option value="otp">3. OTP Verification</option>
-          <option value="wizard">4. Wizard Steps (1-5)</option>
-          <option value="documents">5. Document Uploads (4 States)</option>
-          <option value="consent">6. Consent &amp; Declarations</option>
-          <option value="liveness">7. AI Liveness Check</option>
-          <option value="submitted">8. Submission Success</option>
-          <option value="loading">1. Loading Skeleton</option>
-          <option value="invalid">2. Expired Link State</option>
-        </select>
-        {currentScreen === 'wizard' && (
+      {/* ── Fixed Dev-Only Preview Switcher Bar at Bottom (Development Only) ── */}
+      {isDevMode() && (
+        <div className="ckyc-preview-bar">
+          <span>⚡ Dev Preview:</span>
           <select
             className="ckyc-preview-select"
-            value={wizardStep}
-            onChange={e => setWizardStep(Number(e.target.value) as WizardStep)}
+            value={currentScreen}
+            onChange={e => setCurrentScreen(e.target.value as ScreenId)}
           >
-            <option value={1}>Step 1: Basic</option>
-            <option value={2}>Step 2: Identity (Validation Demo)</option>
-            <option value={3}>Step 3: Bank</option>
-            <option value={4}>Step 4: Demat</option>
-            <option value={5}>Step 5: Nominee</option>
+            <option value="otp">3. OTP Verification</option>
+            <option value="wizard">4. Wizard Steps (1-5)</option>
+            <option value="documents">5. Document Uploads (4 States)</option>
+            <option value="consent">6. Consent &amp; Declarations</option>
+            <option value="liveness">7. AI Liveness Check</option>
+            <option value="submitted">8. Submission Success</option>
+            <option value="loading">1. Loading Skeleton</option>
+            <option value="invalid">2. Expired Link State</option>
           </select>
-        )}
-      </div>
+          {currentScreen === 'wizard' && (
+            <select
+              className="ckyc-preview-select"
+              value={wizardStep}
+              onChange={e => setWizardStep(Number(e.target.value) as WizardStep)}
+            >
+              <option value={1}>Step 1: Basic</option>
+              <option value={2}>Step 2: Identity (Validation Demo)</option>
+              <option value={3}>Step 3: Bank</option>
+              <option value={4}>Step 4: Demat</option>
+              <option value={5}>Step 5: Nominee</option>
+            </select>
+          )}
+        </div>
+      )}
     </div>
   );
 };
