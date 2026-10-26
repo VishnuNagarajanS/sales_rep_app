@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { ArrowRight, ArrowLeft, Lock, Mail, AlertCircle, CheckCircle2, KeyRound, ShieldCheck, Key } from 'lucide-react';
 import { authService } from '../services/authService';
+import Lightfall from '../components/Lightfall/Lightfall';
 import './AuthLayout.css';
 
 export const AuthLayout: React.FC = () => {
@@ -84,18 +85,24 @@ export const AuthLayout: React.FC = () => {
 
   return (
     <div className="auth-page-container">
-      {/* Fixed background video */}
+      {/* Lightfall WebGL Dynamic Background Layer */}
       <div className="auth-bg-layer">
-        <video
-          className="auth-bg-video"
-          autoPlay
-          loop
-          muted
-          playsInline
-          poster="/connectng bg.jpg"
-        >
-          <source src="/login-bg.mp4" type="video/mp4" />
-        </video>
+        <Lightfall
+          colors={["#ff0000", "#ff0a0a", "#8a525c"]}
+          backgroundColor="#100101"
+          speed={0.5}
+          streakCount={2}
+          streakWidth={1}
+          twinkle={0.55}
+          backgroundGlow={0.5}
+          headGlow={0.6}
+          bloom={0.35}
+          mouseInteraction={false}
+          holdToWarp
+          intro
+          mouseStrength={0.5}
+          mouseRadius={1}
+        />
       </div>
       {/* Subtle dark overlay for contrast */}
       <div className="auth-bg-overlay" />
